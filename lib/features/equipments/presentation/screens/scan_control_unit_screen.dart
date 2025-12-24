@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 
 class ScanControlUnitScreen extends StatefulWidget {
   const ScanControlUnitScreen({super.key});
@@ -32,8 +33,7 @@ class _ScanControlUnitScreenState extends State<ScanControlUnitScreen> {
       };
       Navigator.of(context).pop(existing);
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Failed to parse QR')));
+      showInfoSnackBar(context, 'Failed to parse QR');
       Navigator.of(context).pop();
     }
   }

@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signal_strength_indicator/signal_strength_indicator.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
 import '../providers/monitoring_providers.dart';
+import '../../../equipments/presentation/providers/equipment_providers.dart'
+    as eq_provs;
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/telemetry_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
@@ -39,17 +42,24 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       // Ensure service is subscribed (no-op if already subscribed).
       try {
         svc.subscribe(normId);
-      } catch (_) {}
+      } catch (e, st) {
+        debugPrint('MonitoringScreen: subscribe error: $e');
+        debugPrint('stack: $st');
+      }
 
       // Seed positions and latest telemetry from the service snapshot if available.
       try {
         positions = svc.getPositions(normId);
-      } catch (_) {
+      } catch (e, st) {
+        debugPrint('MonitoringScreen: getPositions error: $e');
+        debugPrint('stack: $st');
         positions = [];
       }
       try {
         latestTelemetry = svc.latestTelemetry[normId];
-      } catch (_) {
+      } catch (e, st) {
+        debugPrint('MonitoringScreen: latestTelemetry seed error: $e');
+        debugPrint('stack: $st');
         latestTelemetry = null;
       }
 
@@ -79,7 +89,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           // Show or hide persistent out-of-plot snackbar based on payload.
           _updateOutOfPlotSnack(t);
         });
-      } catch (_) {}
+      } catch (e, st) {
+        debugPrint('MonitoringScreen: deviceTelemetryStream listen error: $e');
+        debugPrint('stack: $st');
+      }
     }
   }
 
@@ -89,7 +102,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     try {
       if (_outOfPlotSnackVisible)
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('MonitoringScreen.dispose: hideCurrentSnackBar error: $e');
+      debugPrint('stack: $st');
+    }
     _deviceSub?.cancel();
     super.dispose();
   }
@@ -112,13 +128,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   @override
   Widget build(BuildContext context) {
     final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+    final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
     final plotsAsync = ref.watch(fm_providers.plotsListProvider(userId));
     final metricsAsync = ref.watch(monitoringStreamProvider(userId));
 
     Widget signalChip(IconData icon, String label, Color color) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: color.withAlpha(31),
               borderRadius: BorderRadius.circular(16)),
           child: Row(children: [
             Icon(icon, size: 14, color: color),
@@ -127,10 +144,45 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           ]),
         );
 
+    // Determine a suitable AppBar title. If a deviceId was provided and we
+    // can resolve a matching control unit, show its name; otherwise fall
+    // back to the generic label.
+    String? _resolvedControlUnitName;
+    try {
+      final cuList = controlUnitsAsync.asData?.value;
+      if (widget.deviceId != null && cuList != null) {
+        for (final cu in cuList) {
+          try {
+            final candidate =
+                (cu.macAddress ?? cu.controlUnitId ?? cu.id).toString();
+            if (candidate.isNotEmpty &&
+                widget.deviceId != null &&
+                canonicalizeMac(candidate) ==
+                    canonicalizeMac(widget.deviceId!)) {
+              _resolvedControlUnitName = cu.name;
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
+    // Compute simple state indicators from the latest telemetry snapshot.
+    final _t = latestTelemetry;
+    final bool _ptoOnTop =
+        _t != null && (_t.ptoState != null && _t.ptoState == 1);
+    final bool _autoOnTop =
+        _t != null && (_t.sprayMode != null && _t.sprayMode == 1);
+    // Left/right solenoid states (used for the top-left L/R indicators)
+    final bool _leftNozzleOn = _t != null &&
+        (_t.leftSolenoidState != null && _t.leftSolenoidState == 1);
+    final bool _rightNozzleOn = _t != null &&
+        (_t.rightSolenoidState != null && _t.rightSolenoidState == 1);
+
     return Scaffold(
       appBar: AppBar(
           title: Row(children: [
-        Text('Data Monitoring'),
+        Text(_resolvedControlUnitName ?? 'Data Monitoring'),
         const Spacer(),
         if (latestTelemetry != null) ...[
           // GPS quality
@@ -156,23 +208,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
             activeColor: Colors.white,
             inactiveColor: Colors.blueGrey,
           )
-
-          // // SIM signal (RSSI style)
-          // Builder(builder: (ctx) {
-          //   final s = latestTelemetry!.simSignalQuality;
-          //   Color col = Colors.grey;
-          //   String lbl = '-';
-          //   if (s != null) {
-          //     lbl = s.toString();
-          //     if (s >= -70)
-          //       col = Colors.white;
-          //     else if (s >= -90)
-          //       col = Colors.orange;
-          //     else
-          //       col = Colors.red;
-          //   }
-          //   return signalChip(Icons.signal_cellular_alt, lbl, col);
-          // }),
         ]
       ])),
       body: plotsAsync.when(
@@ -205,7 +240,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   PolygonLayer(polygons: [
                     Polygon(
                         points: plot.polygon,
-                        color: Colors.green.withOpacity(0.15),
+                        color: Colors.green.withAlpha(38),
                         borderColor: Colors.green,
                         borderStrokeWidth: 2.0)
                   ]),
@@ -230,6 +265,160 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   ])
               ],
             ),
+            // Top-right map overlay for PTO and Auto/Manual indicators
+            Positioned(
+              top: 12,
+              // leave space on the right so the menu button can sit there
+              right: 72,
+              child: SafeArea(
+                child: Card(
+                  color: Colors.white.withAlpha(220),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8.0, vertical: 6.0),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      // PTO dot
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                            color: _ptoOnTop ? Colors.green : Colors.red,
+                            shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 8),
+                      // Auto/Manual chip
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: _autoOnTop ? Colors.green : Colors.grey,
+                            borderRadius: BorderRadius.circular(12)),
+                        child: Text(_autoOnTop ? 'A' : 'M',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+
+            // Menu button just above PTO / A-M indicators with solid card behind
+            Positioned(
+              top: 12,
+              right: 12,
+              child: SafeArea(
+                child: SizedBox(
+                  width: 80,
+                  height: 48,
+                  child: Stack(children: [
+                    // solid background card to ensure visibility above other overlays
+                    // popup menu button centered above the solid card
+                    Positioned.fill(
+                      child: Center(
+                        child: Card(
+                          color: Colors.white,
+                          elevation: 4,
+                          child: PopupMenuButton<String>(
+                            icon: const Icon(Icons.menu, size: 18),
+                            onSelected: (v) {
+                              if (v == null) return;
+                              // _openMonitoringView(v);
+                            },
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem<String>(
+                                  enabled: false,
+                                  child: Text('Heatmap',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const PopupMenuItem(
+                                  value: 'spraying_heatmap',
+                                  child: Text('Spraying heat map')),
+                              const PopupMenuItem(
+                                  value: 'speed_heatmap',
+                                  child: Text('Speed heat map')),
+                              const PopupMenuDivider(),
+                              const PopupMenuItem<String>(
+                                  enabled: false,
+                                  child: Text('Other views',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              const PopupMenuItem(
+                                  value: 'sensor_data',
+                                  child: Text('Sensor data view')),
+                              const PopupMenuItem(
+                                  value: 'spray_on_off',
+                                  child: Text('Spray on/off view')),
+                              const PopupMenuItem(
+                                  value: 'tank_level',
+                                  child: Text('Tank level view')),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+
+            // Top-left L/R nozzle indicators (left/right)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: SafeArea(
+                child: Card(
+                  color: Colors.white.withAlpha(220),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8.0, vertical: 6.0),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      // Left indicator (bound to telemetry)
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                                color:
+                                    _leftNozzleOn ? Colors.green : Colors.grey,
+                                shape: BoxShape.circle),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text('L',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      // Right indicator (bound to telemetry)
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                                color:
+                                    _rightNozzleOn ? Colors.green : Colors.grey,
+                                shape: BoxShape.circle),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text('R',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+
             // Overlay: Top card (nozzles + ultrasonics) and bottom controls
             Positioned.fill(
               child: metricsAsync.when(
@@ -288,47 +477,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                       : ((m['autoMode'] ?? m['auto'] ?? false) == true);
 
                   return Stack(children: [
-                    // Top overlay
-                    Positioned(
-                      left: 12,
-                      right: 12,
-                      top: 12,
-                      child: SafeArea(
-                        child: Card(
-                          color: Colors.white.withOpacity(0.95),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12.0),
-                            child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // Row 1: Left nozzle | Right nozzle
-                                  Row(children: [
-                                    Expanded(
-                                        child: _metricBlock(
-                                            'Left nozzle', leftNozzle)),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                        child: _metricBlock(
-                                            'Right nozzle', rightNozzle)),
-                                  ]),
-                                  const SizedBox(height: 8),
-                                  // Row 2: Left sensor | Right sensor
-                                  Row(children: [
-                                    Expanded(
-                                        child: _metricBlock(
-                                            'Left sensor', leftUltra)),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                        child: _metricBlock(
-                                            'Right sensor', rightUltra)),
-                                  ]),
-                                ]),
-                          ),
-                        ),
-                      ),
-                    ),
+                    // (Top overlay removed - moved metrics elsewhere)
 
                     // Bottom overlay: progress, summary row, PTO
                     Positioned(
@@ -338,90 +487,77 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                       child: SafeArea(
                         child:
                             Column(mainAxisSize: MainAxisSize.min, children: [
-                          Card(
-                            color: Colors.white.withOpacity(0.95),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12.0),
-                              child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    // Progress bar row
-                                    Row(children: [
-                                      Expanded(
-                                          child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                            const Text('Coverage',
-                                                style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.black54)),
-                                            const SizedBox(height: 6),
-                                            LinearProgressIndicator(
-                                                value: (coverage.clamp(0, 100) /
-                                                    100.0)),
-                                            const SizedBox(height: 6),
-                                            Text(
-                                                '${coverage.toStringAsFixed(1)}% covered',
-                                                style: const TextStyle(
-                                                    fontWeight:
-                                                        FontWeight.bold)),
-                                          ])),
+                          // Use a Stack so we can position a small blue dot overlapping
+                          // and slightly above the card on the left side.
+                          Stack(clipBehavior: Clip.none, children: [
+                            Card(
+                              color: Colors.white.withAlpha(242),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Progress bar row
+                                      Row(children: [
+                                        Expanded(
+                                            child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                              const Text('Coverage',
+                                                  style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.black54)),
+                                              const SizedBox(height: 6),
+                                              LinearProgressIndicator(
+                                                  value:
+                                                      (coverage.clamp(0, 100) /
+                                                          100.0)),
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                  '${coverage.toStringAsFixed(1)}% covered',
+                                                  style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold)),
+                                            ])),
+                                      ]),
+                                      const SizedBox(height: 12),
+
+                                      // summary single-line row
+                                      Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            _smallStat('Flow', flowRate),
+                                            _smallStat('Speed', speed),
+                                            _ptoSmallStat(ptoOn),
+                                          ]),
+                                      const SizedBox(height: 12),
+
+                                      // PTO/Auto controls moved to AppBar; hide local toggles
+                                      const SizedBox.shrink(),
                                     ]),
-                                    const SizedBox(height: 12),
-
-                                    // summary single-line row
-                                    Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          _smallStat('Flow', flowRate),
-                                          _smallStat('Speed', speed),
-                                          _smallStat('Tank', tank),
-                                        ]),
-                                    const SizedBox(height: 12),
-
-                                    // PTO toggle row
-                                    Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          const Text('PTO',
-                                              style: TextStyle(
-                                                  fontWeight: FontWeight.w600)),
-                                          const SizedBox(width: 12),
-                                          StatefulBuilder(
-                                              builder: (ctx, setStateInner) {
-                                            var value = ptoOn;
-                                            return Switch(
-                                              value: value,
-                                              onChanged: (v) {
-                                                // locally toggle; provider hook may be added later
-                                                setStateInner(() => value = v);
-                                              },
-                                            );
-                                          }),
-                                          const Text('Auto', // spray mode
-                                              style: TextStyle(
-                                                  fontWeight: FontWeight.w600)),
-                                          const SizedBox(width: 12),
-                                          StatefulBuilder(
-                                              builder: (ctx, setStateInner) {
-                                            var value = autoOn;
-                                            return Switch(
-                                              value: value,
-                                              onChanged: (v) {
-                                                // locally toggle; provider hook may be added later
-                                                setStateInner(() => value = v);
-                                              },
-                                            );
-                                          })
-                                        ])
-                                  ]),
+                              ),
                             ),
-                          ),
+                            // Positioned blue dot that sits slightly above the left
+                            // edge of the card. The negative top offset allows it to
+                            // overlap above the card.
+                            const Positioned(
+                              left: 12,
+                              top: -25,
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                      color: Colors.blue,
+                                      shape: BoxShape.circle),
+                                ),
+                              ),
+                            ),
+                          ]),
                         ]),
                       ),
                     ),
@@ -460,7 +596,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       final ptoOn = (t.ptoState != null && t.ptoState == 1);
       if (inPlot && ptoOn) return Colors.blue;
       if (inPlot && !ptoOn) return Colors.orange;
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('MonitoringScreen._markerColorForTelemetry error: $e');
+      debugPrint('stack: $st');
+    }
     return Colors.red;
   }
 
@@ -483,10 +622,129 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           // Try to read zoom from MapController.camera when available.
           final cam = _mapController.camera;
           zoom = cam.zoom;
-        } catch (_) {}
+        } catch (e, st) {
+          debugPrint(
+              'MonitoringScreen._goToCurrentPosition: camera read error: $e');
+          debugPrint('stack: $st');
+        }
         _mapController.move(target, zoom);
       }
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('MonitoringScreen._goToCurrentPosition error: $e');
+      debugPrint('stack: $st');
+    }
+  }
+
+  void _openMonitoringView(String view) {
+    // Present a bottom sheet placeholder for the chosen view. Replace with
+    // real implementations (charts, overlays, etc.) as needed.
+    try {
+      showModalBottomSheet<void>(
+          context: context,
+          builder: (ctx) {
+            String title;
+            Widget body;
+            switch (view) {
+              case 'spraying_heatmap':
+                title = 'Spraying heat map';
+                body = const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text('Spraying heat map view (placeholder)'),
+                );
+                break;
+              case 'speed_heatmap':
+                title = 'Speed heat map';
+                body = const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text('Speed heat map view (placeholder)'),
+                );
+                break;
+              case 'sensor_data':
+                title = 'Sensor data view';
+                body = const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text('Sensor data view (placeholder)'),
+                );
+                break;
+              case 'spray_on_off':
+                title = 'Spray on/off view';
+                body = const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text('Spray on/off view (placeholder)'),
+                );
+                break;
+              case 'tank_level':
+                title = 'PTO status';
+                try {
+                  final ptoOn = latestTelemetry != null &&
+                      (latestTelemetry!.ptoState != null &&
+                          latestTelemetry!.ptoState == 1);
+                  final updated = latestTelemetry?.timestamp;
+                  body = Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                                color: ptoOn ? Colors.green : Colors.red,
+                                shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(ptoOn ? 'PTO: ON' : 'PTO: OFF',
+                              style: const TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold)),
+                        ]),
+                        const SizedBox(height: 8),
+                        if (updated != null)
+                          Text('Last updated: ${updated.toLocal()}'),
+                      ],
+                    ),
+                  );
+                } catch (e) {
+                  body = Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text('Unable to read PTO status: $e'),
+                  );
+                }
+                break;
+              default:
+                title = 'View';
+                body = Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text('Unknown view: $view'),
+                );
+            }
+
+            return SafeArea(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                          child: Text(title,
+                              style: const TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold))),
+                      IconButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          icon: const Icon(Icons.close))
+                    ],
+                  ),
+                ),
+                body,
+                const SizedBox(height: 12)
+              ]),
+            );
+          });
+    } catch (e, st) {
+      debugPrint('MonitoringScreen._openMonitoringView error: $e');
+      debugPrint('stack: $st');
+    }
   }
 
   // Show a persistent SnackBar when telemetry reports the device is
@@ -501,31 +759,23 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       if (!isInPlot) {
         if (!_outOfPlotSnackVisible) {
           _outOfPlotSnackVisible = true;
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: const Text('Device is outside the assigned plot'),
-            duration: const Duration(days: 1),
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.orange,
-            action: SnackBarAction(
-                label: 'Dismiss',
-                textColor: Colors.white,
-                onPressed: () {
-                  try {
-                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                  } catch (_) {}
-                  _outOfPlotSnackVisible = false;
-                }),
-          ));
+          showInfoSnackBar(context, 'Device is outside the assigned plot');
         }
       } else {
         if (_outOfPlotSnackVisible) {
           try {
             ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          } catch (_) {}
+          } catch (e, st) {
+            debugPrint('MonitoringScreen._updateOutOfPlotSnack hide error: $e');
+            debugPrint('stack: $st');
+          }
           _outOfPlotSnackVisible = false;
         }
       }
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('MonitoringScreen._updateOutOfPlotSnack error: $e');
+      debugPrint('stack: $st');
+    }
   }
 
   // Compute the color for a single stored position entry.
@@ -540,7 +790,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               deviceInPlot.toString().toLowerCase() == 'true'));
       if (inPlotBool && ptoOn) return Colors.blue;
       if (inPlotBool && !ptoOn) return Colors.orange;
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('MonitoringScreen._colorForPositionEntry error: $e');
+      debugPrint('stack: $st');
+    }
     return Colors.red;
   }
 
@@ -615,6 +868,35 @@ Widget _smallStat(String label, String value) {
             style: const TextStyle(fontSize: 12, color: Colors.black54)),
         const SizedBox(height: 6),
         Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+      ],
+    ),
+  );
+}
+
+Widget _ptoSmallStat(bool ptoOn) {
+  return Expanded(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const Text('PTO',
+            style: TextStyle(fontSize: 12, color: Colors.black54)),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: ptoOn ? Colors.green : Colors.red,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(ptoOn ? 'ON' : 'OFF',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        )
       ],
     ),
   );

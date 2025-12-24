@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:convert';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
+import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
 import 'package:simdaas/features/auth/presentation/providers/users_providers.dart';
 import '../../domain/entities/equipment.dart';
 import '../providers/equipment_providers.dart';
@@ -40,8 +43,11 @@ class _EquipmentDetailsScreenState
           final m = json.decode(body) as Map<String, dynamic>;
           final val = m['username'] ?? m['name'] ?? m['user'] ?? m['id'];
           if (val != null) return val.toString();
-        } catch (_) {
-          // ignore and fall back to relaxed parsing
+        } catch (e, st) {
+          debugPrint(
+              'EquipmentDetailsScreen._ownerDisplay JSON parse error: $e');
+          debugPrint('stack: $st');
+          // fall back to relaxed parsing
         }
       }
     }
@@ -128,8 +134,10 @@ class _EquipmentDetailsScreenState
           final id = decoded['id']?.toString();
           if (id != null && id.isNotEmpty) return plotMap[id];
         }
-      } catch (_) {
-        // ignore parse errors
+      } catch (e, st) {
+        debugPrint(
+            'EquipmentDetailsScreen._extractNameFromLinked JSON parse error: $e');
+        debugPrint('stack: $st');
       }
     }
 
@@ -151,7 +159,11 @@ class _EquipmentDetailsScreenState
           try {
             final found = items.where((p) => p.id == id).toList();
             if (found.isNotEmpty) return found.first.name;
-          } catch (_) {}
+          } catch (e, st) {
+            debugPrint(
+                'EquipmentDetailsScreen._resolvePlotName lookup error: $e');
+            debugPrint('stack: $st');
+          }
           return _extractNameFromLinked(id, {
                 for (var e in items) e.id: e.name,
               }) ??
@@ -267,9 +279,12 @@ class _EquipmentDetailsScreenState
                             (e) => e.id == displayedEquipment.id,
                             orElse: () => displayedEquipment);
                         setState(() => displayedEquipment = found);
-                      } catch (_) {
-                        // ignore fetch errors; provider invalidation will
-                        // eventually update the UI
+                      } catch (e, st) {
+                        // Log fetch errors for diagnostics; provider
+                        // invalidation will still update the UI when ready.
+                        debugPrint(
+                            'EquipmentDetailsScreen: failed to fetch fresh equipment: $e');
+                        debugPrint('stack: $st');
                       }
                     }
                   },
@@ -318,12 +333,19 @@ class _EquipmentDetailsScreenState
 
                         if (!context.mounted) return;
                         Navigator.of(context).pop(true);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Equipment deleted')));
+                        showSuccessSnackBar(context, 'Equipment deleted');
                       } catch (err) {
                         if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Delete failed')));
+                        // Present API errors in a user-friendly way when available.
+                        if (err is ApiException) {
+                          final apiErr =
+                              ApiError.fromResponse(err.statusCode, err.body);
+                          showApiErrorSnackBar(context, apiErr,
+                              isWarning: true);
+                        } else {
+                          showGenericErrorSnackBar(context, 'Delete failed',
+                              isWarning: true);
+                        }
                       }
                     }
                   },
@@ -387,7 +409,7 @@ class _EquipmentDetailsScreenState
                 'Wheel diameter (m): ${displayedEquipment.wheelDiameter ?? '-'}',
                 softWrap: true),
             Text(
-                'No. of screws in wheel: ${displayedEquipment.screwsInWheel ?? '-'}',
+                'No. of screws/nuts in wheel: ${displayedEquipment.screwsInWheel ?? '-'}',
                 softWrap: true),
             Text('Axle length (m): ${displayedEquipment.axleLength ?? '-'}',
                 softWrap: true),

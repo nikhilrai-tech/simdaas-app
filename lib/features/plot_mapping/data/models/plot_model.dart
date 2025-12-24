@@ -1,5 +1,6 @@
 import '../../domain/entities/plot.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:flutter/foundation.dart';
 
 class PlotModel extends PlotEntity {
   PlotModel({
@@ -15,10 +16,34 @@ class PlotModel extends PlotEntity {
   });
 
   factory PlotModel.fromJson(String id, Map<String, dynamic> json) {
-    final coords = ((json['polygon'] as List<dynamic>?) ?? []).map((e) {
-      final m = e as Map<String, dynamic>;
-      return LatLng((m['lat'] as num).toDouble(), (m['lng'] as num).toDouble());
-    }).toList();
+    final rawPolygon = (json['polygon'] as List<dynamic>?) ?? [];
+    final coords = <LatLng>[];
+    for (final e in rawPolygon) {
+      try {
+        if (e is List && e.length >= 2) {
+          // [lat, lng]
+          final lat = (e[0] as num).toDouble();
+          final lng = (e[1] as num).toDouble();
+          coords.add(LatLng(lat, lng));
+        } else if (e is Map) {
+          // map with 'lat'/'lng' or 'latitude'/'longitude'
+          final latKey = e.containsKey('lat')
+              ? 'lat'
+              : (e.containsKey('latitude') ? 'latitude' : null);
+          final lngKey = e.containsKey('lng')
+              ? 'lng'
+              : (e.containsKey('longitude') ? 'longitude' : null);
+          if (latKey != null && lngKey != null) {
+            final lat = (e[latKey] as num).toDouble();
+            final lng = (e[lngKey] as num).toDouble();
+            coords.add(LatLng(lat, lng));
+          }
+        }
+      } catch (e, st) {
+        debugPrint(
+            'plot_model.fromJson: skipping invalid polygon entry: $e\n$st');
+      }
+    }
 
     LatLng? centroid;
     if (json['centroid'] != null) {

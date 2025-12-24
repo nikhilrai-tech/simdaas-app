@@ -41,295 +41,432 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
     final usersAsync = ref.watch(users_providers.usersListProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin Dashboard')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child:
-            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const SizedBox(height: 12),
-          Text('Signed in as $userId'),
-          const SizedBox(height: 12),
-          Row(children: [
-            const Text('Jobs',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            PopupMenuButton<_SortBy>(
-              onSelected: (v) => setState(() => _sortBy = v),
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                    value: _SortBy.time, child: Text('Sort by time')),
-                const PopupMenuItem(
-                    value: _SortBy.status, child: Text('Sort by status')),
-                const PopupMenuItem(
-                    value: _SortBy.supervisor,
-                    child: Text('Sort by supervisor')),
+        appBar: AppBar(
+          title: const Text('Admin Dashboard'),
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          foregroundColor: Theme.of(context).colorScheme.onSurface,
+          surfaceTintColor: Colors.transparent,
+        ),
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Theme.of(context).colorScheme.primary.withAlpha(18),
+                Colors.white,
               ],
-              child: const Icon(Icons.sort),
             ),
-          ]),
-          const SizedBox(height: 8),
-          Expanded(
-            child: jobsAsync.when(
-              data: (jobs) {
-                return usersAsync.when(
-                  data: (users) {
-                    return fieldsAsync.when(
-                      data: (fields) {
-                        if (jobs.isEmpty)
-                          return const Center(child: Text('No jobs yet'));
-                        // Sort jobs
-                        final sortedJobs = [...jobs];
-                        sortedJobs.sort((a, b) {
-                          switch (_sortBy) {
-                            case _SortBy.time:
-                              final ta = a.scheduleTime ?? a.createdAt;
-                              final tb = b.scheduleTime ?? b.createdAt;
-                              return ta.compareTo(tb);
-                            case _SortBy.status:
-                              return a.status.index.compareTo(b.status.index);
-                            case _SortBy.supervisor:
-                              return a.userId.compareTo(b.userId);
-                          }
-                        });
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [
+                              Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withAlpha(200),
+                              Theme.of(context)
+                                  .colorScheme
+                                  .secondary
+                                  .withAlpha(160),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withAlpha(40),
+                              blurRadius: 12,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.admin_panel_settings,
+                            color: Colors.white),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Admin',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .displaySmall
+                                    ?.copyWith(fontSize: 20)),
+                            const SizedBox(height: 4),
+                            Text('Signed in as $userId',
+                                style: Theme.of(context).textTheme.bodyMedium),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    const Text('Jobs',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    PopupMenuButton<_SortBy>(
+                      onSelected: (v) => setState(() => _sortBy = v),
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                            value: _SortBy.time, child: Text('Sort by time')),
+                        const PopupMenuItem(
+                            value: _SortBy.status,
+                            child: Text('Sort by status')),
+                        const PopupMenuItem(
+                            value: _SortBy.supervisor,
+                            child: Text('Sort by supervisor')),
+                      ],
+                      child: const Icon(Icons.sort),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: jobsAsync.when(
+                      data: (jobs) {
+                        return usersAsync.when(
+                          data: (users) {
+                            return fieldsAsync.when(
+                              data: (fields) {
+                                if (jobs.isEmpty)
+                                  return const Center(
+                                      child: Text('No jobs yet'));
+                                // Sort jobs
+                                final sortedJobs = [...jobs];
+                                sortedJobs.sort((a, b) {
+                                  switch (_sortBy) {
+                                    case _SortBy.time:
+                                      final ta = a.scheduleTime ?? a.createdAt;
+                                      final tb = b.scheduleTime ?? b.createdAt;
+                                      return ta.compareTo(tb);
+                                    case _SortBy.status:
+                                      return a.status.index
+                                          .compareTo(b.status.index);
+                                    case _SortBy.supervisor:
+                                      return a.userId.compareTo(b.userId);
+                                  }
+                                });
 
-                        return ListView.separated(
-                          itemCount: sortedJobs.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (context, i) {
-                            final job = sortedJobs[i];
-                            final plot = fields
-                                .cast<fm_models.PlotModel?>()
-                                .firstWhere((f) => f?.id == job.plotId,
-                                    orElse: () => null);
-                            // Try to resolve supervisor display from users list
-                            String supervisorDisplay() {
-                              try {
-                                final found =
-                                    users.cast<dynamic>().firstWhere((u) {
-                                  try {
-                                    return u?.id == job.userId;
-                                  } catch (_) {
-                                    try {
-                                      return (u
-                                              as Map<String, dynamic>)['id'] ==
-                                          job.userId;
-                                    } catch (_) {
-                                      return false;
+                                return ListView.separated(
+                                  itemCount: sortedJobs.length,
+                                  separatorBuilder: (_, __) =>
+                                      const Divider(height: 1),
+                                  itemBuilder: (context, i) {
+                                    final job = sortedJobs[i];
+                                    final plot = fields
+                                        .cast<fm_models.PlotModel?>()
+                                        .firstWhere((f) => f?.id == job.plotId,
+                                            orElse: () => null);
+                                    // Try to resolve supervisor display from users list
+                                    String supervisorDisplay() {
+                                      try {
+                                        final found = users
+                                            .cast<dynamic>()
+                                            .firstWhere((u) {
+                                          try {
+                                            return u?.id == job.userId;
+                                          } catch (e) {
+                                            debugPrint(
+                                                'AdminDashboardScreen: supervisorDisplay id compare error: $e');
+                                            try {
+                                              return (u as Map<String,
+                                                      dynamic>)['id'] ==
+                                                  job.userId;
+                                            } catch (e2) {
+                                              debugPrint(
+                                                  'AdminDashboardScreen: supervisorDisplay id compare fallback error: $e2');
+                                              return false;
+                                            }
+                                          }
+                                        }, orElse: () => null);
+                                        if (found != null) {
+                                          final data =
+                                              found is Map<String, dynamic>
+                                                  ? found
+                                                  : (found.data()
+                                                      as Map<String, dynamic>?);
+                                          final name = data?['name'] as String?;
+                                          final email =
+                                              data?['email'] as String?;
+                                          if (name != null && name.isNotEmpty)
+                                            return name;
+                                          return email ?? job.userId;
+                                        }
+                                      } catch (e, st) {
+                                        debugPrint(
+                                            'AdminDashboardScreen: supervisorDisplay parse error: $e');
+                                        debugPrint('stack: $st');
+                                      }
+                                      return job.userId;
                                     }
-                                  }
-                                }, orElse: () => null);
-                                if (found != null) {
-                                  final data = found is Map<String, dynamic>
-                                      ? found
-                                      : (found.data() as Map<String, dynamic>?);
-                                  final name = data?['name'] as String?;
-                                  final email = data?['email'] as String?;
-                                  if (name != null && name.isNotEmpty)
-                                    return name;
-                                  return email ?? job.userId;
-                                }
-                              } catch (_) {}
-                              return job.userId;
-                            }
 
-                            // Responsive tile: side-by-side on wide screens, stacked on narrow
-                            return LayoutBuilder(
-                                builder: (context, tileConstraints) {
-                              final narrow = tileConstraints.maxWidth < 520;
-                              final details = Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(job.name,
-                                            style: const TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold)),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text('Supervisor: ${supervisorDisplay()}',
-                                          style: const TextStyle(fontSize: 13)),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text('${plot?.name ?? 'Unknown farm'}'),
-                                  Text('Spray rate: ${job.sprayRate ?? '-'}'),
-                                ],
-                              );
+                                    // Responsive tile: side-by-side on wide screens, stacked on narrow
+                                    return LayoutBuilder(
+                                        builder: (context, tileConstraints) {
+                                      final narrow =
+                                          tileConstraints.maxWidth < 520;
+                                      final details = Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(job.name,
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .titleMedium
+                                                        ?.copyWith(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            color: Theme.of(
+                                                                    context)
+                                                                .colorScheme
+                                                                .onSurface)),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                  'Supervisor: ${supervisorDisplay()}',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(
+                                                          color: Theme.of(
+                                                                  context)
+                                                              .colorScheme
+                                                              .onSurfaceVariant)),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                              '${plot?.name ?? 'Unknown farm'}'),
+                                          Text(
+                                              'Spray rate: ${job.sprayRate ?? '-'}'),
+                                        ],
+                                      );
 
-                              final statusPreview = Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Chip(
-                                    label: Text(
-                                      job.status
-                                          .toString()
-                                          .split('.')
-                                          .last
-                                          .replaceAll('_', ' ')
-                                          .toUpperCase(),
-                                      style:
-                                          const TextStyle(color: Colors.white),
-                                    ),
-                                    backgroundColor: job.status ==
-                                            JobStatus.scheduled
-                                        ? Colors.orange
-                                        : job.status == JobStatus.ongoing
-                                            ? Colors.green
-                                            : job.status == JobStatus.delayed
-                                                ? Colors.red
-                                                : Colors.grey,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  SizedBox(
-                                    width: 72,
-                                    height: 48,
-                                    child:
-                                        plot != null && plot.polygon.isNotEmpty
-                                            ? CustomPaint(
-                                                painter: PlotPreviewPainter(
-                                                    plot.polygon))
-                                            : Container(
-                                                color: Colors.grey.shade200),
-                                  ),
-                                ],
-                              );
+                                      final statusPreview = Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Chip(
+                                            label: Text(
+                                              job.status
+                                                  .toString()
+                                                  .split('.')
+                                                  .last
+                                                  .replaceAll('_', ' ')
+                                                  .toUpperCase(),
+                                              style: const TextStyle(
+                                                  color: Colors.white),
+                                            ),
+                                            backgroundColor: job.status ==
+                                                    JobStatus.scheduled
+                                                ? Colors.orange
+                                                : job.status ==
+                                                        JobStatus.ongoing
+                                                    ? Colors.green
+                                                    : job.status ==
+                                                            JobStatus.delayed
+                                                        ? Colors.red
+                                                        : Colors.grey,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          SizedBox(
+                                            width: 72,
+                                            height: 48,
+                                            child: plot != null &&
+                                                    plot.polygon.isNotEmpty
+                                                ? CustomPaint(
+                                                    painter: PlotPreviewPainter(
+                                                        plot.polygon))
+                                                : Container(
+                                                    color:
+                                                        Colors.grey.shade200),
+                                          ),
+                                        ],
+                                      );
 
-                              return GestureDetector(
-                                onTap: () {
-                                  final sta =
-                                      (job.scheduleTime ?? job.createdAt);
-                                  final isOngoing =
-                                      !sta.isAfter(DateTime.now());
-                                  if (isOngoing) {
-                                    Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                            builder: (_) => MonitoringScreen(
-                                                plotId: job.plotId,
-                                                jobId: job.id)));
-                                  } else {
-                                    Navigator.of(context).pushNamed('/jobs');
-                                  }
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 8.0, horizontal: 4.0),
-                                  child: narrow
-                                      ? Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            details,
-                                            const SizedBox(height: 8),
-                                            Align(
-                                                alignment:
-                                                    Alignment.centerRight,
-                                                child: statusPreview),
-                                          ],
-                                        )
-                                      : Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Expanded(child: details),
-                                            const SizedBox(width: 12),
-                                            statusPreview,
-                                          ],
+                                      return Card(
+                                        elevation: 3,
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12)),
+                                        shadowColor: Theme.of(context)
+                                            .colorScheme
+                                            .primary
+                                            .withAlpha(40),
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            final sta = (job.scheduleTime ??
+                                                job.createdAt);
+                                            final isOngoing =
+                                                !sta.isAfter(DateTime.now());
+                                            if (isOngoing) {
+                                              Navigator.of(context).push(
+                                                  MaterialPageRoute(
+                                                      builder: (_) =>
+                                                          MonitoringScreen(
+                                                              plotId:
+                                                                  job.plotId,
+                                                              jobId: job.id)));
+                                            } else {
+                                              Navigator.of(context)
+                                                  .pushNamed('/jobs');
+                                            }
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 8.0, horizontal: 4.0),
+                                            child: narrow
+                                                ? Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      details,
+                                                      const SizedBox(height: 8),
+                                                      Align(
+                                                          alignment: Alignment
+                                                              .centerRight,
+                                                          child: statusPreview),
+                                                    ],
+                                                  )
+                                                : Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Expanded(child: details),
+                                                      const SizedBox(width: 12),
+                                                      statusPreview,
+                                                    ],
+                                                  ),
+                                          ),
                                         ),
-                                ),
-                              );
-                            });
+                                      );
+                                    });
+                                  },
+                                );
+                              },
+                              loading: () => const Center(
+                                  child: CircularProgressIndicator()),
+                              error: (e, st) =>
+                                  Center(child: Text(extractErrorMessage(e))),
+                            );
                           },
+                          loading: () =>
+                              const Center(child: CircularProgressIndicator()),
+                          error: (e, st) =>
+                              Center(child: Text(extractErrorMessage(e))),
                         );
                       },
                       loading: () =>
                           const Center(child: CircularProgressIndicator()),
                       error: (e, st) =>
                           Center(child: Text(extractErrorMessage(e))),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  LayoutBuilder(builder: (context, constraints) {
+                    final isNarrow = constraints.maxWidth < 420;
+
+                    final buttons = <Widget>[
+                      ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (c) =>
+                                      const PlotListScreen(showFab: false))),
+                          icon: const Icon(Icons.map),
+                          label: const Text('Plots')),
+                      ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (c) =>
+                                      const JobPlannerScreen(showFab: false))),
+                          icon: const Icon(Icons.calendar_today),
+                          label: const Text('Jobs')),
+                      ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (c) => const OperatorListScreen(
+                                      showFab: false))),
+                          icon: const Icon(Icons.person),
+                          label: const Text('Operators')),
+                      ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).pushNamed(
+                              '/equipments',
+                              arguments: {'readOnly': true}),
+                          icon: const Icon(Icons.build),
+                          label: const Text('Equipments')),
+                      ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (c) => const ReportsScreen())),
+                          icon: const Icon(Icons.report),
+                          label: const Text('Reports')),
+                      ElevatedButton.icon(
+                          onPressed: () => showDialog(
+                              context: context,
+                              builder: (_) => AlertDialog(
+                                    title: const Text('Help & Support'),
+                                    content: const Text(
+                                        'Helpline: +1-800-555-0123\nAvailable 9am-5pm'),
+                                    actions: [
+                                      TextButton(
+                                          onPressed: () =>
+                                              Navigator.of(context).pop(),
+                                          child: const Text('Close'))
+                                    ],
+                                  )),
+                          icon: const Icon(Icons.help_outline),
+                          label: const Text('Help')),
+                    ];
+
+                    // Use GridView for denser layout. On narrow screens use 1 column, otherwise 2.
+                    final crossAxisCount = isNarrow ? 2 : 3;
+                    // Compute a childAspectRatio so that each button is roughly `targetHeight` tall.
+                    final spacing = 8.0;
+                    final targetHeight = 52.0;
+                    final cellWidth = (constraints.maxWidth -
+                            (crossAxisCount - 1) * spacing) /
+                        crossAxisCount;
+                    final childAspectRatio = cellWidth / targetHeight;
+
+                    return GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: crossAxisCount,
+                      crossAxisSpacing: spacing,
+                      mainAxisSpacing: spacing,
+                      childAspectRatio: childAspectRatio,
+                      children: buttons
+                          .map(
+                              (b) => SizedBox(width: double.infinity, child: b))
+                          .toList(),
                     );
-                  },
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (e, st) => Center(child: Text(extractErrorMessage(e))),
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, st) => Center(child: Text(extractErrorMessage(e))),
-            ),
+                  }),
+                ]),
           ),
-          const SizedBox(height: 12),
-          LayoutBuilder(builder: (context, constraints) {
-            final isNarrow = constraints.maxWidth < 420;
-
-            final buttons = <Widget>[
-              ElevatedButton.icon(
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (c) => const PlotListScreen(showFab: false))),
-                  icon: const Icon(Icons.map),
-                  label: const Text('Plots')),
-              ElevatedButton.icon(
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (c) => const JobPlannerScreen(showFab: false))),
-                  icon: const Icon(Icons.calendar_today),
-                  label: const Text('Jobs')),
-              ElevatedButton.icon(
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (c) =>
-                          const OperatorListScreen(showFab: false))),
-                  icon: const Icon(Icons.person),
-                  label: const Text('Operators')),
-              ElevatedButton.icon(
-                  onPressed: () => Navigator.of(context)
-                      .pushNamed('/equipments', arguments: {'readOnly': true}),
-                  icon: const Icon(Icons.build),
-                  label: const Text('Equipments')),
-              ElevatedButton.icon(
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (c) => const ReportsScreen())),
-                  icon: const Icon(Icons.report),
-                  label: const Text('Reports')),
-              ElevatedButton.icon(
-                  onPressed: () => showDialog(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                            title: const Text('Help & Support'),
-                            content: const Text(
-                                'Helpline: +1-800-555-0123\nAvailable 9am-5pm'),
-                            actions: [
-                              TextButton(
-                                  onPressed: () => Navigator.of(context).pop(),
-                                  child: const Text('Close'))
-                            ],
-                          )),
-                  icon: const Icon(Icons.help_outline),
-                  label: const Text('Help')),
-            ];
-
-            // Use GridView for denser layout. On narrow screens use 1 column, otherwise 2.
-            final crossAxisCount = isNarrow ? 2 : 3;
-            // Compute a childAspectRatio so that each button is roughly `targetHeight` tall.
-            final spacing = 8.0;
-            final targetHeight = 52.0;
-            final cellWidth =
-                (constraints.maxWidth - (crossAxisCount - 1) * spacing) /
-                    crossAxisCount;
-            final childAspectRatio = cellWidth / targetHeight;
-
-            return GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: crossAxisCount,
-              crossAxisSpacing: spacing,
-              mainAxisSpacing: spacing,
-              childAspectRatio: childAspectRatio,
-              children: buttons
-                  .map((b) => SizedBox(width: double.infinity, child: b))
-                  .toList(),
-            );
-          }),
-        ]),
-      ),
-    );
+        ));
   }
 }

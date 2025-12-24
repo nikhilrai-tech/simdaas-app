@@ -85,6 +85,19 @@ class OperatorListScreen extends ConsumerWidget {
               if (name.isEmpty) return;
               final phone = _phoneController.text.trim();
               final email = _emailController.text.trim();
+              final emailRegex = RegExp(r"^[^\s@]+@[^\s@]+\.[^\s@]+$");
+              final phoneDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+              if (email.isNotEmpty && !emailRegex.hasMatch(email)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Invalid email')));
+                return;
+              }
+              if (phone.isNotEmpty &&
+                  (phoneDigits.length < 7 || phoneDigits.length > 20)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Invalid phone number')));
+                return;
+              }
               final address = _addressController.text.trim();
               final experience =
                   int.tryParse(_experienceController.text.trim());

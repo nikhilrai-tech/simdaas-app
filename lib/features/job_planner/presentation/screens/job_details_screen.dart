@@ -57,11 +57,15 @@ class JobDetailsScreen extends ConsumerWidget {
                     final found = users.cast<dynamic>().firstWhere((u) {
                       try {
                         return u?.id == job.operatorId;
-                      } catch (_) {
+                      } catch (e, st) {
+                        debugPrint(
+                            'job_details.operatorDisplay inner compare error: $e\n$st');
                         try {
                           return (u as Map<String, dynamic>)['id'] ==
                               job.operatorId;
-                        } catch (_) {
+                        } catch (e, st) {
+                          debugPrint(
+                              'job_details.operatorDisplay map access error: $e\n$st');
                           return false;
                         }
                       }
@@ -75,7 +79,10 @@ class JobDetailsScreen extends ConsumerWidget {
                       if (name != null && name.isNotEmpty) return name;
                       return email ?? job.operatorId ?? '-';
                     }
-                  } catch (_) {}
+                  } catch (e, st) {
+                    debugPrint(
+                        'job_details.operatorDisplay outer error: $e\n$st');
+                  }
                   return job.operatorId ?? '-';
                 }
 
@@ -315,7 +322,7 @@ class _PlotPreviewPainter extends CustomPainter {
         uiPath.lineTo(x, y);
     }
     uiPath.close();
-    final paintFill = Paint()..color = Colors.green.withOpacity(0.25);
+    final paintFill = Paint()..color = Colors.green.withAlpha(64);
     final paintBorder = Paint()
       ..color = Colors.green
       ..style = PaintingStyle.stroke

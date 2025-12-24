@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
@@ -13,7 +14,9 @@ final monitoringStreamProvider =
   List plots;
   try {
     plots = await ref.watch(fm_providers.plotsListProvider(userId).future);
-  } catch (_) {
+  } catch (e, st) {
+    debugPrint('monitoring_providers: failed to load plots: $e');
+    debugPrint('stack: $st');
     plots = [];
   }
 

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import '../../data/models/job_model.dart';
 import '../providers/job_providers.dart';
 import '../providers/edit_job_form_provider.dart';
@@ -254,14 +257,20 @@ class _EditJobScreenState extends ConsumerState<EditJobScreen> {
                                           final Map<String,
                                               Map<String, dynamic>> byId = {};
                                           for (final u in list) {
-                                            final m = Map<String, dynamic>.from(
-                                                u as Map);
-                                            final idRaw = m['id'] ?? m['pk'];
-                                            if (idRaw == null) continue;
-                                            final idStr = idRaw.toString();
-                                            if (idStr.isEmpty) continue;
-                                            if (!byId.containsKey(idStr))
-                                              byId[idStr] = m;
+                                            try {
+                                              final m =
+                                                  Map<String, dynamic>.from(
+                                                      u as Map);
+                                              final idRaw = m['id'] ?? m['pk'];
+                                              if (idRaw == null) continue;
+                                              final idStr = idRaw.toString();
+                                              if (idStr.isEmpty) continue;
+                                              if (!byId.containsKey(idStr))
+                                                byId[idStr] = m;
+                                            } catch (e, st) {
+                                              debugPrint(
+                                                  'edit_job_screen: normalizing operator list entry failed: $e\n$st');
+                                            }
                                           }
                                           final found =
                                               byId[formState.operatorId];
@@ -271,7 +280,9 @@ class _EditJobScreenState extends ConsumerState<EditJobScreen> {
                                                   found['email'] ??
                                                   formState.operatorId;
                                           return Text('Selected: $name');
-                                        } catch (_) {
+                                        } catch (e, st) {
+                                          debugPrint(
+                                              'edit_job_screen.operator display error: $e\n$st');
                                           return Text(
                                               'Selected: ${formState.operatorId}');
                                         }
@@ -488,34 +499,26 @@ class _EditJobScreenState extends ConsumerState<EditJobScreen> {
                                         formState.operatorId ??
                                             widget.jobModel.operatorId;
                                     if (plotToUse == null) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                              content: Text(
-                                                  'Please select a plot')));
+                                      showInfoSnackBar(
+                                          context, 'Please select a plot');
                                       return;
                                     }
                                     if (controlToUse == null) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                              content: Text(
-                                                  'Please select a control unit')));
+                                      showInfoSnackBar(context,
+                                          'Please select a control unit');
                                       return;
                                     }
                                     if (operatorToUse == null) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                              content: Text(
-                                                  'Please select an operator')));
+                                      showInfoSnackBar(
+                                          context, 'Please select an operator');
                                       return;
                                     }
                                     final sprayText =
                                         _sprayRateCtrl.text.trim();
                                     if (sprayText.isNotEmpty &&
                                         double.tryParse(sprayText) == null) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                              content: Text(
-                                                  'Spray rate must be a number')));
+                                      showInfoSnackBar(context,
+                                          'Spray rate must be a number');
                                       return;
                                     }
                                     final dt =
@@ -670,11 +673,25 @@ class _EditJobScreenState extends ConsumerState<EditJobScreen> {
                       controller: phoneCtrl,
                       decoration:
                           const InputDecoration(labelText: 'Contact number'),
-                      keyboardType: TextInputType.phone),
+                      keyboardType: TextInputType.phone,
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return null;
+                        final digits = v.replaceAll(RegExp(r'[^0-9]'), '');
+                        if (digits.length < 7 || digits.length > 20)
+                          return 'Invalid phone number';
+                        return null;
+                      }),
                   TextFormField(
                       controller: emailCtrl,
                       decoration: const InputDecoration(labelText: 'Email'),
-                      keyboardType: TextInputType.emailAddress),
+                      keyboardType: TextInputType.emailAddress,
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return null;
+                        final t = v.trim();
+                        final emailRx = RegExp(r"^[^\s@]+@[^\s@]+\.[^\s@]+$");
+                        if (!emailRx.hasMatch(t)) return 'Invalid email';
+                        return null;
+                      }),
                   TextFormField(
                       controller: addressCtrl,
                       decoration: const InputDecoration(labelText: 'Address')),
@@ -742,13 +759,18 @@ class _EditJobScreenState extends ConsumerState<EditJobScreen> {
                               isActive: isActive);
                       ref.invalidate(users_provs.operatorsListProvider);
                       if (ctx.mounted)
-                        ScaffoldMessenger.of(parentCtx).showSnackBar(
-                            const SnackBar(content: Text('Created operator')));
+                        showSuccessSnackBar(parentCtx, 'Created operator');
                       Navigator.of(ctx).pop(opId);
                     } catch (e) {
-                      if (ctx.mounted)
-                        showPolishedError(parentCtx, e,
-                            fallback: 'Failed to create user');
+                      if (ctx.mounted) {
+                        if (e is ApiException) {
+                          final err =
+                              ApiError.fromResponse(e.statusCode, e.body);
+                          showApiErrorSnackBar(parentCtx, err);
+                        } else {
+                          showGenericErrorSnackBar(parentCtx, e.toString());
+                        }
+                      }
                       creatingNotifier.value = false;
                     }
                   },

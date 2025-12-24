@@ -76,7 +76,7 @@ class JobPlannerScreen extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+              color: Theme.of(context).colorScheme.primary.withAlpha(26),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -245,7 +245,7 @@ class JobPlannerScreen extends ConsumerWidget {
                                           vertical: 6,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: statusColor.withOpacity(0.1),
+                                          color: statusColor.withAlpha(26),
                                           borderRadius:
                                               BorderRadius.circular(20),
                                         ),
@@ -277,7 +277,7 @@ class JobPlannerScreen extends ConsumerWidget {
                                               color: Theme.of(context)
                                                   .colorScheme
                                                   .primary
-                                                  .withOpacity(0.3),
+                                                  .withAlpha(77),
                                             ),
                                             borderRadius:
                                                 BorderRadius.circular(8),
@@ -443,7 +443,7 @@ class PlotPreviewPainter extends CustomPainter {
         uiPath.lineTo(x, y);
     }
     uiPath.close();
-    final paintFill = Paint()..color = Colors.green.withOpacity(0.25);
+    final paintFill = Paint()..color = Colors.green.withAlpha(64);
     final paintBorder = Paint()
       ..color = Colors.green
       ..style = PaintingStyle.stroke

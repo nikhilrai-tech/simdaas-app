@@ -6,6 +6,7 @@ import 'create_equipment_screen.dart';
 import 'equipment_details_screen.dart';
 import 'create_control_unit_screen.dart';
 import 'scan_control_unit_screen.dart';
+import 'equipment_troubleshooting_screen.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/widgets/api_error_widget.dart';
 
@@ -106,6 +107,18 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen> {
                                     'category': 'sprayer',
                                     'readOnly': readOnly
                                   }))),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _CategoryCard(
+                          icon: Icons.info_outline,
+                          label: 'Troubleshooting',
+                          color: const Color(0xFF1565C0),
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      const EquipmentTroubleshootingScreen())),
                         ),
                       ),
                     ],
@@ -213,7 +226,7 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen> {
                                     color: Theme.of(context)
                                         .colorScheme
                                         .primary
-                                        .withOpacity(0.1),
+                                        .withAlpha(26),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Icon(
@@ -273,9 +286,9 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen> {
                                   decoration: BoxDecoration(
                                     color: isAssigned
                                         ? const Color(0xFFAA2424)
-                                            .withOpacity(0.1) // Warning Red
+                                            .withAlpha(26) // Warning Red
                                         : const Color(0xFF2E7D32)
-                                            .withOpacity(0.1), // Primary Green
+                                            .withAlpha(26), // Primary Green
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: Text(
@@ -414,8 +427,8 @@ class _CategoryCard extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                color.withOpacity(0.1),
-                color.withOpacity(0.05),
+                color.withAlpha(26),
+                color.withAlpha(13),
               ],
             ),
           ),

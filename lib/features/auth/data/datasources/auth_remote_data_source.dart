@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:simdaas/core/services/api_service.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import '../models/user_model.dart';
@@ -35,7 +36,10 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
               id = payloadMap['user_id'].toString();
             }
           }
-        } catch (_) {}
+        } catch (e, st) {
+          debugPrint('AuthRemoteDataSource.signIn: token decode failed: $e');
+          debugPrint(st.toString());
+        }
       }
       return UserModel(id: id, email: email);
     }

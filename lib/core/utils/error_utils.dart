@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 
 String _stripExceptionPrefix(String s) {
   // Remove common prefixes like "Exception: " or "ApiException: "
@@ -111,5 +112,5 @@ void showPolishedError(BuildContext context, Object? error,
   final display = (msg.isNotEmpty)
       ? msg.replaceAll('; ', '\n')
       : (fallback ?? 'An error occurred');
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(display)));
+  showGenericErrorSnackBar(context, display);
 }

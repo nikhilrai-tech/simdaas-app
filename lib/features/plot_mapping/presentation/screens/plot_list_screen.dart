@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -106,7 +107,7 @@ class PlotListScreen extends ConsumerWidget {
                                 color: Theme.of(context)
                                     .colorScheme
                                     .primary
-                                    .withOpacity(0.3),
+                                    .withAlpha(77),
                                 width: 1,
                               ),
                               borderRadius: BorderRadius.circular(8),
@@ -193,8 +194,7 @@ class PlotListScreen extends ConsumerWidget {
                   // Ensure provider is invalidated (MapScreen also invalidates but
                   // we do it here too for immediacy) and show confirmation.
                   ref.invalidate(plotsListProvider(userId));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Plot added')));
+                  showSuccessSnackBar(context, 'Plot added');
                 }
               },
               icon: const Icon(Icons.add_location_alt),
@@ -297,7 +297,7 @@ class PlotPolygonPainter extends CustomPainter {
     path.close();
 
     final fill = ui.Paint()
-      ..color = Colors.blue.withOpacity(0.35)
+      ..color = Colors.blue.withAlpha(89)
       ..style = ui.PaintingStyle.fill;
     final stroke = ui.Paint()
       ..color = Colors.blue

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:simdaas/core/services/api_service.dart';
 import 'package:simdaas/core/services/api_exception.dart';
@@ -106,8 +107,7 @@ class JobRemoteDataSourceImpl implements JobRemoteDataSource {
       }
     }
     if (lastResp == null) {
-      // ignore: avoid_print
-      print('JobRemoteDataSource.getJobs failed: $lastEx');
+      debugPrint('JobRemoteDataSource.getJobs failed: $lastEx');
       throw lastEx ?? Exception('Unknown error listing jobs');
     }
 
@@ -122,8 +122,7 @@ class JobRemoteDataSourceImpl implements JobRemoteDataSource {
       }
       return out;
     } catch (e) {
-      // ignore: avoid_print
-      print(
+      debugPrint(
           'Failed to parse jobs response (status=${lastResp.statusCode}). Body:\n${lastResp.body}');
       // If we received a non-JSON response from the server, surface a
       // structured ApiException so UI helpers can extract the server body.

@@ -180,7 +180,7 @@ class PlotPolygonPainter extends CustomPainter {
     path.close();
 
     final fill = ui.Paint()
-      ..color = Colors.blue.withOpacity(0.35)
+      ..color = Colors.blue.withAlpha(89)
       ..style = ui.PaintingStyle.fill;
     final stroke = ui.Paint()
       ..color = Colors.blue

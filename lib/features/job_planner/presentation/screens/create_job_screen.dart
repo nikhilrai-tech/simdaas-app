@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import '../../data/models/job_model.dart';
 import '../../domain/entities/job.dart';
 import '../providers/job_providers.dart';
@@ -150,13 +153,18 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                               isActive: isActive);
                       ref.invalidate(users_provs.operatorsListProvider);
                       if (ctx.mounted)
-                        ScaffoldMessenger.of(parentCtx).showSnackBar(
-                            const SnackBar(content: Text('Created operator')));
+                        showSuccessSnackBar(parentCtx, 'Created operator');
                       Navigator.of(ctx).pop(opId);
                     } catch (e) {
-                      if (ctx.mounted)
-                        showPolishedError(parentCtx, e,
-                            fallback: 'Failed to create user');
+                      if (ctx.mounted) {
+                        if (e is ApiException) {
+                          final err =
+                              ApiError.fromResponse(e.statusCode, e.body);
+                          showApiErrorSnackBar(parentCtx, err);
+                        } else {
+                          showGenericErrorSnackBar(parentCtx, e.toString());
+                        }
+                      }
                       creatingNotifier.value = false;
                     }
                   },
@@ -190,7 +198,8 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
               ref.read(createJobFormProvider.notifier).setOperatorId(createdId);
           });
         }
-      } catch (_) {
+      } catch (e, st) {
+        debugPrint('create_job_screen: operator provider read failed: $e\n$st');
         // if provider read failed, set selected id defensively on next frame
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted)
@@ -228,10 +237,15 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           try {
             _mapController.move(center, 13.0);
-          } catch (_) {}
+          } catch (e, st) {
+            debugPrint(
+                'create_job_screen._centerMapToSelected _mapController.move error: $e\n$st');
+          }
         });
       }
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('create_job_screen._centerMapToSelected error: $e\n$st');
+    }
   }
 
   // operators are loaded from Firestore 'users' collection when needed
@@ -795,8 +809,14 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                                 .addMaterial(picked);
                                           }
                                         } catch (e) {
-                                          showPolishedError(context, e,
-                                              fallback: 'Failed to load mixes');
+                                          if (e is ApiException) {
+                                            final err = ApiError.fromResponse(
+                                                e.statusCode, e.body);
+                                            showApiErrorSnackBar(context, err);
+                                          } else {
+                                            showGenericErrorSnackBar(
+                                                context, e.toString());
+                                          }
                                         }
                                       },
                                       child: const Text('Select existing mix')),
@@ -924,24 +944,18 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                       // build job with scheduleTime/createdAt
                                       // Client-side validation
                                       if (formState.plotId == null) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(const SnackBar(
-                                                content: Text(
-                                                    'Please select a plot')));
+                                        showInfoSnackBar(
+                                            context, 'Please select a plot');
                                         return;
                                       }
                                       if (formState.controlUnitId == null) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(const SnackBar(
-                                                content: Text(
-                                                    'Please select a control unit')));
+                                        showInfoSnackBar(context,
+                                            'Please select a control unit');
                                         return;
                                       }
                                       if (formState.operatorId == null) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(const SnackBar(
-                                                content: Text(
-                                                    'Please select an operator')));
+                                        showInfoSnackBar(context,
+                                            'Please select an operator');
                                         return;
                                       }
                                       // ownerId is legacy; userId is set above
@@ -968,7 +982,10 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                       try {
                                         ref.invalidate(
                                             jobsListProvider(userId));
-                                      } catch (_) {}
+                                      } catch (e, st) {
+                                        debugPrint(
+                                            'create_job_screen: failed to invalidate jobs list: $e\n$st');
+                                      }
                                       if (mounted) {
                                         ref
                                             .read(
@@ -1012,7 +1029,7 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                             PolygonLayer(polygons: [
                               Polygon(
                                   points: f.polygon,
-                                  color: Colors.green.withOpacity(0.25),
+                                  color: Colors.green.withAlpha(64),
                                   borderColor: Colors.green,
                                   borderStrokeWidth: 2.0)
                             ])

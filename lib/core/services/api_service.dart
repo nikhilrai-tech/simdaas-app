@@ -75,6 +75,7 @@ class ApiService {
       return resp;
     } catch (e) {
       debugPrint('ApiService.GET $path error: $e');
+      if (e is ApiException) rethrow;
       throw ApiException(null, 'Network error: $e', path: path);
     }
   }
@@ -123,6 +124,7 @@ class ApiService {
       return resp;
     } catch (e) {
       debugPrint('ApiService.POST $path error: $e');
+      if (e is ApiException) rethrow;
       throw ApiException(null, 'Network error: $e', path: path);
     }
   }
@@ -185,6 +187,7 @@ class ApiService {
       return resp;
     } catch (e) {
       debugPrint('ApiService.PATCH $path error: $e');
+      if (e is ApiException) rethrow;
       throw ApiException(null, 'Network error: $e', path: path);
     }
   }

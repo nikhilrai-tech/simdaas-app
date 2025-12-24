@@ -57,7 +57,7 @@ class EquipmentModel extends EquipmentEntity {
         id: id,
         category: category,
         name: json['name'] as String? ?? '',
-        userId: userId,
+        userId: json['user'].toString() as String? ?? userId,
         status: json['status'] as String?,
         controlUnitId: json['controlUnitId'] as String?,
         mountingHeight: _num('mountingHeight', 'mounting_height'),
@@ -75,25 +75,26 @@ class EquipmentModel extends EquipmentEntity {
         id: id,
         category: category,
         name: json['name'] as String? ?? '',
-        userId: userId,
+        userId: json['user'].toString() as String? ?? userId,
         status: json['status'] as String?,
         controlUnitId: json['controlUnitId'] as String?,
-        mountingHeight: _num('mountingHeight', 'mounting_height'),
-        lidarNozzleDistance:
-            _num('lidarNozzleDistance', 'lidar_nozzle_distance'),
-        ultrasonicDistance: _num('ultrasonicDistance', 'ultrasonic_distance'),
+        mountingHeight: _num('mount_height_of_lidar', 'mounting_height'),
+        lidarNozzleDistance: _num(
+            'distance_b_w_sensor_and_nozzle_center', 'lidar_nozzle_distance'),
+        ultrasonicDistance: _num(
+            'distance_of_us_sensor_from_center_line', 'ultrasonic_distance'),
         wheelDiameter: _num('wheelDiameter', 'wheel_diameter'),
         screwsInWheel: _int('screwsInWheel', 'screws_per_wheel'),
         hingeToControlUnit:
             _num('hingeToControlUnit', 'distance_hinge_control_unit'),
         macAddress:
-            json['macAddress'] as String? ?? json['mac_address'] as String?,
-        linkedSprayerId: json['linkedSprayerId'] as String? ??
-            json['linked_sprayer_id'] as String?,
-        linkedTractorId: json['linkedTractorId'] as String? ??
-            json['linked_tractor_id'] as String?,
-        linkedPlotId: json['linkedPlotId'] as String? ??
-            json['linked_plot_id'] as String?,
+            json['mac_addr'] as String? ?? json['mac_address'] as String?,
+        linkedSprayerId: json['sprayer']['id'].toString() as String? ??
+            json['linked_sprayer_id'].toString() as String?,
+        linkedTractorId: json['tractor']['id'].toString() as String? ??
+            json['linked_tractor_id'].toString() as String?,
+        linkedPlotId: json['plot']['id'].toString() as String? ??
+            json['linked_plot_id'].toString() as String?,
         createdAt: _parseTime('createdAt', 'created_at'),
         updatedAt: _parseTime('updatedAt', 'updated_at'),
       );

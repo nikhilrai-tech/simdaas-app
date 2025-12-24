@@ -373,17 +373,36 @@ class TelemetryService {
           );
           // Store telemetry under the message's device id
           _latest[normId] = stored;
-          // Persist lat/lon history for this device if present
+          // Persist lat/lon history for this device if present, but only when
+          // coordinates look valid. We accept single-axis zero values, but
+          // reject clearly invalid or placeholder coordinates such as both
+          // lat and lon near 0.0. Use a small epsilon to avoid floating
+          // point equality edge cases.
           try {
             if (stored.lat != null && stored.lon != null) {
-              final list =
-                  _positions.putIfAbsent(normId, () => <_LatLonEntry>[]);
-              list.add(_LatLonEntry(
-                  timestamp: stored.timestamp.toUtc(),
-                  lat: stored.lat!,
-                  lon: stored.lon!,
-                  ptoState: stored.ptoState,
-                  deviceInPlot: stored.deviceInPlot));
+              final lat = stored.lat!;
+              final lon = stored.lon!;
+              const double eps = 1e-6;
+              final bool finiteCoords = lat.isFinite && lon.isFinite;
+              final bool inRange =
+                  lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0;
+              final bool bothNearZero = (lat.abs() < eps) && (lon.abs() < eps);
+
+              if (finiteCoords && inRange && !bothNearZero) {
+                final list =
+                    _positions.putIfAbsent(normId, () => <_LatLonEntry>[]);
+                list.add(_LatLonEntry(
+                    timestamp: stored.timestamp.toUtc(),
+                    lat: lat,
+                    lon: lon,
+                    ptoState: stored.ptoState,
+                    deviceInPlot: stored.deviceInPlot));
+              } else {
+                try {
+                  debugPrint(
+                      'Telemetry: ignoring invalid coords for $normId lat=$lat lon=$lon');
+                } catch (_) {}
+              }
             }
           } catch (_) {}
           // Also store telemetry under the subscription key (normKey) so that

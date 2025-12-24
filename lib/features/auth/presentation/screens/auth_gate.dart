@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/features/auth/presentation/screens/login_screen.dart';
+import 'package:simdaas/features/home/presentation/screens/three_button_dashboard_screen.dart';
 import 'package:simdaas/temp_features/control_centres_dashboard.dart';
 
 class AuthGate extends ConsumerWidget {

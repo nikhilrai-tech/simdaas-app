@@ -10,6 +10,7 @@ import '../core/services/auth_service.dart';
 import '../core/services/telemetry_service.dart';
 import '../core/utils/mac_utils.dart';
 import '../features/data_monitoring/presentation/screens/monitoring_screen.dart';
+import '../features/reports/presentation/screens/reports_list_screen.dart';
 import '../features/equipments/presentation/screens/create_control_unit_screen.dart';
 import '../features/equipments/presentation/screens/scan_control_unit_screen.dart';
 
@@ -35,86 +36,168 @@ class TempDashboard extends ConsumerWidget {
           ),
         ],
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Theme.of(context).colorScheme.primary.withOpacity(0.1),
-              Colors.white,
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // subtle background tint
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+              ),
+            ),
+            // Header gradient and emblem
+            Column(
               children: [
-                Icon(
-                  Icons.dashboard_customize,
-                  size: 80,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Welcome!',
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Select the area you want to access',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Theme.of(context).colorScheme.secondary,
-                      ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                // Control centres status card
-                controlUnitsAsync.when(
-                  data: (items) => _DashboardCard(
-                    icon: Icons.router_outlined,
-                    title: 'Active Devices',
-                    subtitle: _controlSummary(items),
-                    color: const Color(0xFF1565C0),
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => _ControlUnitsListScreen(items: items))),
+                Container(
+                  height: 160,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Theme.of(context).colorScheme.primary.withAlpha(40),
+                        Theme.of(context).colorScheme.primary.withAlpha(15),
+                      ],
+                    ),
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(20),
+                    ),
                   ),
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (e, st) => _DashboardCard(
-                    icon: Icons.warning_amber_outlined,
-                    title: 'Active Devices',
-                    subtitle: 'Error loading control centres',
-                    color: Colors.red,
-                    onTap: () {},
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                    child: Row(
+                      children: [
+                        // Emblem
+                        Container(
+                          width: 84,
+                          height: 84,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [
+                                Theme.of(context).colorScheme.primary,
+                                Theme.of(context).colorScheme.secondary,
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primary
+                                    .withAlpha(40),
+                                blurRadius: 12,
+                                offset: const Offset(0, 6),
+                              )
+                            ],
+                          ),
+                          child: Center(
+                            child: Icon(
+                              Icons.dashboard_customize,
+                              color: Colors.white,
+                              size: 36,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // Title
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Welcome',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Quick access to control centres',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                _DashboardCard(
-                  icon: Icons.settings_outlined,
-                  title: 'Settings',
-                  subtitle: 'Configure equipment and system',
-                  color: const Color(0xFF8E4600),
-                  onTap: () =>
-                      Navigator.of(context).pushNamed('/technician_dashboard'),
+                // Content area
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SizedBox(height: 8),
+                        // Control centres status card
+                        controlUnitsAsync.when(
+                          data: (items) => _DashboardCard(
+                            icon: Icons.router_outlined,
+                            title: 'Active Devices',
+                            subtitle: _controlSummary(items),
+                            color: const Color(0xFF1565C0),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => _ControlUnitsListScreen(
+                                  items: items,
+                                ),
+                              ),
+                            ),
+                          ),
+                          loading: () => const Center(
+                              child: Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: CircularProgressIndicator(),
+                          )),
+                          error: (e, st) => _DashboardCard(
+                            icon: Icons.warning_amber_outlined,
+                            title: 'Active Devices',
+                            subtitle: 'Error loading control centres',
+                            color: Colors.red,
+                            onTap: () {},
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _DashboardCard(
+                          icon: Icons.settings_outlined,
+                          title: 'Settings',
+                          subtitle: 'Configure equipment and system',
+                          color: const Color(0xFF8E4600),
+                          onTap: () => Navigator.of(context)
+                              .pushNamed('/technician_dashboard'),
+                        ),
+                        const SizedBox(height: 12),
+                        _DashboardCard(
+                          icon: Icons.bar_chart_outlined,
+                          title: 'Reports',
+                          subtitle: 'View recent application reports',
+                          color: const Color(0xFF00897B),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const ReportsListScreen()),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        // Additional quick actions can be added here
+                      ],
+                    ),
+                  ),
                 ),
-                // const SizedBox(height: 16),
-                // _DashboardCard(
-                //   icon: Icons.app_settings_alt_outlined,
-                //   title: 'App Settings',
-                //   subtitle: 'Manage application preferences',
-                //   color: const Color(0xFF00796B),
-                //   onTap: () => Navigator.of(context).pushNamed('/app_settings'),
-                // ),
               ],
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -135,6 +218,8 @@ class TempDashboard extends ConsumerWidget {
   String _capitalize(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 }
+
+/// Simple model used for dummy report data in the temporary UI.
 
 /// Try to extract a plot name from a `linkedPlotId` value which may be:
 /// - an id string that maps to `plotMap`, or
@@ -347,9 +432,27 @@ class _ControlUnitsListScreenState
                   color: isActive ? Colors.green : Colors.grey,
                 ),
                 onTap: deviceIdNorm.isNotEmpty
-                    ? () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) =>
-                            MonitoringScreen(deviceId: deviceIdNorm)))
+                    ? () {
+                        // Try to extract a usable plot id from the linkedPlotId
+                        String? plotIdForNav;
+                        try {
+                          if (linkedPlotId.isNotEmpty) {
+                            final idMatch =
+                                RegExp(r'id\s*[:=]\s*([0-9A-Za-z-]+)')
+                                    .firstMatch(linkedPlotId);
+                            if (idMatch != null) {
+                              plotIdForNav = idMatch.group(1);
+                            } else {
+                              plotIdForNav = linkedPlotId;
+                            }
+                          }
+                        } catch (_) {}
+
+                        Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => MonitoringScreen(
+                                deviceId: deviceIdNorm,
+                                plotId: plotIdForNav)));
+                      }
                     : null,
               );
             },
@@ -628,7 +731,7 @@ class _DashboardCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 3,
-      shadowColor: color.withOpacity(0.3),
+      shadowColor: color.withAlpha(60),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
       ),
@@ -643,8 +746,8 @@ class _DashboardCard extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                color.withOpacity(0.1),
-                color.withOpacity(0.05),
+                color.withAlpha(24),
+                color.withAlpha(12),
               ],
             ),
           ),
@@ -653,13 +756,20 @@ class _DashboardCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.2),
+                  color: color,
                   borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withAlpha(40),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
                 ),
                 child: Icon(
                   icon,
                   size: 32,
-                  color: color,
+                  color: Colors.white,
                 ),
               ),
               const SizedBox(width: 16),
@@ -669,15 +779,17 @@ class _DashboardCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.secondary,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                     ),
                   ],
@@ -685,7 +797,7 @@ class _DashboardCard extends StatelessWidget {
               ),
               Icon(
                 Icons.arrow_forward_ios,
-                color: color,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 size: 20,
               ),
             ],

@@ -297,14 +297,16 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
     for (final item in arrT) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
-      final normalized = _normalizeEquipmentMap(map, 'tractor');
+      final normalized = Map<String, dynamic>.from(map);
+      normalized['category'] = 'tractor';
       out.add(EquipmentModel.fromJson(id, normalized));
     }
     final arrS = json.decode(sprayersResp.body) as List<dynamic>;
     for (final item in arrS) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
-      final normalized = _normalizeEquipmentMap(map, 'sprayer');
+      final normalized = Map<String, dynamic>.from(map);
+      normalized['category'] = 'sprayer';
       out.add(EquipmentModel.fromJson(id, normalized));
     }
     // control units
@@ -313,12 +315,16 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
       for (final item in arrC) {
         final map = Map<String, dynamic>.from(item as Map);
         final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
-        final normalized = _normalizeEquipmentMap(map, 'control_unit');
+        final normalized = Map<String, dynamic>.from(map);
+        normalized['category'] = 'control_unit';
         out.add(EquipmentModel.fromJson(id, normalized));
       }
-    } catch (_) {
+    } catch (e, st) {
       // If control-units endpoint isn't present or returns unexpected data,
-      // ignore and continue with tractors/sprayers list.
+      // log the error for diagnostics and continue with tractors/sprayers list.
+      debugPrint(
+          'EquipmentRemoteDataSource.getEquipments: control-units parse error: $e');
+      debugPrint('stack: $st');
     }
     return out;
   }
@@ -331,7 +337,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
     for (final item in arr) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
-      final normalized = _normalizeEquipmentMap(map, 'tractor');
+      final normalized = Map<String, dynamic>.from(map);
+      normalized['category'] = 'tractor';
       out.add(EquipmentModel.fromJson(id, normalized));
     }
     return out;
@@ -345,7 +352,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
     for (final item in arr) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
-      final normalized = _normalizeEquipmentMap(map, 'sprayer');
+      final normalized = Map<String, dynamic>.from(map);
+      normalized['category'] = 'sprayer';
       out.add(EquipmentModel.fromJson(id, normalized));
     }
     return out;
@@ -364,7 +372,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
       for (final item in arr) {
         final map = Map<String, dynamic>.from(item as Map);
         final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
-        final normalized = _normalizeEquipmentMap(map, 'control_unit');
+        final normalized = Map<String, dynamic>.from(map);
+        normalized['category'] = 'control_unit';
         out.add(EquipmentModel.fromJson(id, normalized));
       }
       return out;
@@ -373,115 +382,5 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
       debugPrint('EquipmentRemoteDataSource.getControlUnits: stack: $st');
       rethrow;
     }
-  }
-
-  // Convert snake_case API response keys into the camelCase keys expected by
-  // EquipmentModel.fromJson and ensure the 'category' field is present so the
-  // factory dispatches to the correct typed model.
-  Map<String, dynamic> _normalizeEquipmentMap(
-      Map<String, dynamic> src, String category) {
-    final out = <String, dynamic>{};
-    // copy existing known camelCase keys (if any)
-    out.addAll(src.map((k, v) => MapEntry(k.toString(), v)));
-
-    // ensure category
-    out['category'] = (src['category'] ?? category).toString();
-
-    dynamic tryParseDouble(dynamic v) {
-      if (v == null) return null;
-      if (v is num) return v.toDouble();
-      if (v is String) return double.tryParse(v);
-      return null;
-    }
-
-    dynamic tryParseInt(dynamic v) {
-      if (v == null) return null;
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v);
-      return null;
-    }
-
-    // snake_case -> camelCase mappings
-    if (src.containsKey('user_id'))
-      out['userId'] = tryParseInt(src['user_id']) ?? src['user_id'];
-    if (src.containsKey('wheel_diameter'))
-      out['wheelDiameter'] =
-          tryParseDouble(src['wheel_diameter']) ?? src['wheel_diameter'];
-    if (src.containsKey('screws_per_wheel'))
-      out['screwsInWheel'] =
-          tryParseInt(src['screws_per_wheel']) ?? src['screws_per_wheel'];
-    if (src.containsKey('axle_length')) {
-      // backend sometimes returns axle_length as string; try parse to double when possible
-      final parsed = tryParseDouble(src['axle_length']);
-      out['axleLength'] = parsed ?? src['axle_length'];
-    }
-    if (src.containsKey('contact_number'))
-      out['contactNumber'] = src['contact_number'];
-    if (src.containsKey('nozzle_count'))
-      out['nozzleCount'] =
-          tryParseInt(src['nozzle_count']) ?? src['nozzle_count'];
-    if (src.containsKey('tank_capacity'))
-      out['tankCapacity'] =
-          tryParseDouble(src['tank_capacity']) ?? src['tank_capacity'];
-    if (src.containsKey('distance_hinge_axle'))
-      out['hingeToAxle'] = tryParseDouble(src['distance_hinge_axle']) ??
-          src['distance_hinge_axle'];
-    if (src.containsKey('distance_hinge_nozzle'))
-      out['hingeToNozzle'] = tryParseDouble(src['distance_hinge_nozzle']) ??
-          src['distance_hinge_nozzle'];
-    if (src.containsKey('distance_hinge_control_unit'))
-      out['hingeToControlUnit'] =
-          tryParseDouble(src['distance_hinge_control_unit']) ??
-              src['distance_hinge_control_unit'];
-    if (src.containsKey('mounting_height'))
-      out['mountingHeight'] =
-          tryParseDouble(src['mounting_height']) ?? src['mounting_height'];
-    if (src.containsKey('lidar_nozzle_distance'))
-      out['lidarNozzleDistance'] =
-          tryParseDouble(src['lidar_nozzle_distance']) ??
-              src['lidar_nozzle_distance'];
-    if (src.containsKey('ultrasonic_distance'))
-      out['ultrasonicDistance'] = tryParseDouble(src['ultrasonic_distance']) ??
-          src['ultrasonic_distance'];
-    if (src.containsKey('mac_address')) out['macAddress'] = src['mac_address'];
-    // Some backends use the shorter key 'mac_addr' instead of 'mac_address'
-    if (src.containsKey('mac_addr')) out['macAddress'] = src['mac_addr'];
-    // Map 'user' (primitive user id) to our canonical 'userId' as STRING
-    // The UI and models expect string ids (nullable). Ensure we always return
-    // a string to avoid 'int is not a subtype of String' cast errors.
-    if (src.containsKey('user')) out['userId'] = src['user']?.toString();
-    // Preserve created/updated timestamps if present for detail views
-    if (src.containsKey('created_at')) out['createdAt'] = src['created_at'];
-    if (src.containsKey('updated_at')) out['updatedAt'] = src['updated_at'];
-    if (src.containsKey('distance_b_w_sensor_and_nozzle_center'))
-      out['lidarNozzleDistance'] =
-          tryParseDouble(src['distance_b_w_sensor_and_nozzle_center']) ??
-              src['distance_b_w_sensor_and_nozzle_center'];
-    if (src.containsKey('mount_height_of_lidar'))
-      out['mountingHeight'] = tryParseDouble(src['mount_height_of_lidar']) ??
-          src['mount_height_of_lidar'];
-    if (src.containsKey('distance_of_us_sensor_from_center_line'))
-      out['ultrasonicDistance'] =
-          tryParseDouble(src['distance_of_us_sensor_from_center_line']) ??
-              src['distance_of_us_sensor_from_center_line'];
-    if (src.containsKey('sprayer'))
-      out['linkedSprayerId'] = src['sprayer']?.toString();
-    if (src.containsKey('tractor'))
-      out['linkedTractorId'] = src['tractor']?.toString();
-    // map plot references to linkedPlotId (APIs may use 'plot' or 'plot_id')
-    if (src.containsKey('plot')) out['linkedPlotId'] = src['plot']?.toString();
-    if (src.containsKey('plot_id'))
-      out['linkedPlotId'] = src['plot_id']?.toString();
-    if (src.containsKey('linked_plot_id'))
-      out['linkedPlotId'] = src['linked_plot_id']?.toString();
-    if (src.containsKey('linked_sprayer_id'))
-      out['linkedSprayerId'] = src['linked_sprayer_id']?.toString();
-    if (src.containsKey('linked_tractor_id'))
-      out['linkedTractorId'] = src['linked_tractor_id']?.toString();
-    if (src.containsKey('control_unit_id'))
-      out['controlUnitId'] = src['control_unit_id']?.toString();
-
-    return out;
   }
 }

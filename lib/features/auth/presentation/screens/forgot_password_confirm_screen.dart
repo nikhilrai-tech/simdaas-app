@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 
 class ForgotPasswordConfirmScreen extends ConsumerStatefulWidget {
   const ForgotPasswordConfirmScreen({super.key, this.email});
@@ -47,6 +49,8 @@ class _ForgotPasswordConfirmScreenState
     return true;
   }
 
+  final _emailRegex = RegExp(r"^[^\s@]+@[^\s@]+\.[^\s@]+$");
+
   @override
   Widget build(BuildContext context) {
     final arg = ModalRoute.of(context)?.settings.arguments;
@@ -72,9 +76,16 @@ class _ForgotPasswordConfirmScreenState
                       controller: _emailCtrl,
                       decoration: const InputDecoration(labelText: 'Email'),
                       keyboardType: TextInputType.emailAddress,
-                      validator: (v) => (v == null || v.isEmpty)
-                          ? 'Please enter your email'
-                          : null,
+                      maxLength: 254,
+                      validator: (v) {
+                        if (v == null || v.isEmpty)
+                          return 'Please enter your email';
+                        final t = v.trim();
+                        if (t.length > 254) return 'Email too long';
+                        if (!_emailRegex.hasMatch(t))
+                          return 'Invalid email format';
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 8),
                     TextFormField(
@@ -100,10 +111,9 @@ class _ForgotPasswordConfirmScreenState
                         ),
                       ),
                       validator: (v) {
-                        if (v == null || v.isEmpty) return 'Enter a password';
-                        if (!_validatePassword(v)) {
-                          return 'Password must be >=8 chars, include uppercase, number and special char';
-                        }
+                        if (v == null || v.isEmpty) return 'Enter password';
+                        if (!_validatePassword(v))
+                          return 'Password must be stronger';
                         return null;
                       },
                     ),
@@ -114,8 +124,7 @@ class _ForgotPasswordConfirmScreenState
                       decoration:
                           const InputDecoration(labelText: 'Confirm password'),
                       validator: (v) {
-                        if (v == null || v.isEmpty)
-                          return 'Confirm your password';
+                        if (v == null || v.isEmpty) return 'Confirm password';
                         if (v != _passwordCtrl.text)
                           return 'Passwords do not match';
                         return null;
@@ -124,113 +133,65 @@ class _ForgotPasswordConfirmScreenState
                     const SizedBox(height: 12),
                     _loading
                         ? const CircularProgressIndicator()
-                        : Column(children: [
-                            ElevatedButton(
-                                onPressed: () async {
-                                  if (!_formKey.currentState!.validate())
-                                    return;
-                                  setState(() => _loading = true);
-                                  final auth = ref.read(authServiceProvider);
-                                  final email = _emailCtrl.text.trim();
-                                  final code = _codeCtrl.text.trim();
-                                  final pw = _passwordCtrl.text;
-                                  try {
-                                    await auth.confirmPasswordReset(
-                                        email, code, pw);
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                            content: Text(
-                                                'Password reset successful')));
-                                    // navigate back to login
-                                    Navigator.of(context)
-                                        .pushReplacementNamed('/login');
-                                  } catch (e) {
-                                    String msg;
-                                    if (e is ApiException && e.body != null) {
-                                      try {
-                                        final parsed = json.decode(e.body!)
-                                            as Map<String, dynamic>;
-                                        final msgs = <String>[];
-                                        parsed.forEach((k, v) {
-                                          if (v is List && v.isNotEmpty) {
-                                            msgs.add('${k}: ${v.first}');
-                                          } else if (v is String) {
-                                            msgs.add('${k}: $v');
-                                          } else {
-                                            msgs.add('$k: ${v.toString()}');
-                                          }
-                                        });
-                                        msg = msgs.join(' • ');
-                                      } catch (_) {
-                                        msg = e.toString();
-                                      }
-                                    } else {
-                                      msg = e.toString();
-                                    }
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text(msg)));
-                                  } finally {
-                                    if (mounted)
-                                      setState(() => _loading = false);
-                                  }
-                                },
-                                child: const Text('Reset password')),
-                            const SizedBox(height: 8),
-                            TextButton(
-                                onPressed: () async {
-                                  final email = _emailCtrl.text.trim();
-                                  if (email.isEmpty) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                            content:
-                                                Text('Enter email to resend')));
-                                    return;
-                                  }
-                                  setState(() => _loading = true);
-                                  try {
-                                    await ref
-                                        .read(authServiceProvider)
-                                        .resendPasswordReset(email);
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                            content: Text(
-                                                'Verification code sent successfully')));
-                                  } catch (e) {
-                                    String msg;
-                                    if (e is ApiException && e.body != null) {
-                                      try {
-                                        final parsed = json.decode(e.body!)
-                                            as Map<String, dynamic>;
-                                        final msgs = <String>[];
-                                        parsed.forEach((k, v) {
-                                          if (v is List && v.isNotEmpty) {
-                                            msgs.add('${k}: ${v.first}');
-                                          } else if (v is String) {
-                                            msgs.add('${k}: $v');
-                                          } else {
-                                            msgs.add('$k: ${v.toString()}');
-                                          }
-                                        });
-                                        msg = msgs.join(' • ');
-                                      } catch (_) {
-                                        msg = e.toString();
-                                      }
-                                    } else {
-                                      msg = e.toString();
-                                    }
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text(msg)));
-                                  } finally {
-                                    if (mounted)
-                                      setState(() => _loading = false);
-                                  }
-                                },
-                                child: const Text('Resend code'))
-                          ]),
+                        : ElevatedButton(
+                            onPressed: () async {
+                              if (!_formKey.currentState!.validate()) return;
+                              setState(() => _loading = true);
+                              final auth = ref.read(authServiceProvider);
+                              final email = _emailCtrl.text.trim();
+                              final code = _codeCtrl.text.trim();
+                              final pw = _passwordCtrl.text;
+                              try {
+                                await auth.confirmPasswordReset(
+                                    email, code, pw);
+                                if (!mounted) return;
+                                showSuccessSnackBar(
+                                    context, 'Password reset successful');
+                                Navigator.of(context)
+                                    .pushReplacementNamed('/login');
+                              } catch (e) {
+                                if (e is ApiException) {
+                                  final err = ApiError.fromResponse(
+                                      e.statusCode, e.body);
+                                  showApiErrorSnackBar(context, err);
+                                } else {
+                                  showGenericErrorSnackBar(
+                                      context, e.toString());
+                                }
+                              } finally {
+                                if (mounted) setState(() => _loading = false);
+                              }
+                            },
+                            child: const Text('Reset password')),
+                    const SizedBox(height: 8),
+                    TextButton(
+                        onPressed: () async {
+                          final email = _emailCtrl.text.trim();
+                          if (email.isEmpty) {
+                            showInfoSnackBar(context, 'Enter email to resend');
+                            return;
+                          }
+                          setState(() => _loading = true);
+                          try {
+                            await ref
+                                .read(authServiceProvider)
+                                .resendPasswordReset(email);
+                            if (!mounted) return;
+                            showSuccessSnackBar(
+                                context, 'Verification code sent successfully');
+                          } catch (e) {
+                            if (e is ApiException) {
+                              final err =
+                                  ApiError.fromResponse(e.statusCode, e.body);
+                              showApiErrorSnackBar(context, err);
+                            } else {
+                              showGenericErrorSnackBar(context, e.toString());
+                            }
+                          } finally {
+                            if (mounted) setState(() => _loading = false);
+                          }
+                        },
+                        child: const Text('Resend code'))
                   ]),
                 )
               ],

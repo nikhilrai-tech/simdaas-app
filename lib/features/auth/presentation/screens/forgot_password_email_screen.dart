@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 
 class ForgotPasswordEmailScreen extends ConsumerStatefulWidget {
@@ -65,10 +67,8 @@ class _ForgotPasswordEmailScreenState
                         try {
                           await auth.requestPasswordReset(email);
                           if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content:
-                                      Text('Verification code sent to email')));
+                          showSuccessSnackBar(
+                              context, 'Verification code sent to email');
                           // Navigate to confirm screen with email
                           if (mounted) {
                             Navigator.of(context).pushNamed(
@@ -77,30 +77,12 @@ class _ForgotPasswordEmailScreenState
                           }
                         } catch (e) {
                           String msg;
-                          if (e is ApiException && e.body != null) {
-                            try {
-                              final parsed =
-                                  json.decode(e.body!) as Map<String, dynamic>;
-                              final msgs = <String>[];
-                              parsed.forEach((k, v) {
-                                if (v is List && v.isNotEmpty) {
-                                  msgs.add('${k}: ${v.first}');
-                                } else if (v is String) {
-                                  msgs.add('${k}: $v');
-                                } else {
-                                  msgs.add('$k: ${v.toString()}');
-                                }
-                              });
-                              msg = msgs.join(' • ');
-                            } catch (_) {
-                              msg = e.toString();
-                            }
+                          if (e is ApiException) {
+                            final err =
+                                ApiError.fromResponse(e.statusCode, e.body);
+                            showApiErrorSnackBar(context, err);
                           } else {
-                            msg = e.toString();
-                          }
-                          if (mounted) {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(SnackBar(content: Text(msg)));
+                            showGenericErrorSnackBar(context, e.toString());
                           }
                         } finally {
                           if (mounted) setState(() => _loading = false);

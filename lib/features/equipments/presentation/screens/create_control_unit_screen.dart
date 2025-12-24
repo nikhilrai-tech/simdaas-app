@@ -6,6 +6,8 @@ import '../../../plot_mapping/presentation/providers/plot_providers.dart'
 import 'package:simdaas/core/services/auth_service.dart';
 import 'dart:convert';
 import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 
 class CreateControlUnitScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic>? existingData;
@@ -18,9 +20,37 @@ class CreateControlUnitScreen extends ConsumerStatefulWidget {
       _CreateControlUnitScreenState();
 }
 
+// KeepAlive helper so off-screen pages retain FormState
+class _KeepAlive extends StatefulWidget {
+  final Widget child;
+  const _KeepAlive({required this.child});
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
+
+class _KeepAliveState extends State<_KeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
 class _CreateControlUnitScreenState
     extends ConsumerState<CreateControlUnitScreen> {
   final _formKey = GlobalKey<FormState>();
+  late final List<GlobalKey<FormState>> _pageKeys;
+  final _pageController = PageController();
+  int _currentPage = 0;
+  bool _isSaving = false;
+  // Unit selectors for meter inputs
+  String _lidarNozzleDistanceUnit = 'm';
+  String _mountHeightUnit = 'm';
+  String _ultrasonicDistanceUnit = 'm';
   final _name = TextEditingController();
   final _controlUnitId = TextEditingController();
   final _macAddress = TextEditingController();
@@ -59,7 +89,14 @@ class _CreateControlUnitScreenState
     _lidarNozzleDistance.dispose();
     _mountHeightOfLidar.dispose();
     _ultrasonicDistance.dispose();
+    _pageController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _pageKeys = List.generate(4, (_) => GlobalKey<FormState>());
   }
 
   @override
@@ -222,403 +259,680 @@ class _CreateControlUnitScreenState
                 .toSet();
           },
           orElse: () {});
-    } catch (_) {}
+    } catch (e, st) {
+      // Log instead of silently ignoring so we have diagnostics if provider
+      // access or decoding fails while populating MAC cache.
+      debugPrint('CreateControlUnitScreen: error populating existing MACs: $e');
+      debugPrint('stack: $st');
+    }
+
+    // Build a multi-page wizard: main page + three image pages
+    final totalPages = 4;
 
     return Scaffold(
       appBar: AppBar(
           title: Text(_isEditing ? 'Edit Control Unit' : 'Add Control Unit')),
-      body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: SingleChildScrollView(
-          // ensure the scroll view moves above the keyboard
-          padding:
-              EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                TextFormField(
-                  controller: _name,
-                  enabled: !_prefilledName,
-                  decoration:
-                      const InputDecoration(labelText: 'Control Unit name'),
-                  validator: (v) =>
-                      (v == null || v.isEmpty) ? 'Enter name' : null,
+      body: SafeArea(
+        child: Stack(children: [
+          Column(
+            children: [
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                child: LinearProgressIndicator(
+                  value: (1.0 * (_currentPage + 1)) / totalPages,
                 ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _controlUnitId,
-                  // control unit identifier should not be editable when editing
-                  // an existing control unit (it's a primary identifier).
-                  enabled: !_prefilledControlUnitId && !_isEditing,
-                  decoration:
-                      const InputDecoration(labelText: 'Control unit ID'),
-                  validator: (v) =>
-                      (v == null || v.isEmpty) ? 'Enter control unit id' : null,
-                ),
-                const SizedBox(height: 8),
-                // owner is not selectable; current user will be used
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _macAddress,
-                  enabled: !_prefilledMac,
-                  decoration: const InputDecoration(labelText: 'MAC address'),
-                  validator: (v) {
-                    final val = v?.trim() ?? '';
-                    if (val.isEmpty) return 'Enter MAC address';
-                    // normalize: remove separators and lowercase
-                    final norm = val
-                        .replaceAll(RegExp(r'[^A-Fa-f0-9]'), '')
-                        .toLowerCase();
-                    if (norm.isEmpty) return 'Enter valid MAC address';
-                    // when we have cached existing MACs, ensure uniqueness
-                    if (_existingMacs.isNotEmpty) {
-                      final own = widget.existingData?['macAddress']
-                          ?.toString()
-                          .replaceAll(RegExp(r'[^A-Fa-f0-9]'), '')
-                          .toLowerCase();
-                      for (final e in _existingMacs) {
-                        if (own != null && own == e && e == norm)
-                          continue; // ignore own
-                        if (e == norm) return 'MAC address already exists';
-                        if (e.contains(norm) || norm.contains(e))
-                          return 'MAC address too similar to existing device';
-                      }
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 8),
-                // Sprayer & Tractor dropdowns
-                const SizedBox(height: 8),
-                Consumer(builder: (context, ref, _) {
-                  final userId =
-                      ref.read(authServiceProvider).currentUserId ?? '';
-                  final eqAsync = ref.watch(sprayersProvider(userId));
-                  return eqAsync.when(
-                      data: (items) {
-                        final sprayers = items
-                            .where((e) => e.category == 'sprayer')
-                            .toList();
-                        return DropdownButtonFormField<String?>(
-                          value: _linkedSprayerId,
-                          decoration: const InputDecoration(
-                              labelText: 'Linked sprayer'),
-                          items: [
-                            const DropdownMenuItem(
-                                value: null, child: Text('None')),
-                            ...sprayers.map((e) => DropdownMenuItem(
-                                value: e.id,
-                                child: Text(
-                                    '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
-                          ],
-                          onChanged: _prefilledLinkedSprayer
-                              ? null
-                              : (v) => setState(() => _linkedSprayerId = v),
-                          validator: (v) {
-                            if (v == null || v.isEmpty)
-                              return 'Select a linked sprayer';
-                            return null;
-                          },
-                          disabledHint: _prefilledLinkedSprayer &&
-                                  _linkedSprayerId != null
-                              ? () {
-                                  final found = sprayers.isNotEmpty
-                                      ? sprayers.firstWhere(
-                                          (s) => s.id == _linkedSprayerId,
-                                          orElse: () => sprayers.first)
-                                      : null;
-                                  final display = found != null
-                                      ? found.name
-                                      : _linkedSprayerId;
-                                  return Text('Linked: ${display ?? ''}');
-                                }()
-                              : null,
-                        );
-                      },
-                      loading: () => const CircularProgressIndicator(),
-                      error: (e, st) => const SizedBox());
-                }),
-                const SizedBox(height: 8),
-                Consumer(builder: (context, ref, _) {
-                  final userId =
-                      ref.read(authServiceProvider).currentUserId ?? '';
-                  final eqAsync = ref.watch(tractorsProvider(userId));
-                  return eqAsync.when(
-                      data: (items) {
-                        final tractors = items
-                            .where((e) => e.category == 'tractor')
-                            .toList();
-                        final dropdown = DropdownButtonFormField<String?>(
-                          value: _linkedTractorId,
-                          decoration: const InputDecoration(
-                              labelText: 'Linked tractor'),
-                          items: [
-                            const DropdownMenuItem(
-                                value: null, child: Text('None')),
-                            ...tractors.map((e) => DropdownMenuItem(
-                                value: e.id,
-                                child: Text(
-                                    '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
-                          ],
-                          onChanged: _prefilledLinkedTractor
-                              ? null
-                              : (v) => setState(() => _linkedTractorId = v),
-                          validator: (v) {
-                            if (v == null || v.isEmpty)
-                              return 'Select a linked tractor';
-                            return null;
-                          },
-                          disabledHint: _prefilledLinkedTractor &&
-                                  _linkedTractorId != null
-                              ? () {
-                                  final found = tractors.isNotEmpty
-                                      ? tractors.firstWhere(
-                                          (s) => s.id == _linkedTractorId,
-                                          orElse: () => tractors.first)
-                                      : null;
-                                  final display = found != null
-                                      ? found.name
-                                      : _linkedTractorId;
-                                  return Text('Linked: ${display ?? ''}');
-                                }()
-                              : null,
-                        );
+              ),
+              Expanded(
+                child: PageView(
+                  controller: _pageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  onPageChanged: (i) => setState(() => _currentPage = i),
+                  children: [
+                    // Page 0: Main details (all fields except image-pages)
+                    _KeepAlive(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Form(
+                          key: _pageKeys[0],
+                          child: SingleChildScrollView(
+                            padding: EdgeInsets.only(
+                                bottom:
+                                    MediaQuery.of(context).viewInsets.bottom),
+                            child: Column(
+                              children: [
+                                TextFormField(
+                                  controller: _name,
+                                  enabled: !_prefilledName,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Control Unit name'),
+                                  validator: (v) => (v == null || v.isEmpty)
+                                      ? 'Enter name'
+                                      : null,
+                                ),
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                  controller: _controlUnitId,
+                                  enabled:
+                                      !_prefilledControlUnitId && !_isEditing,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Control unit ID'),
+                                  validator: (v) => (v == null || v.isEmpty)
+                                      ? 'Enter control unit id'
+                                      : null,
+                                ),
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                  controller: _macAddress,
+                                  enabled: !_prefilledMac,
+                                  decoration: const InputDecoration(
+                                      labelText: 'MAC address'),
+                                  validator: (v) {
+                                    final val = v?.trim() ?? '';
+                                    if (val.isEmpty) return 'Enter MAC address';
+                                    final norm = val
+                                        .replaceAll(RegExp(r'[^A-Fa-f0-9]'), '')
+                                        .toLowerCase();
+                                    if (norm.isEmpty)
+                                      return 'Enter valid MAC address';
+                                    if (_existingMacs.isNotEmpty) {
+                                      final own = widget
+                                          .existingData?['macAddress']
+                                          ?.toString()
+                                          .replaceAll(
+                                              RegExp(r'[^A-Fa-f0-9]'), '')
+                                          .toLowerCase();
+                                      for (final e in _existingMacs) {
+                                        if (own != null &&
+                                            own == e &&
+                                            e == norm) continue;
+                                        if (e == norm)
+                                          return 'MAC address already exists';
+                                        if (e.contains(norm) ||
+                                            norm.contains(e))
+                                          return 'MAC address too similar to existing device';
+                                      }
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                // Sprayer dropdown + add button (mirror Tractor add)
+                                const SizedBox(height: 8),
+                                Consumer(builder: (context, ref, _) {
+                                  final userId = ref
+                                          .read(authServiceProvider)
+                                          .currentUserId ??
+                                      '';
+                                  final eqAsync =
+                                      ref.watch(sprayersProvider(userId));
+                                  return eqAsync.when(
+                                      data: (items) {
+                                        final sprayers = items
+                                            .where(
+                                                (e) => e.category == 'sprayer')
+                                            .toList();
+                                        final dropdown = DropdownButtonFormField<String?>(
+                                          value: _linkedSprayerId,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Linked sprayer'),
+                                          items: [
+                                            const DropdownMenuItem(
+                                                value: null,
+                                                child: Text('None')),
+                                            ...sprayers.map((e) => DropdownMenuItem(
+                                                value: e.id,
+                                                child: Text(
+                                                    '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
+                                          ],
+                                          onChanged: _prefilledLinkedSprayer
+                                              ? null
+                                              : (v) => setState(
+                                                  () => _linkedSprayerId = v),
+                                          validator: (v) {
+                                            if (v == null || v.isEmpty)
+                                              return 'Select a linked sprayer';
+                                            return null;
+                                          },
+                                        );
 
-                        return Row(
-                          children: [
-                            Expanded(child: dropdown),
-                            const SizedBox(width: 8),
-                            IconButton(
-                              tooltip: 'Add tractor',
-                              icon: const Icon(Icons.add_circle_outline),
-                              onPressed: () async {
-                                // Navigate to add tractor screen and refresh tractors list on return
-                                await Navigator.of(context)
-                                    .pushNamed('/create_tractor');
-                                // Invalidate provider so the new tractor appears in dropdown
-                                ref.invalidate(tractorsProvider(userId));
-                              },
+                                        return Row(
+                                          children: [
+                                            Expanded(child: dropdown),
+                                            const SizedBox(width: 8),
+                                            IconButton(
+                                              tooltip: 'Add sprayer',
+                                              icon: const Icon(
+                                                  Icons.add_circle_outline),
+                                              onPressed: () async {
+                                                await Navigator.of(context)
+                                                    .pushNamed('/create_sprayer');
+                                                ref.invalidate(
+                                                    sprayersProvider(userId));
+                                              },
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                      loading: () =>
+                                          const CircularProgressIndicator(),
+                                      error: (e, st) => const SizedBox());
+                                }),
+                                const SizedBox(height: 8),
+                                // Tractor dropdown + add button
+                                Consumer(builder: (context, ref, _) {
+                                  final userId = ref
+                                          .read(authServiceProvider)
+                                          .currentUserId ??
+                                      '';
+                                  final eqAsync =
+                                      ref.watch(tractorsProvider(userId));
+                                  return eqAsync.when(
+                                      data: (items) {
+                                        final tractors = items
+                                            .where(
+                                                (e) => e.category == 'tractor')
+                                            .toList();
+                                        final dropdown =
+                                            DropdownButtonFormField<String?>(
+                                          value: _linkedTractorId,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Linked tractor'),
+                                          items: [
+                                            const DropdownMenuItem(
+                                                value: null,
+                                                child: Text('None')),
+                                            ...tractors.map((e) => DropdownMenuItem(
+                                                value: e.id,
+                                                child: Text(
+                                                    '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
+                                          ],
+                                          onChanged: _prefilledLinkedTractor
+                                              ? null
+                                              : (v) => setState(
+                                                  () => _linkedTractorId = v),
+                                          validator: (v) {
+                                            if (v == null || v.isEmpty)
+                                              return 'Select a linked tractor';
+                                            return null;
+                                          },
+                                        );
+
+                                        return Row(
+                                          children: [
+                                            Expanded(child: dropdown),
+                                            const SizedBox(width: 8),
+                                            IconButton(
+                                              tooltip: 'Add tractor',
+                                              icon: const Icon(
+                                                  Icons.add_circle_outline),
+                                              onPressed: () async {
+                                                await Navigator.of(context)
+                                                    .pushNamed(
+                                                        '/create_tractor');
+                                                ref.invalidate(
+                                                    tractorsProvider(userId));
+                                              },
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                      loading: () =>
+                                          const CircularProgressIndicator(),
+                                      error: (e, st) => const SizedBox());
+                                }),
+                                const SizedBox(height: 8),
+                                // Plot dropdown
+                                Consumer(builder: (context, ref, _) {
+                                  final userId = ref
+                                          .read(authServiceProvider)
+                                          .currentUserId ??
+                                      '';
+                                  final plotsAsync = ref.watch(
+                                      fm_providers.plotsListProvider(userId));
+                                  return plotsAsync.when(
+                                      data: (items) {
+                                        return DropdownButtonFormField<String?>(
+                                          value: _linkedPlotId,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Default plot'),
+                                          items: [
+                                            const DropdownMenuItem(
+                                                value: null,
+                                                child: Text('None')),
+                                            ...items.map((p) =>
+                                                DropdownMenuItem(
+                                                    value: p.id,
+                                                    child: Text(p.name)))
+                                          ],
+                                          onChanged: _prefilledLinkedPlot
+                                              ? null
+                                              : (v) => setState(
+                                                  () => _linkedPlotId = v),
+                                          validator: (v) {
+                                            if (v == null || v.isEmpty)
+                                              return 'Select a default plot';
+                                            return null;
+                                          },
+                                        );
+                                      },
+                                      loading: () =>
+                                          const CircularProgressIndicator(),
+                                      error: (e, st) => const SizedBox());
+                                }),
+                                const SizedBox(height: 8),
+                                DropdownButtonFormField<String>(
+                                  value: _sensorType,
+                                  decoration: const InputDecoration(
+                                      labelText: 'Sensor type'),
+                                  items: const [
+                                    DropdownMenuItem(
+                                        value: 'lidar', child: Text('LIDAR')),
+                                    DropdownMenuItem(
+                                        value: 'ultrasonic',
+                                        child: Text('Ultrasonic')),
+                                  ],
+                                  onChanged: _prefilledSensorType
+                                      ? null
+                                      : (v) {
+                                          final nv = v ?? 'lidar';
+                                          setState(() {
+                                            _sensorType = nv;
+                                            if (_sensorType == 'lidar') {
+                                              _ultrasonicDistance.clear();
+                                            } else {
+                                              _mountHeightOfLidar.clear();
+                                              _lidarNozzleDistance.clear();
+                                            }
+                                          });
+                                        },
+                                  validator: (v) => (v == null || v.isEmpty)
+                                      ? 'Select sensor type'
+                                      : null,
+                                  disabledHint: _prefilledSensorType
+                                      ? Text(_sensorType.toUpperCase())
+                                      : null,
+                                ),
+                                const SizedBox(height: 8),
+                              ],
                             ),
-                          ],
-                        );
-                      },
-                      loading: () => const CircularProgressIndicator(),
-                      error: (e, st) => const SizedBox());
-                }),
-                const SizedBox(height: 8),
-                // Plot dropdown
-                Consumer(builder: (context, ref, _) {
-                  final userId =
-                      ref.read(authServiceProvider).currentUserId ?? '';
-                  final plotsAsync =
-                      ref.watch(fm_providers.plotsListProvider(userId));
-                  return plotsAsync.when(
-                      data: (items) {
-                        return DropdownButtonFormField<String?>(
-                          value: _linkedPlotId,
-                          decoration:
-                              const InputDecoration(labelText: 'Default plot'),
-                          items: [
-                            const DropdownMenuItem(
-                                value: null, child: Text('None')),
-                            ...items.map((p) => DropdownMenuItem(
-                                value: p.id, child: Text(p.name)))
-                          ],
-                          onChanged: _prefilledLinkedPlot
-                              ? null
-                              : (v) => setState(() => _linkedPlotId = v),
-                          validator: (v) {
-                            if (v == null || v.isEmpty)
-                              return 'Select a default plot';
-                            return null;
-                          },
-                          disabledHint:
-                              _prefilledLinkedPlot && _linkedPlotId != null
-                                  ? () {
-                                      final found = items.isNotEmpty
-                                          ? items.firstWhere(
-                                              (s) => s.id == _linkedPlotId,
-                                              orElse: () => items.first)
-                                          : null;
-                                      final display = found != null
-                                          ? found.name
-                                          : _linkedPlotId;
-                                      return Text('Linked: ${display ?? ''}');
-                                    }()
-                                  : null,
-                        );
-                      },
-                      loading: () => const CircularProgressIndicator(),
-                      error: (e, st) => const SizedBox());
-                }),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: _sensorType,
-                  decoration: const InputDecoration(labelText: 'Sensor type'),
-                  items: const [
-                    DropdownMenuItem(value: 'lidar', child: Text('LIDAR')),
-                    DropdownMenuItem(
-                        value: 'ultrasonic', child: Text('Ultrasonic')),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Page 1: lidar-nozzle distance (image + field)
+                    _KeepAlive(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Form(
+                          key: _pageKeys[1],
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(
+                                height: 200,
+                                child: Image.asset(
+                                  'assets/lidar_nozzle_distance.png',
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (ctx, err, st) => const Center(
+                                    child: Icon(Icons.image_not_supported,
+                                        size: 48),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _lidarNozzleDistance,
+                                    enabled: !_prefilledLidarNozzle,
+                                    decoration: const InputDecoration(
+                                        labelText:
+                                            'Distance b/w sensor and nozzle center'),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                            decimal: true),
+                                    validator: (v) => (v == null || v.isEmpty)
+                                        ? 'Enter distance'
+                                        : null,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                SizedBox(
+                                  width: 110,
+                                  child: DropdownButtonFormField<String>(
+                                    value: _lidarNozzleDistanceUnit,
+                                    items: const [
+                                      DropdownMenuItem(value: 'm', child: Text('m')),
+                                      DropdownMenuItem(value: 'in', child: Text('in')),
+                                      DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                    ],
+                                    onChanged: (v) => setState(() => _lidarNozzleDistanceUnit = v ?? 'm'),
+                                    decoration: const InputDecoration(labelText: 'Unit'),
+                                  ),
+                                )
+                              ]),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Page 2: mount height of lidar (image + field)
+                    _KeepAlive(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Form(
+                          key: _pageKeys[2],
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(
+                                height: 200,
+                                child: Image.asset(
+                                  'assets/mount_height_lidar.png',
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (ctx, err, st) => const Center(
+                                    child: Icon(Icons.image_not_supported,
+                                        size: 48),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _mountHeightOfLidar,
+                                    enabled: !_prefilledMountHeight,
+                                    decoration: const InputDecoration(
+                                        labelText: 'Mount height of LIDAR'),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                            decimal: true),
+                                    validator: (v) => null,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                SizedBox(
+                                  width: 110,
+                                  child: DropdownButtonFormField<String>(
+                                    value: _mountHeightUnit,
+                                    items: const [
+                                      DropdownMenuItem(value: 'm', child: Text('m')),
+                                      DropdownMenuItem(value: 'in', child: Text('in')),
+                                      DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                    ],
+                                    onChanged: (v) => setState(() => _mountHeightUnit = v ?? 'm'),
+                                    decoration: const InputDecoration(labelText: 'Unit'),
+                                  ),
+                                )
+                              ]),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Page 3: ultrasonic distance (image + field)
+                    _KeepAlive(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Form(
+                          key: _pageKeys[3],
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(
+                                height: 200,
+                                child: Image.asset(
+                                  'assets/ultrasonic_distance.png',
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (ctx, err, st) => const Center(
+                                    child: Icon(Icons.image_not_supported,
+                                        size: 48),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Row(children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _ultrasonicDistance,
+                                    enabled: !_prefilledUltrasonic,
+                                    decoration: const InputDecoration(
+                                        labelText:
+                                            'Distance of US sensor from center line'),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                            decimal: true),
+                                    validator: (v) => null,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                SizedBox(
+                                  width: 110,
+                                  child: DropdownButtonFormField<String>(
+                                    value: _ultrasonicDistanceUnit,
+                                    items: const [
+                                      DropdownMenuItem(value: 'm', child: Text('m')),
+                                      DropdownMenuItem(value: 'in', child: Text('in')),
+                                      DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                    ],
+                                    onChanged: (v) => setState(() => _ultrasonicDistanceUnit = v ?? 'm'),
+                                    decoration: const InputDecoration(labelText: 'Unit'),
+                                  ),
+                                )
+                              ]),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
-                  onChanged: _prefilledSensorType
-                      ? null
-                      : (v) {
-                          final nv = v ?? 'lidar';
-                          setState(() {
-                            _sensorType = nv;
-                            // Clear the hidden fields when switching
-                            if (_sensorType == 'lidar') {
-                              _ultrasonicDistance.clear();
-                            } else {
-                              _mountHeightOfLidar.clear();
-                              _lidarNozzleDistance.clear();
-                            }
-                          });
-                        },
-                  validator: (v) =>
-                      (v == null || v.isEmpty) ? 'Select sensor type' : null,
-                  disabledHint: _prefilledSensorType
-                      ? Text(_sensorType.toUpperCase())
-                      : null,
                 ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _lidarNozzleDistance,
-                  enabled: !_prefilledLidarNozzle,
-                  decoration: const InputDecoration(
-                      labelText: 'Distance b/w sensor and nozzle center (m)'),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) =>
-                      (v == null || v.isEmpty) ? 'Enter distance' : null,
+              ),
+
+              // Navigation buttons
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12.0, vertical: 12.0),
+                child: Row(
+                  children: [
+                    if (_currentPage > 0)
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            final prev = _currentPage - 1;
+                            _pageController.animateToPage(prev,
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeInOut);
+                          },
+                          child: const Text('Back'),
+                        ),
+                      ),
+                    if (_currentPage > 0) const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton(
+                        onPressed: _isSaving
+                            ? null
+                            : () async {
+                                // validate current page
+                                final key = _pageKeys[_currentPage];
+                                if (!(key.currentState?.validate() ?? false))
+                                  return;
+                                if (_currentPage < totalPages - 1) {
+                                  final next = _currentPage + 1;
+                                  _pageController.animateToPage(next,
+                                      duration:
+                                          const Duration(milliseconds: 250),
+                                      curve: Curves.easeInOut);
+                                  return;
+                                }
+
+                                debugPrint(
+                                    'CreateControlUnitScreen: Save pressed, currentPage=$_currentPage');
+                                FocusScope.of(context).unfocus();
+                                // validate all pages with logging
+                                for (var i = 0; i < totalPages; i++) {
+                                  debugPrint(
+                                      'CreateControlUnitScreen: validating page $i');
+                                  final k = _pageKeys[i];
+                                  final valid =
+                                      k.currentState?.validate() ?? false;
+                                  if (!valid) {
+                                    final vals = {
+                                      0: _name.text,
+                                      1: _lidarNozzleDistance.text,
+                                      2: _mountHeightOfLidar.text,
+                                      3: _ultrasonicDistance.text,
+                                    };
+                                    debugPrint(
+                                        'CreateControlUnitScreen: page $i invalid, values=$vals');
+                                    _pageController.animateToPage(i,
+                                        duration:
+                                            const Duration(milliseconds: 250),
+                                        curve: Curves.easeInOut);
+                                    return;
+                                  }
+                                }
+
+                                // final save
+                                setState(() => _isSaving = true);
+                                final ctrl =
+                                    ref.read(equipmentControllerProvider);
+                                final navigator = Navigator.of(context);
+                                final currentUserId =
+                                    ref.read(authServiceProvider).currentUserId;
+                                // Parse numeric inputs and convert from inches to
+                                // meters when the corresponding unit selector is 'in'.
+                                double? parsedLidar = _lidarNozzleDistance.text.isEmpty
+                                    ? null
+                                    : double.tryParse(_lidarNozzleDistance.text);
+                                if (parsedLidar != null) {
+                                  if (_lidarNozzleDistanceUnit == 'in') {
+                                    parsedLidar = parsedLidar * 0.0254;
+                                  } else if (_lidarNozzleDistanceUnit == 'ft') {
+                                    parsedLidar = parsedLidar * 0.3048;
+                                  }
+                                }
+
+                                double? parsedMount = _mountHeightOfLidar.text.isEmpty
+                                    ? null
+                                    : double.tryParse(_mountHeightOfLidar.text);
+                                if (parsedMount != null) {
+                                  if (_mountHeightUnit == 'in') {
+                                    parsedMount = parsedMount * 0.0254;
+                                  } else if (_mountHeightUnit == 'ft') {
+                                    parsedMount = parsedMount * 0.3048;
+                                  }
+                                }
+
+                                double? parsedUltra = _ultrasonicDistance.text.isEmpty
+                                    ? null
+                                    : double.tryParse(_ultrasonicDistance.text);
+                                if (parsedUltra != null) {
+                                  if (_ultrasonicDistanceUnit == 'in') {
+                                    parsedUltra = parsedUltra * 0.0254;
+                                  } else if (_ultrasonicDistanceUnit == 'ft') {
+                                    parsedUltra = parsedUltra * 0.3048;
+                                  }
+                                }
+
+                                final data = {
+                                  'category': 'control_unit',
+                                  'name': _name.text,
+                                  'userId': currentUserId,
+                                  'status': 'vacant',
+                                  'controlUnitId': _controlUnitId.text.isEmpty
+                                      ? null
+                                      : _controlUnitId.text,
+                                  'macAddress': _macAddress.text.isEmpty
+                                      ? null
+                                      : _macAddress.text,
+                                  'linkedSprayerId': _linkedSprayerId,
+                                  'linkedTractorId': _linkedTractorId,
+                                  'linkedPlotId': _linkedPlotId,
+                                  'lidarNozzleDistance':
+                                        parsedLidar,
+                                      'mountingHeight': parsedMount,
+                                      'ultrasonicDistance': parsedUltra,
+                                };
+
+                                try {
+                                  if (_isEditing &&
+                                      (widget.existingData?.containsKey('id') ==
+                                          true)) {
+                                    final existingId =
+                                        widget.existingData!['id']?.toString();
+                                    if (existingId != null &&
+                                        existingId.isNotEmpty) {
+                                      await ctrl.update(existingId, data);
+                                    } else {
+                                      final id = DateTime.now()
+                                          .millisecondsSinceEpoch
+                                          .toString();
+                                      data['id'] = id;
+                                      await ctrl.add(data);
+                                    }
+                                  } else {
+                                    final id = DateTime.now()
+                                        .millisecondsSinceEpoch
+                                        .toString();
+                                    data['id'] = id;
+                                    await ctrl.add(data);
+                                  }
+
+                                  if (!mounted) return;
+                                  if (mounted)
+                                    setState(() => _isSaving = false);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                          content: Text(_isEditing
+                                              ? 'Control unit updated'
+                                              : 'Control unit added')));
+                                  await Future.delayed(
+                                      const Duration(milliseconds: 700));
+                                  if (!mounted) return;
+                                  navigator.pop(true);
+                                } catch (e) {
+                                  if (e is ApiException) {
+                                    final err = ApiError.fromResponse(
+                                        e.statusCode, e.body);
+                                    showApiErrorSnackBar(context, err);
+                                  } else {
+                                    showGenericErrorSnackBar(
+                                        context, e.toString());
+                                  }
+                                } finally {
+                                  if (mounted)
+                                    setState(() => _isSaving = false);
+                                }
+                              },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 24.0, vertical: 12.0),
+                          child: Text(
+                              _currentPage < totalPages - 1 ? 'Next' : 'Save'),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                if (_sensorType == 'lidar') ...[
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _mountHeightOfLidar,
-                    enabled: !_prefilledMountHeight,
-                    decoration: const InputDecoration(
-                        labelText: 'Mount height of LIDAR (m)'),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    // mount height is allowed to be empty per requirements
-                    validator: (v) => null,
-                  ),
-                ] else ...[
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _ultrasonicDistance,
-                    enabled: !_prefilledUltrasonic,
-                    decoration: const InputDecoration(
-                        labelText:
-                            'Distance of US sensor from center line (m)'),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    // ultrasonic distance is allowed to be empty per requirements
-                    validator: (v) => null,
-                  ),
-                ],
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (!_formKey.currentState!.validate()) return;
-                    final ctrl = ref.read(equipmentControllerProvider);
-                    final navigator = Navigator.of(context);
-                    final currentUserId =
-                        ref.read(authServiceProvider).currentUserId;
-
-                    // Build payload. For updates we will reuse the existing id.
-                    final data = {
-                      'category': 'control_unit',
-                      'name': _name.text,
-                      // always assign to current authenticated user
-                      'userId': currentUserId,
-                      'status': 'vacant',
-                      'controlUnitId': _controlUnitId.text.isEmpty
-                          ? null
-                          : _controlUnitId.text,
-                      'macAddress':
-                          _macAddress.text.isEmpty ? null : _macAddress.text,
-                      'linkedSprayerId': _linkedSprayerId,
-                      'linkedTractorId': _linkedTractorId,
-                      'linkedPlotId': _linkedPlotId,
-                      'lidarNozzleDistance': _lidarNozzleDistance.text.isEmpty
-                          ? null
-                          : double.tryParse(_lidarNozzleDistance.text),
-                      'mountingHeight': _mountHeightOfLidar.text.isEmpty
-                          ? null
-                          : double.tryParse(_mountHeightOfLidar.text),
-                      'ultrasonicDistance': _ultrasonicDistance.text.isEmpty
-                          ? null
-                          : double.tryParse(_ultrasonicDistance.text),
-                    };
-
-                    try {
-                      if (_isEditing &&
-                          (widget.existingData?.containsKey('id') == true)) {
-                        final existingId =
-                            widget.existingData!['id']?.toString();
-                        if (existingId != null && existingId.isNotEmpty) {
-                          await ctrl.update(existingId, data);
-                        } else {
-                          // fallback to add if id not available
-                          final id =
-                              DateTime.now().millisecondsSinceEpoch.toString();
-                          data['id'] = id;
-                          await ctrl.add(data);
-                        }
-                      } else {
-                        final id =
-                            DateTime.now().millisecondsSinceEpoch.toString();
-                        data['id'] = id;
-                        await ctrl.add(data);
-                      }
-
-                      if (!mounted) return;
-                      // signal success to caller so list screens can react
-                      navigator.pop(true);
-                    } catch (e) {
-                      // parse ApiException body for user-friendly message
-                      String userMessage;
-                      if (e is ApiException && e.body != null) {
-                        try {
-                          final parsed =
-                              json.decode(e.body!) as Map<String, dynamic>;
-                          final msgs = <String>[];
-                          parsed.forEach((k, v) {
-                            if (v is List && v.isNotEmpty) {
-                              msgs.add('${k}: ${v.first}');
-                            } else if (v is String) {
-                              msgs.add('${k}: $v');
-                            } else {
-                              msgs.add('$k: ${v.toString()}');
-                            }
-                          });
-                          userMessage = msgs.join(' • ');
-                        } catch (_) {
-                          userMessage = e.message;
-                        }
-                      } else {
-                        userMessage = e.toString();
-                      }
-
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(userMessage)),
-                      );
-                    }
-                  },
-                  child: const Padding(
-                    padding:
-                        EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-                    child: Text('Save'),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ),
+          if (_isSaving)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black45,
+                child: const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+            ),
+        ]),
       ),
     );
   }

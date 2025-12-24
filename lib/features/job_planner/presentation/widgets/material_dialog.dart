@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import '../../../fertilizers/presentation/providers/fertilizers_providers.dart'
     as fert_provs;
 
@@ -26,6 +29,7 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
       TextEditingController(text: existing?['description'] as String? ?? '');
   final addNameCtrl = TextEditingController();
   final addQtyCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
   String? selectedIdFromList;
   bool adding = false;
 
@@ -41,185 +45,220 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                     ? 'Add Material Mix'
                     : 'Edit Material Mix'),
                 content: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Mix name & description
-                      TextFormField(
-                          controller: nameCtrl,
-                          decoration:
-                              const InputDecoration(labelText: 'Mix Name')),
-                      TextFormField(
-                          controller: descCtrl,
-                          decoration:
-                              const InputDecoration(labelText: 'Description')),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          const Text('Fertilizers',
-                              style: TextStyle(fontWeight: FontWeight.w600)),
-                          const Spacer(),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      // Inline fertilizer list
-                      allFertsAsync.when(
-                        data: (allFerts) {
-                          // prepare name lookup
-                          final fertNameById = <String, String>{};
-                          final fertNames = <String>[];
-                          for (final f in allFerts) {
-                            final id = (f['id']?.toString() ??
-                                f['pk']?.toString() ??
-                                '');
-                            final name = f['name']?.toString() ?? id;
-                            fertNameById[id] = name;
-                            fertNames.add(name);
-                          }
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Mix name & description
+                        TextFormField(
+                            controller: nameCtrl,
+                            decoration:
+                                const InputDecoration(labelText: 'Mix Name'),
+                            maxLength: 120,
+                            validator: (v) => (v == null || v.trim().isEmpty)
+                                ? 'Enter mix name'
+                                : null),
+                        TextFormField(
+                            controller: descCtrl,
+                            decoration: const InputDecoration(
+                                labelText: 'Description')),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            const Text('Fertilizers',
+                                style: TextStyle(fontWeight: FontWeight.w600)),
+                            const Spacer(),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Inline fertilizer list
+                        allFertsAsync.when(
+                          data: (allFerts) {
+                            // prepare name lookup
+                            final fertNameById = <String, String>{};
+                            final fertNames = <String>[];
+                            for (final f in allFerts) {
+                              final id = (f['id']?.toString() ??
+                                  f['pk']?.toString() ??
+                                  '');
+                              final name = f['name']?.toString() ?? id;
+                              fertNameById[id] = name;
+                              fertNames.add(name);
+                            }
 
-                          // Inline add controls (use outer-scope controllers/vars so their
-                          // state persists across rebuilds and we don't shadow them)
+                            // Inline add controls (use outer-scope controllers/vars so their
+                            // state persists across rebuilds and we don't shadow them)
 
-                          return Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (currentFerts.isEmpty)
-                                const Text('No fertilizers added'),
-                              if (currentFerts.isNotEmpty)
-                                ...currentFerts.map((e) {
-                                  final display = (e['name']?.toString() ??
-                                          (e['fertilizer'] != null
-                                              ? (fertNameById[e['fertilizer']
-                                                      ?.toString()] ??
-                                                  e['fertilizer']?.toString())
-                                              : 'Unknown'))
-                                      .toString();
-                                  return ListTile(
-                                    title: Text(display),
-                                    subtitle:
-                                        Text('Qty: ${e['quantity'] ?? ''}'),
-                                    trailing: IconButton(
-                                        icon: const Icon(Icons.delete),
-                                        onPressed: () => setStateOuter(
-                                            () => currentFerts.remove(e))),
-                                  );
-                                }).toList(),
-                              const SizedBox(height: 8),
-                              // Add fertilizer inline: Autocomplete + quantity + Add button
-                              Row(children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: Autocomplete<String>(
-                                    optionsBuilder: (textEditingValue) {
-                                      final input =
-                                          textEditingValue.text.toLowerCase();
-                                      if (input.isEmpty)
-                                        return const Iterable<String>.empty();
-                                      return fertNames.where((n) =>
-                                          n.toLowerCase().contains(input));
-                                    },
-                                    displayStringForOption: (opt) => opt,
-                                    fieldViewBuilder: (context, controller,
-                                        focusNode, onFieldSubmitted) {
-                                      controller.text = addNameCtrl.text;
-                                      controller.selection =
-                                          TextSelection.fromPosition(
-                                              TextPosition(
-                                                  offset:
-                                                      controller.text.length));
-                                      controller.addListener(() {
-                                        addNameCtrl.text = controller.text;
-                                      });
-                                      return TextFormField(
-                                          controller: controller,
-                                          focusNode: focusNode,
-                                          decoration: const InputDecoration(
-                                              labelText:
-                                                  'Fertilizer (type or pick suggestion)'));
-                                    },
-                                    onSelected: (selection) {
-                                      final found = allFerts.firstWhere(
-                                          (f) =>
-                                              (f['name']?.toString() ?? '') ==
-                                              selection,
-                                          orElse: () => {});
-                                      final id = found['id']?.toString() ??
-                                          found['pk']?.toString();
-                                      selectedIdFromList = id?.toString();
-                                      addNameCtrl.text = selection;
-                                    },
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (currentFerts.isEmpty)
+                                  const Text('No fertilizers added'),
+                                if (currentFerts.isNotEmpty)
+                                  ...currentFerts.map((e) {
+                                    final display = (e['name']?.toString() ??
+                                            (e['fertilizer'] != null
+                                                ? (fertNameById[e['fertilizer']
+                                                        ?.toString()] ??
+                                                    e['fertilizer']?.toString())
+                                                : 'Unknown'))
+                                        .toString();
+                                    return ListTile(
+                                      title: Text(display),
+                                      subtitle:
+                                          Text('Qty: ${e['quantity'] ?? ''}'),
+                                      trailing: IconButton(
+                                          icon: const Icon(Icons.delete),
+                                          onPressed: () => setStateOuter(
+                                              () => currentFerts.remove(e))),
+                                    );
+                                  }).toList(),
+                                const SizedBox(height: 8),
+                                // Add fertilizer inline: Autocomplete + quantity + Add button
+                                Row(children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: Autocomplete<String>(
+                                      optionsBuilder: (textEditingValue) {
+                                        final input =
+                                            textEditingValue.text.toLowerCase();
+                                        if (input.isEmpty)
+                                          return const Iterable<String>.empty();
+                                        return fertNames.where((n) =>
+                                            n.toLowerCase().contains(input));
+                                      },
+                                      displayStringForOption: (opt) => opt,
+                                      fieldViewBuilder: (context, controller,
+                                          focusNode, onFieldSubmitted) {
+                                        controller.text = addNameCtrl.text;
+                                        controller.selection =
+                                            TextSelection.fromPosition(
+                                                TextPosition(
+                                                    offset: controller
+                                                        .text.length));
+                                        controller.addListener(() {
+                                          addNameCtrl.text = controller.text;
+                                        });
+                                        return TextFormField(
+                                            controller: controller,
+                                            focusNode: focusNode,
+                                            decoration: const InputDecoration(
+                                                labelText:
+                                                    'Fertilizer (type or pick suggestion)'));
+                                      },
+                                      onSelected: (selection) {
+                                        final found = allFerts.firstWhere(
+                                            (f) =>
+                                                (f['name']?.toString() ?? '') ==
+                                                selection,
+                                            orElse: () => {});
+                                        final id = found['id']?.toString() ??
+                                            found['pk']?.toString();
+                                        selectedIdFromList = id?.toString();
+                                        addNameCtrl.text = selection;
+                                      },
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 1,
-                                  child: TextFormField(
-                                      controller: addQtyCtrl,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Qty'),
-                                      keyboardType:
-                                          TextInputType.numberWithOptions(
-                                              decimal: true)),
-                                ),
-                                const SizedBox(width: 8),
-                                ElevatedButton(
-                                    onPressed: () async {
-                                      if (adding) return;
-                                      setStateOuter(() {
-                                        adding = true;
-                                      });
-                                      try {
-                                        var q = double.tryParse(
-                                                addQtyCtrl.text.trim()) ??
-                                            0.0;
-                                        dynamic fertValue;
-                                        if (selectedIdFromList != null) {
-                                          fertValue = (int.tryParse(
-                                                  selectedIdFromList!) ??
-                                              selectedIdFromList!);
-                                        } else {
-                                          final nameVal =
-                                              addNameCtrl.text.trim();
-                                          if (nameVal.isNotEmpty) {
-                                            try {
-                                              final controller = ref.read(fert_provs
-                                                  .fertilizerControllerProvider);
-                                              final createdF = await controller
-                                                  .createFertilizer(
-                                                      {'name': nameVal});
-                                              fertValue = (createdF['id'] ??
-                                                      createdF['pk']) ??
-                                                  createdF;
-                                            } catch (_) {
-                                              fertValue = nameVal;
-                                            }
-                                          } else {
-                                            fertValue = addNameCtrl.text.trim();
-                                          }
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 1,
+                                    child: TextFormField(
+                                        controller: addQtyCtrl,
+                                        decoration: const InputDecoration(
+                                            labelText: 'Qty'),
+                                        keyboardType:
+                                            TextInputType.numberWithOptions(
+                                                decimal: true)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton(
+                                      onPressed: () async {
+                                        if (adding) return;
+                                        // Validate inline qty before adding
+                                        final q = double.tryParse(
+                                            addQtyCtrl.text.trim());
+                                        if (q == null || q <= 0) {
+                                          ScaffoldMessenger.of(ctx)
+                                              .showSnackBar(const SnackBar(
+                                                  content: Text(
+                                                      'Enter valid qty (> 0)')));
+                                          return;
                                         }
                                         setStateOuter(() {
-                                          currentFerts.add({
-                                            'fertilizer': fertValue,
-                                            'quantity': q,
-                                            'name': addNameCtrl.text.trim()
+                                          adding = true;
+                                        });
+                                        try {
+                                          dynamic fertValue;
+                                          if (selectedIdFromList != null) {
+                                            fertValue = (int.tryParse(
+                                                    selectedIdFromList!) ??
+                                                selectedIdFromList!);
+                                          } else {
+                                            final nameVal =
+                                                addNameCtrl.text.trim();
+                                            if (nameVal.isNotEmpty) {
+                                              try {
+                                                final controller = ref.read(
+                                                    fert_provs
+                                                        .fertilizerControllerProvider);
+                                                final createdF =
+                                                    await controller
+                                                        .createFertilizer(
+                                                            {'name': nameVal});
+                                                fertValue = (createdF['id'] ??
+                                                        createdF['pk']) ??
+                                                    createdF;
+                                              } catch (e, st) {
+                                                debugPrint(
+                                                    'material_dialog.createFertilizer error: $e\n$st');
+                                                fertValue = nameVal;
+                                              }
+                                            } else {
+                                              fertValue =
+                                                  addNameCtrl.text.trim();
+                                            }
+                                          }
+                                          setStateOuter(() {
+                                            currentFerts.add({
+                                              'fertilizer': fertValue,
+                                              'quantity': q,
+                                              'name': addNameCtrl.text.trim()
+                                            });
+                                            addNameCtrl.clear();
+                                            addQtyCtrl.clear();
+                                            selectedIdFromList = null;
                                           });
-                                          addNameCtrl.clear();
-                                          addQtyCtrl.clear();
-                                          selectedIdFromList = null;
-                                        });
-                                      } finally {
-                                        setStateOuter(() {
-                                          adding = false;
-                                        });
-                                      }
-                                    },
-                                    child: const Text('Add')),
-                              ])
-                            ],
-                          );
-                        },
-                        loading: () {
-                          return Column(
+                                        } finally {
+                                          setStateOuter(() {
+                                            adding = false;
+                                          });
+                                        }
+                                      },
+                                      child: const Text('Add')),
+                                ])
+                              ],
+                            );
+                          },
+                          loading: () {
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (currentFerts.isEmpty)
+                                  const Text('No fertilizers added'),
+                                if (currentFerts.isNotEmpty)
+                                  ...currentFerts
+                                      .map((e) => ListTile(
+                                          title: Text(e['name']?.toString() ??
+                                              e['fertilizer']?.toString() ??
+                                              ''),
+                                          subtitle: Text(
+                                              'Qty: ${e['quantity'] ?? ''}')))
+                                      .toList(),
+                              ],
+                            );
+                          },
+                          error: (e, st) => Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (currentFerts.isEmpty)
@@ -234,26 +273,10 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                                             'Qty: ${e['quantity'] ?? ''}')))
                                     .toList(),
                             ],
-                          );
-                        },
-                        error: (e, st) => Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (currentFerts.isEmpty)
-                              const Text('No fertilizers added'),
-                            if (currentFerts.isNotEmpty)
-                              ...currentFerts
-                                  .map((e) => ListTile(
-                                      title: Text(e['name']?.toString() ??
-                                          e['fertilizer']?.toString() ??
-                                          ''),
-                                      subtitle:
-                                          Text('Qty: ${e['quantity'] ?? ''}')))
-                                  .toList(),
-                          ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 actions: [
@@ -297,8 +320,13 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                           Navigator.of(ctx).pop(result);
                         } catch (e) {
                           Navigator.of(ctx).pop();
-                          showPolishedError(parentCtx, e,
-                              fallback: 'Failed to create mix');
+                          if (e is ApiException) {
+                            final err =
+                                ApiError.fromResponse(e.statusCode, e.body);
+                            showApiErrorSnackBar(parentCtx, err);
+                          } else {
+                            showGenericErrorSnackBar(parentCtx, e.toString());
+                          }
                         }
                       },
                       child: const Text('OK'))

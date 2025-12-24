@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import 'package:simdaas/core/services/api_service.dart';
+import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 
 // NOTE: This file was originally Firestore-backed. It now uses the REST API
@@ -40,8 +42,7 @@ class UsersController {
         }
       }
       if (lastResp == null) {
-        // ignore: avoid_print
-        print('UsersController.listUsers error: $lastEx');
+        debugPrint('UsersController.listUsers error: $lastEx');
         throw lastEx ?? Exception('Unknown error');
       }
       if (lastResp.statusCode != 200) return [];
@@ -57,8 +58,7 @@ class UsersController {
       return out;
     } catch (e, st) {
       // Log and surface error to callers
-      // ignore: avoid_print
-      print('UsersController.listUsers error: $e\n$st');
+      debugPrint('UsersController.listUsers error: $e\n$st');
       rethrow;
     }
   }
@@ -92,8 +92,7 @@ class UsersController {
         }
       }
       if (lastResp == null) {
-        // ignore: avoid_print
-        print(
+        debugPrint(
             'UsersController.getUserById: no successful response for $id: $lastEx');
         return null;
       }
@@ -115,8 +114,7 @@ class UsersController {
       }
       return null;
     } catch (e, st) {
-      // ignore: avoid_print
-      print('UsersController.getUserById error: $e\n$st');
+      debugPrint('UsersController.getUserById error: $e\n$st');
       return null;
     }
   }
@@ -164,8 +162,13 @@ class UsersController {
       return id;
     }
     ref.invalidate(usersListProvider);
-    throw Exception(
-        'Create user failed: ${lastResp?.statusCode} ${lastResp?.body} ${lastEx ?? ''}');
+    if (lastResp != null) {
+      throw ApiException(lastResp.statusCode,
+          'Create user failed with status ${lastResp.statusCode}',
+          body: lastResp.body);
+    }
+    throw ApiException(null, 'Create user failed',
+        body: lastEx?.toString() ?? '');
   }
 }
 
@@ -200,8 +203,7 @@ class OperatorsController {
         }
       }
       if (lastResp == null) {
-        // ignore: avoid_print
-        print('OperatorsController.listOperators error: $lastEx');
+        debugPrint('OperatorsController.listOperators error: $lastEx');
         throw lastEx ?? Exception('Unknown error');
       }
       if (lastResp.statusCode != 200) return [];
@@ -221,8 +223,7 @@ class OperatorsController {
       return out;
     } catch (e, st) {
       // Log and rethrow; callers (providers) will show errors
-      // ignore: avoid_print
-      print('OperatorsController.listOperators error: $e\n$st');
+      debugPrint('OperatorsController.listOperators error: $e\n$st');
       rethrow;
     }
   }
@@ -280,8 +281,13 @@ class OperatorsController {
       return id;
     }
     ref.invalidate(operatorsListProvider);
-    throw Exception(
-        'Create operator failed: ${lastResp?.statusCode} ${lastResp?.body} ${lastEx ?? ''}');
+    if (lastResp != null) {
+      throw ApiException(lastResp.statusCode,
+          'Create operator failed with status ${lastResp.statusCode}',
+          body: lastResp.body);
+    }
+    throw ApiException(null, 'Create operator failed',
+        body: lastEx?.toString() ?? '');
   }
 }
 
@@ -304,7 +310,7 @@ final usersListProvider = FutureProvider((ref) async {
     return users;
   } catch (e, st) {
     // ignore: avoid_print
-    print('usersListProvider: failed to load users: $e\n$st');
+    debugPrint('usersListProvider: failed to load users: $e\n$st');
     return <Map<String, dynamic>>[];
   }
 });

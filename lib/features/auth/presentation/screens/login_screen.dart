@@ -15,7 +15,7 @@ class LoginScreen extends ConsumerWidget {
             end: Alignment.bottomRight,
             colors: [
               Theme.of(context).colorScheme.primary,
-              Theme.of(context).colorScheme.primary.withOpacity(0.7),
+              Theme.of(context).colorScheme.primary.withAlpha(179),
             ],
           ),
         ),
@@ -34,7 +34,7 @@ class LoginScreen extends ConsumerWidget {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Colors.black.withAlpha(26),
                           blurRadius: 20,
                           offset: const Offset(0, 10),
                         ),
@@ -60,7 +60,7 @@ class LoginScreen extends ConsumerWidget {
                   Text(
                     'Precision Agriculture Management',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Colors.white.withOpacity(0.9),
+                          color: Colors.white.withAlpha(230),
                         ),
                   ),
                   const SizedBox(height: 48),
@@ -68,7 +68,7 @@ class LoginScreen extends ConsumerWidget {
                   // Login form card
                   Card(
                     elevation: 8,
-                    shadowColor: Colors.black.withOpacity(0.3),
+                    shadowColor: Colors.black.withAlpha(77),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),

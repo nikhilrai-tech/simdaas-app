@@ -4,6 +4,8 @@ import '../providers/equipment_providers.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'dart:convert';
 import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 
 class CreateEquipmentScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic>? existingData;
@@ -32,6 +34,16 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
   final _linkedTractorId = TextEditingController();
   final _controlUnitId = TextEditingController();
   String _sprayerType = 'lidar';
+  // Unit selectors for fields that are stored in meters. If user enters in
+  // inches, we'll convert to meters on save.
+  String _mountingHeightUnit = 'm';
+  String _lidarNozzleDistanceUnit = 'm';
+  String _ultrasonicDistanceUnit = 'm';
+  String _wheelDiameterUnit = 'm';
+  String _axleLengthUnit = 'm';
+  String _hingeToAxleUnit = 'm';
+  String _hingeToNozzleUnit = 'm';
+  String _hingeToControlUnitUnit = 'm';
 
   @override
   Widget build(BuildContext context) {
@@ -102,62 +114,205 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
               ),
               const SizedBox(height: 8),
               if (_sprayerType == 'lidar') ...[
-                TextFormField(
-                    controller: _mountingHeight,
-                    decoration: const InputDecoration(
-                        labelText: 'Mounting height of lidar (m)'),
-                    keyboardType:
-                        TextInputType.numberWithOptions(decimal: true)),
-                TextFormField(
-                    controller: _lidarNozzleDistance,
-                    decoration: const InputDecoration(
-                        labelText: 'Distance between lidar and nozzle (m)'),
-                    keyboardType:
-                        TextInputType.numberWithOptions(decimal: true)),
-                TextFormField(
-                    controller: _hingeToAxle,
-                    decoration: const InputDecoration(
-                        labelText: 'Distance between hinge point and axle (m)'),
-                    keyboardType:
-                        TextInputType.numberWithOptions(decimal: true)),
-                TextFormField(
-                    controller: _hingeToNozzle,
-                    decoration: const InputDecoration(
-                        labelText:
-                            'Distance between hinge point and nozzle (m)'),
-                    keyboardType:
-                        TextInputType.numberWithOptions(decimal: true)),
-                TextFormField(
-                    controller: _hingeToControlUnit,
-                    decoration: const InputDecoration(
-                        labelText:
-                            'Distance between hinge point and control unit mounting (m)'),
-                    keyboardType:
-                        TextInputType.numberWithOptions(decimal: true)),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                        controller: _mountingHeight,
+                        decoration: const InputDecoration(
+                            labelText: 'Mounting height of lidar'),
+                        keyboardType:
+                            TextInputType.numberWithOptions(decimal: true)),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String>(
+                      value: _mountingHeightUnit,
+                      items: const [
+                        DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                           DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      ],
+                      onChanged: (v) => setState(() => _mountingHeightUnit = v ?? 'm'),
+                      decoration: const InputDecoration(labelText: 'Unit'),
+                    ),
+                  )
+                ]),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                        controller: _lidarNozzleDistance,
+                        decoration: const InputDecoration(
+                            labelText: 'Distance between lidar and nozzle'),
+                        keyboardType:
+                            TextInputType.numberWithOptions(decimal: true)),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String>(
+                      value: _lidarNozzleDistanceUnit,
+                      items: const [
+                        DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      ],
+                      onChanged: (v) => setState(() => _lidarNozzleDistanceUnit = v ?? 'm'),
+                      decoration: const InputDecoration(labelText: 'Unit'),
+                    ),
+                  )
+                ]),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                        controller: _hingeToAxle,
+                        decoration: const InputDecoration(
+                            labelText: 'Distance between hinge point and axle'),
+                        keyboardType:
+                            TextInputType.numberWithOptions(decimal: true)),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String>(
+                      value: _hingeToAxleUnit,
+                      items: const [
+                        DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      ],
+                      onChanged: (v) => setState(() => _hingeToAxleUnit = v ?? 'm'),
+                      decoration: const InputDecoration(labelText: 'Unit'),
+                    ),
+                  )
+                ]),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                        controller: _hingeToNozzle,
+                        decoration: const InputDecoration(
+                            labelText:
+                                'Distance between hinge point and nozzle'),
+                        keyboardType:
+                            TextInputType.numberWithOptions(decimal: true)),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String>(
+                      value: _hingeToNozzleUnit,
+                      items: const [
+                        DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      ],
+                      onChanged: (v) => setState(() => _hingeToNozzleUnit = v ?? 'm'),
+                      decoration: const InputDecoration(labelText: 'Unit'),
+                    ),
+                  )
+                ]),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                        controller: _hingeToControlUnit,
+                        decoration: const InputDecoration(
+                            labelText:
+                                'Distance between hinge point and control unit mounting'),
+                        keyboardType:
+                            TextInputType.numberWithOptions(decimal: true)),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String>(
+                      value: _hingeToControlUnitUnit,
+                      items: const [
+                        DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      ],
+                      onChanged: (v) => setState(() => _hingeToControlUnitUnit = v ?? 'm'),
+                      decoration: const InputDecoration(labelText: 'Unit'),
+                    ),
+                  )
+                ]),
               ] else ...[
-                TextFormField(
-                    controller: _ultrasonicDistance,
-                    decoration: const InputDecoration(
-                        labelText: 'Distance of sensor from center line (m)'),
-                    keyboardType:
-                        TextInputType.numberWithOptions(decimal: true)),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                        controller: _ultrasonicDistance,
+                        decoration: const InputDecoration(
+                            labelText: 'Distance of sensor from center line'),
+                        keyboardType:
+                            TextInputType.numberWithOptions(decimal: true)),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String>(
+                      value: _ultrasonicDistanceUnit,
+                      items: const [
+                        DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                      ],
+                      onChanged: (v) => setState(() => _ultrasonicDistanceUnit = v ?? 'm'),
+                      decoration: const InputDecoration(labelText: 'Unit'),
+                    ),
+                  )
+                ]),
               ],
             ] else if (_category == 'tractor') ...[
-              TextFormField(
-                  controller: _wheelDiameter,
-                  decoration:
-                      const InputDecoration(labelText: 'Wheel diameter (m)'),
-                  keyboardType: TextInputType.numberWithOptions(decimal: true)),
+              Row(children: [
+                Expanded(
+                  child: TextFormField(
+                      controller: _wheelDiameter,
+                      decoration:
+                          const InputDecoration(labelText: 'Wheel diameter'),
+                      keyboardType: TextInputType.numberWithOptions(decimal: true)),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 110,
+                  child: DropdownButtonFormField<String>(
+                    value: _wheelDiameterUnit,
+                    items: const [
+                      DropdownMenuItem(value: 'm', child: Text('m')),
+                      DropdownMenuItem(value: 'in', child: Text('in')),
+                       DropdownMenuItem(value: 'ft', child: Text('ft')),
+                    ],
+                    onChanged: (v) => setState(() => _wheelDiameterUnit = v ?? 'm'),
+                    decoration: const InputDecoration(labelText: 'Unit'),
+                  ),
+                )
+              ]),
               TextFormField(
                   controller: _screwsInWheel,
                   decoration: const InputDecoration(
-                      labelText: 'Number of screws in wheel'),
+                      labelText: 'Number of screws/Nuts in wheel'),
                   keyboardType: TextInputType.number),
-              TextFormField(
-                  controller: _axleLength,
-                  decoration:
-                      const InputDecoration(labelText: 'Axle length (m)'),
-                  keyboardType: TextInputType.numberWithOptions(decimal: true)),
+              Row(children: [
+                Expanded(
+                  child: TextFormField(
+                      controller: _axleLength,
+                      decoration:
+                          const InputDecoration(labelText: 'Axle length'),
+                      keyboardType: TextInputType.numberWithOptions(decimal: true)),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 110,
+                  child: DropdownButtonFormField<String>(
+                    value: _axleLengthUnit,
+                    items: const [
+                      DropdownMenuItem(value: 'm', child: Text('m')),
+                      DropdownMenuItem(value: 'in', child: Text('in')),
+                       DropdownMenuItem(value: 'ft', child: Text('ft')),
+                    ],
+                    onChanged: (v) => setState(() => _axleLengthUnit = v ?? 'm'),
+                    decoration: const InputDecoration(labelText: 'Unit'),
+                  ),
+                )
+              ]),
             ] else if (_category == 'control_unit') ...[
               TextFormField(
                   controller: _controlUnitId,
@@ -201,50 +356,133 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                   String? linkedTractorId;
                   try {
                     mountingHeight = double.tryParse(_mountingHeight.text);
-                  } catch (_) {
+                    if (mountingHeight != null) {
+                      if (_mountingHeightUnit == 'in') {
+                        mountingHeight = mountingHeight * 0.0254;
+                      } else if (_mountingHeightUnit == 'ft') {
+                        mountingHeight = mountingHeight * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse mountingHeight error: $e');
+                    debugPrint('stack: $st');
                     mountingHeight = null;
                   }
                   try {
                     ultrasonicDistance =
                         double.tryParse(_ultrasonicDistance.text);
-                  } catch (_) {
+                    if (ultrasonicDistance != null) {
+                      if (_ultrasonicDistanceUnit == 'in') {
+                        ultrasonicDistance = ultrasonicDistance * 0.0254;
+                      } else if (_ultrasonicDistanceUnit == 'ft') {
+                        ultrasonicDistance = ultrasonicDistance * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse ultrasonicDistance error: $e');
+                    debugPrint('stack: $st');
                     ultrasonicDistance = null;
                   }
                   try {
                     lidarNozzleDistance =
                         double.tryParse(_lidarNozzleDistance.text);
-                  } catch (_) {
+                    if (lidarNozzleDistance != null) {
+                      if (_lidarNozzleDistanceUnit == 'in') {
+                        lidarNozzleDistance = lidarNozzleDistance * 0.0254;
+                      } else if (_lidarNozzleDistanceUnit == 'ft') {
+                        lidarNozzleDistance = lidarNozzleDistance * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse lidarNozzleDistance error: $e');
+                    debugPrint('stack: $st');
                     lidarNozzleDistance = null;
                   }
                   try {
                     wheelDiameter = double.tryParse(_wheelDiameter.text);
-                  } catch (_) {
+                    if (wheelDiameter != null) {
+                      if (_wheelDiameterUnit == 'in') {
+                        wheelDiameter = wheelDiameter * 0.0254;
+                      } else if (_wheelDiameterUnit == 'ft') {
+                        wheelDiameter = wheelDiameter * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse wheelDiameter error: $e');
+                    debugPrint('stack: $st');
                     wheelDiameter = null;
                   }
                   try {
                     screwsInWheel = int.tryParse(_screwsInWheel.text);
-                  } catch (_) {
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse screwsInWheel error: $e');
+                    debugPrint('stack: $st');
                     screwsInWheel = null;
                   }
                   try {
                     axleLength = double.tryParse(_axleLength.text);
-                  } catch (_) {
+                    if (axleLength != null) {
+                      if (_axleLengthUnit == 'in') {
+                        axleLength = axleLength * 0.0254;
+                      } else if (_axleLengthUnit == 'ft') {
+                        axleLength = axleLength * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse axleLength error: $e');
+                    debugPrint('stack: $st');
                     axleLength = null;
                   }
                   try {
                     hingeToAxle = double.tryParse(_hingeToAxle.text);
-                  } catch (_) {
+                    if (hingeToAxle != null) {
+                      if (_hingeToAxleUnit == 'in') {
+                        hingeToAxle = hingeToAxle * 0.0254;
+                      } else if (_hingeToAxleUnit == 'ft') {
+                        hingeToAxle = hingeToAxle * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse hingeToAxle error: $e');
+                    debugPrint('stack: $st');
                     hingeToAxle = null;
                   }
                   try {
                     hingeToNozzle = double.tryParse(_hingeToNozzle.text);
-                  } catch (_) {
+                    if (hingeToNozzle != null) {
+                      if (_hingeToNozzleUnit == 'in') {
+                        hingeToNozzle = hingeToNozzle * 0.0254;
+                      } else if (_hingeToNozzleUnit == 'ft') {
+                        hingeToNozzle = hingeToNozzle * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse hingeToNozzle error: $e');
+                    debugPrint('stack: $st');
                     hingeToNozzle = null;
                   }
                   try {
                     hingeToControlUnit =
                         double.tryParse(_hingeToControlUnit.text);
-                  } catch (_) {
+                    if (hingeToControlUnit != null) {
+                      if (_hingeToControlUnitUnit == 'in') {
+                        hingeToControlUnit = hingeToControlUnit * 0.0254;
+                      } else if (_hingeToControlUnitUnit == 'ft') {
+                        hingeToControlUnit = hingeToControlUnit * 0.3048;
+                      }
+                    }
+                  } catch (e, st) {
+                    debugPrint(
+                        'CreateEquipmentScreen: parse hingeToControlUnit error: $e');
+                    debugPrint('stack: $st');
                     hingeToControlUnit = null;
                   }
                   macAddress =
@@ -315,33 +553,12 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                     if (!mounted) return;
                     Navigator.of(context).pop(true);
                   } catch (e) {
-                    String userMessage;
-                    if (e is ApiException && e.body != null) {
-                      try {
-                        final parsed =
-                            json.decode(e.body!) as Map<String, dynamic>;
-                        final msgs = <String>[];
-                        parsed.forEach((k, v) {
-                          if (v is List && v.isNotEmpty) {
-                            msgs.add('${k}: ${v.first}');
-                          } else if (v is String) {
-                            msgs.add('${k}: $v');
-                          } else {
-                            msgs.add('$k: ${v.toString()}');
-                          }
-                        });
-                        userMessage = msgs.join(' • ');
-                      } catch (_) {
-                        userMessage = e.message;
-                      }
+                    if (e is ApiException) {
+                      final err = ApiError.fromResponse(e.statusCode, e.body);
+                      showApiErrorSnackBar(context, err);
                     } else {
-                      userMessage = e.toString();
+                      showGenericErrorSnackBar(context, e.toString());
                     }
-
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(userMessage)),
-                    );
                   }
                 },
                 child: const Text('Save'))

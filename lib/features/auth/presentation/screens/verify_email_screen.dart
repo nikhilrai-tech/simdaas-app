@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 
 class VerifyEmailScreen extends ConsumerStatefulWidget {
   const VerifyEmailScreen({super.key});
@@ -56,9 +57,8 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen> {
                         if (mounted)
                           Navigator.of(context).pushReplacementNamed('/login');
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Verification failed')));
+                        showGenericErrorSnackBar(context, 'Verification failed',
+                            isWarning: true);
                       }
                     },
                     child: const Padding(
@@ -73,8 +73,11 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen> {
                   if ((_email ?? '').isEmpty) return;
                   final svc = ref.read(authServiceProvider);
                   final ok = await svc.resendVerification(_email ?? '');
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(ok ? 'Code resent' : 'Resend failed')));
+                  if (ok)
+                    showSuccessSnackBar(context, 'Code resent');
+                  else
+                    showGenericErrorSnackBar(context, 'Resend failed',
+                        isWarning: true);
                 },
                 child: const Text('Resend code'))
           ],

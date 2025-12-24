@@ -140,74 +140,72 @@ class TelemetryBootstrapper extends ConsumerWidget {
       Future.microtask(() => _fetchAndSubscribe(ref, currentUserId));
     }
 
-    // Listen for changes to auth state and react when a user logs in/out.
+    // Listen for auth state changes to detect sign-out and clear subscriptions.
     ref.listen<AuthService>(authServiceProvider, (previous, next) {
       final userId = next.currentUserId ?? '';
-      if (userId.isNotEmpty) {
-        debugPrint('TelemetryBootstrapper.listen: userId present: $userId');
-        // Set up a continuous listener on the controlUnitsProvider for this user
-        // so we automatically subscribe/unsubscribe when control units change.
-        final controlProv = eq_provs.controlUnitsProvider(userId);
-        // Use fireImmediately so we react to the current cached/loaded state.
-        ref.listen<AsyncValue<List<dynamic>>>(controlProv, (prev, nextCu) {
-          try {
-            nextCu.when(
-              data: (items) {
-                debugPrint(
-                    'TelemetryBootstrapper: controlUnits changed: ${items.length}');
-                final ids = <String>[];
-                for (final cu in items) {
-                  try {
-                    final dynCu = cu as dynamic;
-                    String id = '';
-                    try {
-                      final maybe = dynCu['mac'] ??
-                          dynCu['mac_address'] ??
-                          dynCu['controlUnitId'] ??
-                          dynCu['control_unit_id'] ??
-                          dynCu['id'];
-                      if (maybe != null) id = maybe.toString();
-                    } catch (_) {
-                      try {
-                        id = (dynCu.macAddress ??
-                                    dynCu.controlUnitId ??
-                                    dynCu.id)
-                                ?.toString() ??
-                            '';
-                      } catch (_) {
-                        id = '';
-                      }
-                    }
-                    if (id.isNotEmpty) ids.add(id);
-                  } catch (e) {
-                    debugPrint(
-                        'TelemetryBootstrapper: error extracting id from cu: $e');
-                  }
-                }
-                final svc = ref.read(telemetryServiceProvider);
-                svc.subscribeToDevices(ids);
-              },
-              loading: () {
-                debugPrint(
-                    'TelemetryBootstrapper: controlUnits loading for $userId');
-              },
-              error: (err, st) {
-                debugPrint(
-                    'TelemetryBootstrapper: controlUnits error for $userId: $err');
-              },
-            );
-          } catch (e) {
-            debugPrint(
-                'TelemetryBootstrapper: controlUnits listener exception: $e');
-          }
-        });
-      } else {
+      if (userId.isEmpty) {
         debugPrint(
             'TelemetryBootstrapper.listen: user signed out or no userId');
         try {
           final svc = ref.read(telemetryServiceProvider);
           svc.subscribeToDevices(<String>[]);
         } catch (_) {}
+      }
+    });
+
+    // Separately listen for control unit list changes for the current user.
+    // Using a top-level ref.listen within build is required by Riverpod; we
+    // must not call ref.listen from inside another listener callback.
+    final watchedUserId = ref.watch(authServiceProvider).currentUserId ?? '';
+    final controlProv = eq_provs.controlUnitsProvider(watchedUserId);
+    ref.listen<AsyncValue<List<dynamic>>>(controlProv, (prev, nextCu) {
+      try {
+        nextCu.when(
+          data: (items) {
+            debugPrint(
+                'TelemetryBootstrapper: controlUnits changed: ${items.length}');
+            final ids = <String>[];
+            for (final cu in items) {
+              try {
+                final dynCu = cu as dynamic;
+                String id = '';
+                try {
+                  final maybe = dynCu['mac'] ??
+                      dynCu['mac_address'] ??
+                      dynCu['controlUnitId'] ??
+                      dynCu['control_unit_id'] ??
+                      dynCu['id'];
+                  if (maybe != null) id = maybe.toString();
+                } catch (_) {
+                  try {
+                    id = (dynCu.macAddress ?? dynCu.controlUnitId ?? dynCu.id)
+                            ?.toString() ??
+                        '';
+                  } catch (_) {
+                    id = '';
+                  }
+                }
+                if (id.isNotEmpty) ids.add(id);
+              } catch (e) {
+                debugPrint(
+                    'TelemetryBootstrapper: error extracting id from cu: $e');
+              }
+            }
+            final svc = ref.read(telemetryServiceProvider);
+            svc.subscribeToDevices(ids);
+          },
+          loading: () {
+            debugPrint(
+                'TelemetryBootstrapper: controlUnits loading for $watchedUserId');
+          },
+          error: (err, st) {
+            debugPrint(
+                'TelemetryBootstrapper: controlUnits error for $watchedUserId: $err');
+          },
+        );
+      } catch (e) {
+        debugPrint(
+            'TelemetryBootstrapper: controlUnits listener exception: $e');
       }
     });
 

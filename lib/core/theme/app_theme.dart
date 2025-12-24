@@ -40,7 +40,6 @@ class AppTheme {
         primary: primaryGreen,
         secondary: secondaryTeal,
         surface: cardWhite,
-        background: backgroundLight,
         error: warningRed,
       ),
       scaffoldBackgroundColor: backgroundLight,
@@ -62,7 +61,7 @@ class AppTheme {
       // Card theme
       cardTheme: CardThemeData(
         elevation: 2,
-        shadowColor: Colors.black.withOpacity(0.1),
+        shadowColor: Colors.black.withAlpha(25),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),

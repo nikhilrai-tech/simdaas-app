@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'dart:math' as math;
 import 'package:http/http.dart' as http;
@@ -84,7 +85,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             return;
           }
         }
-      } catch (_) {}
+      } catch (e, st) {
+        debugPrint('map_screen._onTapTap nearest index error: $e\n$st');
+      }
     }
 
     // try to insert on nearest segment if close
@@ -162,7 +165,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // Clear any previous polygon state so each new map session starts fresh
     try {
       ref.read(mapStateProvider.notifier).clearAll();
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('map_screen.initState.clearAll error: $e\n$st');
+    }
     // move the map after first frame if an initial center was provided
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final c = widget.initialCenter;
@@ -180,7 +185,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           if (loc.latitude != 0 || loc.longitude != 0) {
             _mapController.move(loc, 18.0);
           }
-        } catch (_) {}
+        } catch (e, st) {
+          debugPrint('map_screen.initState.getCurrentLocation error: $e\n$st');
+        }
       });
     }
 
@@ -235,7 +242,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           searchNotifier.clearSuggestions();
         }
       }
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('map_screen._onSearchChanged search error: $e\n$st');
       if (mounted) {
         searchNotifier.clearSuggestions();
       }
@@ -324,7 +332,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         final lat = double.parse(parts[0].trim());
         final lng = double.parse(parts[1].trim());
         center = LatLng(lat, lng);
-      } catch (_) {}
+      } catch (e, st) {
+        debugPrint(
+            'map_screen._navigateToLocation parse coords error: $e\n$st');
+      }
     } else {
       // geocode via Nominatim
       try {
@@ -341,7 +352,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             center = LatLng(lat, lon);
           }
         }
-      } catch (_) {}
+      } catch (e, st) {
+        debugPrint('map_screen._navigateToLocation geocode error: $e\n$st');
+      }
     }
 
     if (center != null) {
@@ -378,7 +391,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       if (suggested > 0) {
         areaCtrl.text = suggested.toStringAsFixed(2);
       }
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint(
+          'map_screen._saveField compute area suggestion error: $e\n$st');
+    }
     final resMap = await showModalBottomSheet<Map<String, String>?>(
       context: context,
       isScrollControlled: true,
@@ -571,20 +587,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       double? approx;
       try {
         approx = double.parse((resMap['area'] ?? '').toString());
-      } catch (_) {
+      } catch (e, st) {
+        debugPrint('map_screen._saveField parse area error: $e\n$st');
         approx = null;
       }
       double? rowSpacing;
       try {
         rowSpacing = double.parse((resMap['rowSpacing'] ?? '').toString());
-      } catch (_) {
+      } catch (e, st) {
+        debugPrint('map_screen._saveField parse rowSpacing error: $e\n$st');
         rowSpacing = null;
       }
       // note: obstacles input is collected but not stored in the canonical PlotModel
       int? treeCount;
       try {
         treeCount = int.parse(resMap['treeCount'] ?? '');
-      } catch (_) {
+      } catch (e, st) {
+        debugPrint('map_screen._saveField parse treeCount error: $e\n$st');
         treeCount = null;
       }
       // normalize polygon before saving
@@ -640,8 +659,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       final curZoom = cam.zoom;
       final newZoom = (curZoom + 1).clamp(widget.minZoom, widget.maxZoom);
       _mapController.move(center, newZoom);
-    } catch (_) {
-      // ignore - camera not ready or unsupported operation
+    } catch (e, st) {
+      debugPrint('map_screen._zoomIn error: $e\n$st');
     }
   }
 
@@ -652,8 +671,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       final curZoom = cam.zoom;
       final newZoom = (curZoom - 1).clamp(widget.minZoom, widget.maxZoom);
       _mapController.move(center, newZoom);
-    } catch (_) {
-      // ignore - camera not ready or unsupported operation
+    } catch (e, st) {
+      debugPrint('map_screen._zoomOut error: $e\n$st');
     }
   }
 
@@ -678,8 +697,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               final pts = ref.read(mapStateProvider).points;
               if (pts.isEmpty) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('No vertices to clear')));
+                  showInfoSnackBar(context, 'No vertices to clear');
                 }
                 return;
               }
@@ -702,8 +720,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               if (confirm == true) {
                 ref.read(mapStateProvider.notifier).clearAll();
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Cleared all vertices')));
+                  showSuccessSnackBar(context, 'Cleared all vertices');
                 }
               }
             },
@@ -740,7 +757,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 PolygonLayer(polygons: [
                   Polygon(
                       points: points,
-                      color: Colors.blue.withOpacity(0.3),
+                      color: Colors.blue.withAlpha(77),
                       borderStrokeWidth: 3.0,
                       borderColor: Colors.blue)
                 ]),
@@ -806,7 +823,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                                   selectedVertex, LatLng(newLat, newLng));
                             }
                             _lastPointerPosition = event.position;
-                          } catch (e) {
+                          } catch (e, st) {
+                            debugPrint(
+                                'map_screen.onPointerMove error: $e\n$st');
                             // If anything fails, just update the last position
                             _lastPointerPosition = event.position;
                           }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 // job providers intentionally not imported here to avoid circular deps
 import '../../domain/entities/plot.dart';
 // avoid importing plot_list_screen to prevent a circular import; reimplement a small preview widget here
@@ -104,7 +105,7 @@ class PlotPolygonPainter extends CustomPainter {
     path.close();
 
     final fill = ui.Paint()
-      ..color = Colors.blue.withOpacity(0.35)
+      ..color = Colors.blue.withAlpha(89)
       ..style = ui.PaintingStyle.fill;
     final stroke = ui.Paint()
       ..color = Colors.blue
@@ -154,100 +155,212 @@ class PlotDetailsScreen extends ConsumerWidget {
                 builder: (ctx) {
                   final insets = MediaQuery.of(ctx).viewInsets.bottom;
                   final maxHeight = MediaQuery.of(ctx).size.height * 0.9;
-                  return AnimatedPadding(
-                    duration: const Duration(milliseconds: 250),
-                    padding: EdgeInsets.only(bottom: insets),
-                    child: FractionallySizedBox(
-                      heightFactor: 0.75,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: maxHeight),
-                        child: Material(
-                          color: Theme.of(context).scaffoldBackgroundColor,
-                          elevation: 8,
-                          shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(12))),
-                          child: SingleChildScrollView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12.0, vertical: 12.0),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  // small drag handle
-                                  Center(
-                                    child: Container(
-                                      width: 36,
-                                      height: 4,
-                                      margin: const EdgeInsets.only(bottom: 8),
-                                      decoration: BoxDecoration(
-                                          color: Colors.grey[400],
-                                          borderRadius:
-                                              BorderRadius.circular(4)),
-                                    ),
+                  final _formKeyLocal = GlobalKey<FormState>();
+                  // Local unit state for the modal. Use StatefulBuilder so the
+                  // dropdowns can update locally.
+                  String rowUnit = 'm';
+                  String bedUnit = 'm';
+                  return StatefulBuilder(builder: (ctx2, setState2) {
+                    return AnimatedPadding(
+                      duration: const Duration(milliseconds: 250),
+                      padding: EdgeInsets.only(bottom: insets),
+                      child: FractionallySizedBox(
+                        heightFactor: 0.75,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: maxHeight),
+                          child: Material(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                            elevation: 8,
+                            shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.vertical(
+                                    top: Radius.circular(12))),
+                            child: SingleChildScrollView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12.0, vertical: 12.0),
+                                child: Form(
+                                  key: _formKeyLocal,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      // small drag handle
+                                      Center(
+                                        child: Container(
+                                          width: 36,
+                                          height: 4,
+                                          margin: const EdgeInsets.only(bottom: 8),
+                                          decoration: BoxDecoration(
+                                              color: Colors.grey[400],
+                                              borderRadius:
+                                                  BorderRadius.circular(4)),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      TextFormField(
+                                          controller: nameCtrl,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Plot Name'),
+                                          maxLength: 200,
+                                          validator: (v) =>
+                                              (v == null || v.trim().isEmpty)
+                                                  ? 'Enter plot name'
+                                                  : null),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                          controller: areaCtrl,
+                                          keyboardType: const TextInputType
+                                              .numberWithOptions(decimal: true),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Approx Area (ha)'),
+                                          validator: (v) {
+                                            if (v == null || v.isEmpty)
+                                              return null;
+                                            final t = v.trim();
+                                            final val = double.tryParse(t);
+                                            if (val == null)
+                                              return 'Invalid number';
+                                            if (val < 0)
+                                              return 'Must be non-negative';
+                                            return null;
+                                          }),
+                                      const SizedBox(height: 8),
+                                      Row(children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                              controller: rowCtrl,
+                                              keyboardType: const TextInputType
+                                                  .numberWithOptions(decimal: true),
+                                              decoration: const InputDecoration(
+                                                  labelText: 'Row Spacing'),
+                                              validator: (v) {
+                                                if (v == null || v.isEmpty)
+                                                  return null;
+                                                final t = v.trim();
+                                                final val = double.tryParse(t);
+                                                if (val == null)
+                                                  return 'Invalid number';
+                                                if (val <= 0) return 'Must be > 0';
+                                                return null;
+                                              }),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        SizedBox(
+                                          width: 110,
+                                          child: DropdownButtonFormField<String>(
+                                            value: rowUnit,
+                                            items: const [
+                                              DropdownMenuItem(value: 'm', child: Text('m')),
+                                              DropdownMenuItem(value: 'in', child: Text('in')),
+                                              DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                            ],
+                                            onChanged: (v) => setState2(() => rowUnit = v ?? 'm'),
+                                            decoration: const InputDecoration(labelText: 'Unit'),
+                                          ),
+                                        )
+                                      ]),
+                                      const SizedBox(height: 8),
+                                      Row(children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                              controller: bedCtrl,
+                                              keyboardType: const TextInputType
+                                                  .numberWithOptions(decimal: true),
+                                              decoration: const InputDecoration(
+                                                  labelText: 'Bed Height'),
+                                              validator: (v) {
+                                                if (v == null || v.isEmpty)
+                                                  return null;
+                                                final t = v.trim();
+                                                final val = double.tryParse(t);
+                                                if (val == null)
+                                                  return 'Invalid number';
+                                                if (val < 0)
+                                                  return 'Must be non-negative';
+                                                return null;
+                                              }),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        SizedBox(
+                                          width: 110,
+                                          child: DropdownButtonFormField<String>(
+                                            value: bedUnit,
+                                            items: const [
+                                              DropdownMenuItem(value: 'm', child: Text('m')),
+                                              DropdownMenuItem(value: 'in', child: Text('in')),
+                                              DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                            ],
+                                            onChanged: (v) => setState2(() => bedUnit = v ?? 'm'),
+                                            decoration: const InputDecoration(labelText: 'Unit'),
+                                          ),
+                                        )
+                                      ]),
+                                      const SizedBox(height: 8),
+                                      TextFormField(
+                                          controller: treeCtrl,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                              labelText: 'Total Trees'),
+                                          validator: (v) {
+                                            if (v == null || v.isEmpty)
+                                              return null;
+                                            final t = v.trim();
+                                            final val = int.tryParse(t);
+                                            if (val == null)
+                                              return 'Invalid integer';
+                                            if (val < 0)
+                                              return 'Must be non-negative';
+                                            return null;
+                                          }),
+                                      const SizedBox(height: 16),
+                                      ElevatedButton(
+                                        onPressed: () {
+                                          if (!(_formKeyLocal.currentState
+                                                  ?.validate() ??
+                                              true)) return;
+                                          // Convert row/bed to meters if needed
+                                          String rowOut = rowCtrl.text;
+                                          if (rowOut.isNotEmpty) {
+                                            final v = double.tryParse(rowOut);
+                                            if (v != null) {
+                                              if (rowUnit == 'in') rowOut = (v * 0.0254).toString();
+                                              else if (rowUnit == 'ft') rowOut = (v * 0.3048).toString();
+                                            }
+                                          }
+                                          String bedOut = bedCtrl.text;
+                                          if (bedOut.isNotEmpty) {
+                                            final v = double.tryParse(bedOut);
+                                            if (v != null) {
+                                              if (bedUnit == 'in') bedOut = (v * 0.0254).toString();
+                                              else if (bedUnit == 'ft') bedOut = (v * 0.3048).toString();
+                                            }
+                                          }
+                                          Navigator.of(ctx).pop({
+                                            'name': nameCtrl.text,
+                                            'area': areaCtrl.text,
+                                            'rowSpacing': rowOut,
+                                            'bedHeight': bedOut,
+                                            'treeCount': treeCtrl.text,
+                                          });
+                                        },
+                                        child: const Padding(
+                                            padding: EdgeInsets.symmetric(
+                                                vertical: 12.0),
+                                            child: Text('Save')),
+                                      ),
+                                      SizedBox(height: insets),
+                                    ],
                                   ),
-                                  const SizedBox(height: 4),
-                                  TextField(
-                                      controller: nameCtrl,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Plot Name')),
-                                  const SizedBox(height: 8),
-                                  TextField(
-                                      controller: areaCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Approx Area (ha)')),
-                                  const SizedBox(height: 8),
-                                  TextField(
-                                      controller: rowCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Row Spacing (m)')),
-                                  const SizedBox(height: 8),
-                                  TextField(
-                                      controller: bedCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Bed Height (m)')),
-                                  const SizedBox(height: 8),
-                                  TextField(
-                                      controller: treeCtrl,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Total Trees')),
-                                  const SizedBox(height: 16),
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      Navigator.of(ctx).pop({
-                                        'name': nameCtrl.text,
-                                        'area': areaCtrl.text,
-                                        'rowSpacing': rowCtrl.text,
-                                        'bedHeight': bedCtrl.text,
-                                        'treeCount': treeCtrl.text,
-                                      });
-                                    },
-                                    child: const Padding(
-                                        padding: EdgeInsets.symmetric(
-                                            vertical: 12.0),
-                                        child: Text('Save')),
-                                  ),
-                                  SizedBox(height: insets),
-                                ],
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  );
+                    );
+                  });
                 },
               );
 
@@ -269,8 +382,7 @@ class PlotDetailsScreen extends ConsumerWidget {
                       ref.read(authServiceProvider).currentUserId;
                   if (currentUserId != null)
                     ref.invalidate(plotsListProvider(currentUserId));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Plot updated')));
+                  showSuccessSnackBar(context, 'Plot updated');
                   // replace this route with a fresh details page for the updated plot
                   Navigator.of(context).pushReplacement(MaterialPageRoute(
                       builder: (_) => PlotDetailsScreen(plot: updated)));
@@ -315,8 +427,7 @@ class PlotDetailsScreen extends ConsumerWidget {
                   ref.invalidate(plotsListProvider(currentUserId));
                 }
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Plot deleted')));
+                  showSuccessSnackBar(context, 'Plot deleted');
                   Navigator.of(context).pop();
                 }
               } catch (e) {

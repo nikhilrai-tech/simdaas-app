@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
+import 'package:simdaas/core/utils/api_error_ui.dart';
 import '../providers/auth_providers.dart';
 
 class LoginForm extends ConsumerStatefulWidget {
@@ -56,8 +57,13 @@ class _LoginFormState extends ConsumerState<LoginForm> {
               prefixIcon: Icon(Icons.person_outline),
               hintText: 'Enter your username',
             ),
-            validator: (v) =>
-                (v == null || v.isEmpty) ? 'Please enter your username' : null,
+            maxLength: 100,
+            validator: (v) {
+              if (v == null || v.isEmpty) return 'Please enter your username';
+              final trimmed = v.trim();
+              if (trimmed.length > 100) return 'Username too long';
+              return null;
+            },
           ),
           const SizedBox(height: 16),
           TextFormField(
@@ -109,27 +115,9 @@ class _LoginFormState extends ConsumerState<LoginForm> {
                             .pushReplacementNamed('/dashboard');
                       }
                     } else if (state is AsyncError) {
-                      // navigate to plot list
                       final msg = extractErrorMessage(state.error);
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Row(
-                              children: [
-                                const Icon(Icons.error_outline,
-                                    color: Colors.white),
-                                const SizedBox(width: 12),
-                                Expanded(child: Text('Login failed: $msg')),
-                              ],
-                            ),
-                            backgroundColor:
-                                Theme.of(context).colorScheme.error,
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        );
+                        showGenericErrorSnackBar(context, 'Login failed: $msg');
                       }
                     }
                   },
