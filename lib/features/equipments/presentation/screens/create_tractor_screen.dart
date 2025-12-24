@@ -175,9 +175,10 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                         keyboardType:
                                             TextInputType.numberWithOptions(
                                                 decimal: true),
-                                        validator: (v) => (v == null || v.isEmpty)
-                                            ? 'Enter wheel diameter'
-                                            : null,
+                                        validator: (v) =>
+                                            (v == null || v.isEmpty)
+                                                ? 'Enter wheel diameter'
+                                                : null,
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -186,12 +187,17 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                       child: DropdownButtonFormField<String>(
                                         value: _wheelDiameterUnit,
                                         items: const [
-                                          DropdownMenuItem(value: 'm', child: Text('m')),
-                                          DropdownMenuItem(value: 'in', child: Text('in')),
-                                          DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                          DropdownMenuItem(
+                                              value: 'm', child: Text('m')),
+                                          DropdownMenuItem(
+                                              value: 'in', child: Text('in')),
+                                          DropdownMenuItem(
+                                              value: 'ft', child: Text('ft')),
                                         ],
-                                        onChanged: (v) => setState(() => _wheelDiameterUnit = v ?? 'm'),
-                                        decoration: const InputDecoration(labelText: 'Unit'),
+                                        onChanged: (v) => setState(() =>
+                                            _wheelDiameterUnit = v ?? 'm'),
+                                        decoration: const InputDecoration(
+                                            labelText: 'Unit'),
                                       ),
                                     )
                                   ]),
@@ -266,9 +272,10 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                         keyboardType:
                                             TextInputType.numberWithOptions(
                                                 decimal: true),
-                                        validator: (v) => (v == null || v.isEmpty)
-                                            ? 'Enter axle length'
-                                            : null,
+                                        validator: (v) =>
+                                            (v == null || v.isEmpty)
+                                                ? 'Enter axle length'
+                                                : null,
                                       ),
                                     ),
                                     const SizedBox(width: 8),
@@ -277,12 +284,17 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                       child: DropdownButtonFormField<String>(
                                         value: _axleLengthUnit,
                                         items: const [
-                                          DropdownMenuItem(value: 'm', child: Text('m')),
-                                          DropdownMenuItem(value: 'in', child: Text('in')),
-                                          DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                          DropdownMenuItem(
+                                              value: 'm', child: Text('m')),
+                                          DropdownMenuItem(
+                                              value: 'in', child: Text('in')),
+                                          DropdownMenuItem(
+                                              value: 'ft', child: Text('ft')),
                                         ],
-                                        onChanged: (v) => setState(() => _axleLengthUnit = v ?? 'm'),
-                                        decoration: const InputDecoration(labelText: 'Unit'),
+                                        onChanged: (v) => setState(
+                                            () => _axleLengthUnit = v ?? 'm'),
+                                        decoration: const InputDecoration(
+                                            labelText: 'Unit'),
                                       ),
                                     )
                                   ]),
@@ -373,9 +385,11 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                           double.tryParse(_wheelDiameter.text);
                                       if (wheelDiameter != null) {
                                         if (_wheelDiameterUnit == 'in') {
-                                          wheelDiameter = wheelDiameter * 0.0254;
+                                          wheelDiameter =
+                                              wheelDiameter * 0.0254;
                                         } else if (_wheelDiameterUnit == 'ft') {
-                                          wheelDiameter = wheelDiameter * 0.3048;
+                                          wheelDiameter =
+                                              wheelDiameter * 0.3048;
                                         }
                                       }
                                     } catch (e, st) {

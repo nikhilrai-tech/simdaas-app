@@ -450,8 +450,7 @@ class _ControlUnitsListScreenState
 
                         Navigator.of(context).push(MaterialPageRoute(
                             builder: (_) => MonitoringScreen(
-                                deviceId: deviceIdNorm,
-                                plotId: plotIdForNav)));
+                                deviceId: deviceIdNorm, plotId: plotIdForNav)));
                       }
                     : null,
               );

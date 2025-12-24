@@ -131,9 +131,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       items: const [
                         DropdownMenuItem(value: 'm', child: Text('m')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
-                           DropdownMenuItem(value: 'ft', child: Text('ft')),
+                        DropdownMenuItem(value: 'ft', child: Text('ft')),
                       ],
-                      onChanged: (v) => setState(() => _mountingHeightUnit = v ?? 'm'),
+                      onChanged: (v) =>
+                          setState(() => _mountingHeightUnit = v ?? 'm'),
                       decoration: const InputDecoration(labelText: 'Unit'),
                     ),
                   )
@@ -155,9 +156,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       items: const [
                         DropdownMenuItem(value: 'm', child: Text('m')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
-                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                        DropdownMenuItem(value: 'ft', child: Text('ft')),
                       ],
-                      onChanged: (v) => setState(() => _lidarNozzleDistanceUnit = v ?? 'm'),
+                      onChanged: (v) =>
+                          setState(() => _lidarNozzleDistanceUnit = v ?? 'm'),
                       decoration: const InputDecoration(labelText: 'Unit'),
                     ),
                   )
@@ -179,9 +181,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       items: const [
                         DropdownMenuItem(value: 'm', child: Text('m')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
-                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                        DropdownMenuItem(value: 'ft', child: Text('ft')),
                       ],
-                      onChanged: (v) => setState(() => _hingeToAxleUnit = v ?? 'm'),
+                      onChanged: (v) =>
+                          setState(() => _hingeToAxleUnit = v ?? 'm'),
                       decoration: const InputDecoration(labelText: 'Unit'),
                     ),
                   )
@@ -204,9 +207,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       items: const [
                         DropdownMenuItem(value: 'm', child: Text('m')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
-                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                        DropdownMenuItem(value: 'ft', child: Text('ft')),
                       ],
-                      onChanged: (v) => setState(() => _hingeToNozzleUnit = v ?? 'm'),
+                      onChanged: (v) =>
+                          setState(() => _hingeToNozzleUnit = v ?? 'm'),
                       decoration: const InputDecoration(labelText: 'Unit'),
                     ),
                   )
@@ -229,9 +233,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       items: const [
                         DropdownMenuItem(value: 'm', child: Text('m')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
-                         DropdownMenuItem(value: 'ft', child: Text('ft')),
+                        DropdownMenuItem(value: 'ft', child: Text('ft')),
                       ],
-                      onChanged: (v) => setState(() => _hingeToControlUnitUnit = v ?? 'm'),
+                      onChanged: (v) =>
+                          setState(() => _hingeToControlUnitUnit = v ?? 'm'),
                       decoration: const InputDecoration(labelText: 'Unit'),
                     ),
                   )
@@ -255,7 +260,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         DropdownMenuItem(value: 'm', child: Text('m')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
                       ],
-                      onChanged: (v) => setState(() => _ultrasonicDistanceUnit = v ?? 'm'),
+                      onChanged: (v) =>
+                          setState(() => _ultrasonicDistanceUnit = v ?? 'm'),
                       decoration: const InputDecoration(labelText: 'Unit'),
                     ),
                   )
@@ -268,7 +274,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       controller: _wheelDiameter,
                       decoration:
                           const InputDecoration(labelText: 'Wheel diameter'),
-                      keyboardType: TextInputType.numberWithOptions(decimal: true)),
+                      keyboardType:
+                          TextInputType.numberWithOptions(decimal: true)),
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
@@ -278,9 +285,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                     items: const [
                       DropdownMenuItem(value: 'm', child: Text('m')),
                       DropdownMenuItem(value: 'in', child: Text('in')),
-                       DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      DropdownMenuItem(value: 'ft', child: Text('ft')),
                     ],
-                    onChanged: (v) => setState(() => _wheelDiameterUnit = v ?? 'm'),
+                    onChanged: (v) =>
+                        setState(() => _wheelDiameterUnit = v ?? 'm'),
                     decoration: const InputDecoration(labelText: 'Unit'),
                   ),
                 )
@@ -296,7 +304,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       controller: _axleLength,
                       decoration:
                           const InputDecoration(labelText: 'Axle length'),
-                      keyboardType: TextInputType.numberWithOptions(decimal: true)),
+                      keyboardType:
+                          TextInputType.numberWithOptions(decimal: true)),
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
@@ -306,9 +315,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                     items: const [
                       DropdownMenuItem(value: 'm', child: Text('m')),
                       DropdownMenuItem(value: 'in', child: Text('in')),
-                       DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      DropdownMenuItem(value: 'ft', child: Text('ft')),
                     ],
-                    onChanged: (v) => setState(() => _axleLengthUnit = v ?? 'm'),
+                    onChanged: (v) =>
+                        setState(() => _axleLengthUnit = v ?? 'm'),
                     decoration: const InputDecoration(labelText: 'Unit'),
                   ),
                 )

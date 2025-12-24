@@ -191,7 +191,8 @@ class PlotDetailsScreen extends ConsumerWidget {
                                         child: Container(
                                           width: 36,
                                           height: 4,
-                                          margin: const EdgeInsets.only(bottom: 8),
+                                          margin:
+                                              const EdgeInsets.only(bottom: 8),
                                           decoration: BoxDecoration(
                                               color: Colors.grey[400],
                                               borderRadius:
@@ -232,7 +233,8 @@ class PlotDetailsScreen extends ConsumerWidget {
                                           child: TextFormField(
                                               controller: rowCtrl,
                                               keyboardType: const TextInputType
-                                                  .numberWithOptions(decimal: true),
+                                                  .numberWithOptions(
+                                                  decimal: true),
                                               decoration: const InputDecoration(
                                                   labelText: 'Row Spacing'),
                                               validator: (v) {
@@ -242,22 +244,31 @@ class PlotDetailsScreen extends ConsumerWidget {
                                                 final val = double.tryParse(t);
                                                 if (val == null)
                                                   return 'Invalid number';
-                                                if (val <= 0) return 'Must be > 0';
+                                                if (val <= 0)
+                                                  return 'Must be > 0';
                                                 return null;
                                               }),
                                         ),
                                         const SizedBox(width: 8),
                                         SizedBox(
                                           width: 110,
-                                          child: DropdownButtonFormField<String>(
+                                          child:
+                                              DropdownButtonFormField<String>(
                                             value: rowUnit,
                                             items: const [
-                                              DropdownMenuItem(value: 'm', child: Text('m')),
-                                              DropdownMenuItem(value: 'in', child: Text('in')),
-                                              DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                              DropdownMenuItem(
+                                                  value: 'm', child: Text('m')),
+                                              DropdownMenuItem(
+                                                  value: 'in',
+                                                  child: Text('in')),
+                                              DropdownMenuItem(
+                                                  value: 'ft',
+                                                  child: Text('ft')),
                                             ],
-                                            onChanged: (v) => setState2(() => rowUnit = v ?? 'm'),
-                                            decoration: const InputDecoration(labelText: 'Unit'),
+                                            onChanged: (v) => setState2(
+                                                () => rowUnit = v ?? 'm'),
+                                            decoration: const InputDecoration(
+                                                labelText: 'Unit'),
                                           ),
                                         )
                                       ]),
@@ -267,7 +278,8 @@ class PlotDetailsScreen extends ConsumerWidget {
                                           child: TextFormField(
                                               controller: bedCtrl,
                                               keyboardType: const TextInputType
-                                                  .numberWithOptions(decimal: true),
+                                                  .numberWithOptions(
+                                                  decimal: true),
                                               decoration: const InputDecoration(
                                                   labelText: 'Bed Height'),
                                               validator: (v) {
@@ -285,15 +297,23 @@ class PlotDetailsScreen extends ConsumerWidget {
                                         const SizedBox(width: 8),
                                         SizedBox(
                                           width: 110,
-                                          child: DropdownButtonFormField<String>(
+                                          child:
+                                              DropdownButtonFormField<String>(
                                             value: bedUnit,
                                             items: const [
-                                              DropdownMenuItem(value: 'm', child: Text('m')),
-                                              DropdownMenuItem(value: 'in', child: Text('in')),
-                                              DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                              DropdownMenuItem(
+                                                  value: 'm', child: Text('m')),
+                                              DropdownMenuItem(
+                                                  value: 'in',
+                                                  child: Text('in')),
+                                              DropdownMenuItem(
+                                                  value: 'ft',
+                                                  child: Text('ft')),
                                             ],
-                                            onChanged: (v) => setState2(() => bedUnit = v ?? 'm'),
-                                            decoration: const InputDecoration(labelText: 'Unit'),
+                                            onChanged: (v) => setState2(
+                                                () => bedUnit = v ?? 'm'),
+                                            decoration: const InputDecoration(
+                                                labelText: 'Unit'),
                                           ),
                                         )
                                       ]),
@@ -325,16 +345,24 @@ class PlotDetailsScreen extends ConsumerWidget {
                                           if (rowOut.isNotEmpty) {
                                             final v = double.tryParse(rowOut);
                                             if (v != null) {
-                                              if (rowUnit == 'in') rowOut = (v * 0.0254).toString();
-                                              else if (rowUnit == 'ft') rowOut = (v * 0.3048).toString();
+                                              if (rowUnit == 'in')
+                                                rowOut =
+                                                    (v * 0.0254).toString();
+                                              else if (rowUnit == 'ft')
+                                                rowOut =
+                                                    (v * 0.3048).toString();
                                             }
                                           }
                                           String bedOut = bedCtrl.text;
                                           if (bedOut.isNotEmpty) {
                                             final v = double.tryParse(bedOut);
                                             if (v != null) {
-                                              if (bedUnit == 'in') bedOut = (v * 0.0254).toString();
-                                              else if (bedUnit == 'ft') bedOut = (v * 0.3048).toString();
+                                              if (bedUnit == 'in')
+                                                bedOut =
+                                                    (v * 0.0254).toString();
+                                              else if (bedUnit == 'ft')
+                                                bedOut =
+                                                    (v * 0.3048).toString();
                                             }
                                           }
                                           Navigator.of(ctx).pop({

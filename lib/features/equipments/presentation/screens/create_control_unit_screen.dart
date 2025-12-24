@@ -372,7 +372,8 @@ class _CreateControlUnitScreenState
                                             .where(
                                                 (e) => e.category == 'sprayer')
                                             .toList();
-                                        final dropdown = DropdownButtonFormField<String?>(
+                                        final dropdown =
+                                            DropdownButtonFormField<String?>(
                                           value: _linkedSprayerId,
                                           decoration: const InputDecoration(
                                               labelText: 'Linked sprayer'),
@@ -406,7 +407,8 @@ class _CreateControlUnitScreenState
                                                   Icons.add_circle_outline),
                                               onPressed: () async {
                                                 await Navigator.of(context)
-                                                    .pushNamed('/create_sprayer');
+                                                    .pushNamed(
+                                                        '/create_sprayer');
                                                 ref.invalidate(
                                                     sprayersProvider(userId));
                                               },
@@ -604,12 +606,17 @@ class _CreateControlUnitScreenState
                                   child: DropdownButtonFormField<String>(
                                     value: _lidarNozzleDistanceUnit,
                                     items: const [
-                                      DropdownMenuItem(value: 'm', child: Text('m')),
-                                      DropdownMenuItem(value: 'in', child: Text('in')),
-                                      DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                      DropdownMenuItem(
+                                          value: 'm', child: Text('m')),
+                                      DropdownMenuItem(
+                                          value: 'in', child: Text('in')),
+                                      DropdownMenuItem(
+                                          value: 'ft', child: Text('ft')),
                                     ],
-                                    onChanged: (v) => setState(() => _lidarNozzleDistanceUnit = v ?? 'm'),
-                                    decoration: const InputDecoration(labelText: 'Unit'),
+                                    onChanged: (v) => setState(() =>
+                                        _lidarNozzleDistanceUnit = v ?? 'm'),
+                                    decoration: const InputDecoration(
+                                        labelText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -659,12 +666,17 @@ class _CreateControlUnitScreenState
                                   child: DropdownButtonFormField<String>(
                                     value: _mountHeightUnit,
                                     items: const [
-                                      DropdownMenuItem(value: 'm', child: Text('m')),
-                                      DropdownMenuItem(value: 'in', child: Text('in')),
-                                      DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                      DropdownMenuItem(
+                                          value: 'm', child: Text('m')),
+                                      DropdownMenuItem(
+                                          value: 'in', child: Text('in')),
+                                      DropdownMenuItem(
+                                          value: 'ft', child: Text('ft')),
                                     ],
-                                    onChanged: (v) => setState(() => _mountHeightUnit = v ?? 'm'),
-                                    decoration: const InputDecoration(labelText: 'Unit'),
+                                    onChanged: (v) => setState(
+                                        () => _mountHeightUnit = v ?? 'm'),
+                                    decoration: const InputDecoration(
+                                        labelText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -715,12 +727,17 @@ class _CreateControlUnitScreenState
                                   child: DropdownButtonFormField<String>(
                                     value: _ultrasonicDistanceUnit,
                                     items: const [
-                                      DropdownMenuItem(value: 'm', child: Text('m')),
-                                      DropdownMenuItem(value: 'in', child: Text('in')),
-                                      DropdownMenuItem(value: 'ft', child: Text('ft')),
+                                      DropdownMenuItem(
+                                          value: 'm', child: Text('m')),
+                                      DropdownMenuItem(
+                                          value: 'in', child: Text('in')),
+                                      DropdownMenuItem(
+                                          value: 'ft', child: Text('ft')),
                                     ],
-                                    onChanged: (v) => setState(() => _ultrasonicDistanceUnit = v ?? 'm'),
-                                    decoration: const InputDecoration(labelText: 'Unit'),
+                                    onChanged: (v) => setState(() =>
+                                        _ultrasonicDistanceUnit = v ?? 'm'),
+                                    decoration: const InputDecoration(
+                                        labelText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -807,9 +824,11 @@ class _CreateControlUnitScreenState
                                     ref.read(authServiceProvider).currentUserId;
                                 // Parse numeric inputs and convert from inches to
                                 // meters when the corresponding unit selector is 'in'.
-                                double? parsedLidar = _lidarNozzleDistance.text.isEmpty
-                                    ? null
-                                    : double.tryParse(_lidarNozzleDistance.text);
+                                double? parsedLidar =
+                                    _lidarNozzleDistance.text.isEmpty
+                                        ? null
+                                        : double.tryParse(
+                                            _lidarNozzleDistance.text);
                                 if (parsedLidar != null) {
                                   if (_lidarNozzleDistanceUnit == 'in') {
                                     parsedLidar = parsedLidar * 0.0254;
@@ -818,7 +837,8 @@ class _CreateControlUnitScreenState
                                   }
                                 }
 
-                                double? parsedMount = _mountHeightOfLidar.text.isEmpty
+                                double? parsedMount = _mountHeightOfLidar
+                                        .text.isEmpty
                                     ? null
                                     : double.tryParse(_mountHeightOfLidar.text);
                                 if (parsedMount != null) {
@@ -829,7 +849,8 @@ class _CreateControlUnitScreenState
                                   }
                                 }
 
-                                double? parsedUltra = _ultrasonicDistance.text.isEmpty
+                                double? parsedUltra = _ultrasonicDistance
+                                        .text.isEmpty
                                     ? null
                                     : double.tryParse(_ultrasonicDistance.text);
                                 if (parsedUltra != null) {
@@ -854,10 +875,9 @@ class _CreateControlUnitScreenState
                                   'linkedSprayerId': _linkedSprayerId,
                                   'linkedTractorId': _linkedTractorId,
                                   'linkedPlotId': _linkedPlotId,
-                                  'lidarNozzleDistance':
-                                        parsedLidar,
-                                      'mountingHeight': parsedMount,
-                                      'ultrasonicDistance': parsedUltra,
+                                  'lidarNozzleDistance': parsedLidar,
+                                  'mountingHeight': parsedMount,
+                                  'ultrasonicDistance': parsedUltra,
                                 };
 
                                 try {
