@@ -4,14 +4,15 @@ import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'dart:math' as math;
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+// no json decoding here; geocoding handled by GeocodingService
+import 'package:simdaas/core/services/geocoding_service.dart';
 import 'package:latlong2/latlong.dart';
-import '../providers/plot_providers.dart';
+// plot providers/imports moved to helper where needed
 import '../providers/map_state_providers.dart';
-import '../../data/models/plot_model.dart';
-import 'package:simdaas/core/services/auth_service.dart';
+// Plot model and auth service used in save helper
 import 'package:simdaas/core/services/location_service.dart';
+import '../widgets/plot_save_sheet.dart';
+import '../widgets/map_layers.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
   final LatLng? initialCenter;
@@ -44,7 +45,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     const R = 6371000.0; // Earth radius in meters
     // use centroid latitude for projection scale
     double sumLat = 0;
-    for (final p in poly) sumLat += p.latitude;
+    for (final p in poly) {
+      sumLat += p.latitude;
+    }
     final lat0 = (sumLat / poly.length) * (math.pi / 180.0);
 
     List<double> xs = [];
@@ -118,7 +121,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (points.length < 2) return null;
     // use centroid latitude for projection
     double sumLat = 0;
-    for (final pt in points) sumLat += pt.latitude;
+    for (final pt in points) {
+      sumLat += pt.latitude;
+    }
     final lat0 = (sumLat / points.length) * (math.pi / 180.0);
     const R = 6371000.0;
 
@@ -228,20 +233,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (_searchCtrl.text.trim() != text) return; // user kept typing
 
     try {
-      final url = Uri.parse(
-          'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(text)}&format=json&limit=5');
-      final resp =
-          await http.get(url, headers: {'User-Agent': 'SmartSprayerApp/1.0'});
-      if (resp.statusCode == 200) {
-        final List data = json.decode(resp.body) as List;
-        if (mounted) {
-          searchNotifier.setSuggestions(data.cast<Map<String, dynamic>>());
-        }
-      } else {
-        if (mounted) {
-          searchNotifier.clearSuggestions();
-        }
-      }
+      final geo = ref.read(geocodingServiceProvider);
+      final data = await geo.searchSuggestions(text, limit: 5);
+      if (mounted) searchNotifier.setSuggestions(data);
     } catch (e, st) {
       debugPrint('map_screen._onSearchChanged search error: $e\n$st');
       if (mounted) {
@@ -339,18 +333,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     } else {
       // geocode via Nominatim
       try {
-        final url = Uri.parse(
-            'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(text)}&format=json&limit=1');
-        final resp =
-            await http.get(url, headers: {'User-Agent': 'SmartSprayerApp/1.0'});
-        if (resp.statusCode == 200) {
-          final List data = json.decode(resp.body) as List;
-          if (data.isNotEmpty) {
-            final first = data.first as Map<String, dynamic>;
-            final lat = double.parse(first['lat'] as String);
-            final lon = double.parse(first['lon'] as String);
-            center = LatLng(lat, lon);
-          }
+        final geo = ref.read(geocodingServiceProvider);
+        final data = await geo.searchSuggestions(text, limit: 1);
+        if (data.isNotEmpty) {
+          final first = data.first;
+          final lat = double.parse(first['lat'].toString());
+          final lon = double.parse(first['lon'].toString());
+          center = LatLng(lat, lon);
         }
       } catch (e, st) {
         debugPrint('map_screen._navigateToLocation geocode error: $e\n$st');
@@ -367,271 +356,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Future<void> _saveField() async {
     final mapState = ref.read(mapStateProvider);
     final points = mapState.points;
+    final normalizedPoints = _normalizePolygon(points);
+    // update stored points to normalized
+    ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
 
-    final nameCtrl = TextEditingController();
-    final zipCtrl = TextEditingController();
-    final bedHeightCtrl = TextEditingController();
-    final areaCtrl = TextEditingController();
-    final rowSpacingCtrl = TextEditingController();
-    final obstaclesCtrl = TextEditingController();
-    final treeCountCtrl = TextEditingController();
-    final _formKey = GlobalKey<FormState>();
-
-    // Focus nodes to allow moving to next field on keyboard 'Next' action
-    final nameFocus = FocusNode();
-    final zipFocus = FocusNode();
-    final bedHeightFocus = FocusNode();
-    final areaFocus = FocusNode();
-    final rowSpacingFocus = FocusNode();
-    final obstaclesFocus = FocusNode();
-    final treeCountFocus = FocusNode();
-    // prefill area suggestion
-    try {
-      final suggested = _computeAreaHa(points);
-      if (suggested > 0) {
-        areaCtrl.text = suggested.toStringAsFixed(2);
-      }
-    } catch (e, st) {
-      debugPrint(
-          'map_screen._saveField compute area suggestion error: $e\n$st');
-    }
-    final resMap = await showModalBottomSheet<Map<String, String>?>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      builder: (ctx) {
-        final insets = MediaQuery.of(ctx).viewInsets.bottom;
-        final maxHeight = MediaQuery.of(ctx).size.height * 0.9;
-        return AnimatedPadding(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-          padding: EdgeInsets.only(bottom: insets),
-          child: FractionallySizedBox(
-            heightFactor: 0.75,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: maxHeight),
-              child: Material(
-                color: Theme.of(context).scaffoldBackgroundColor,
-                elevation: 8,
-                shape: const RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(12))),
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12.0, vertical: 12.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // small drag handle
-                        Center(
-                          child: Container(
-                            width: 36,
-                            height: 4,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                                color: Colors.grey[400],
-                                borderRadius: BorderRadius.circular(4)),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Form(
-                          key: _formKey,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextFormField(
-                                controller: nameCtrl,
-                                focusNode: nameFocus,
-                                textInputAction: TextInputAction.next,
-                                onFieldSubmitted: (_) =>
-                                    FocusScope.of(ctx).requestFocus(zipFocus),
-                                decoration: const InputDecoration(
-                                    labelText: 'Plot Name'),
-                                validator: (v) => (v == null || v.isEmpty)
-                                    ? 'Enter plot name'
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: zipCtrl,
-                                focusNode: zipFocus,
-                                textInputAction: TextInputAction.next,
-                                onFieldSubmitted: (_) => FocusScope.of(ctx)
-                                    .requestFocus(bedHeightFocus),
-                                decoration: const InputDecoration(
-                                    labelText: 'Pin / Zip Code'),
-                                validator: (v) => (v == null || v.isEmpty)
-                                    ? 'Enter pin/zip'
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: bedHeightCtrl,
-                                focusNode: bedHeightFocus,
-                                textInputAction: TextInputAction.next,
-                                onFieldSubmitted: (_) =>
-                                    FocusScope.of(ctx).requestFocus(areaFocus),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                        decimal: true),
-                                decoration: const InputDecoration(
-                                    labelText: 'Bed Height (m)'),
-                                validator: (v) => (v == null || v.isEmpty)
-                                    ? 'Enter bed height'
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: areaCtrl,
-                                focusNode: areaFocus,
-                                textInputAction: TextInputAction.next,
-                                onFieldSubmitted: (_) => FocusScope.of(ctx)
-                                    .requestFocus(rowSpacingFocus),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                        decimal: true),
-                                decoration: const InputDecoration(
-                                    labelText: 'Approx Area (ha)'),
-                                validator: (v) => (v == null || v.isEmpty)
-                                    ? 'Enter area'
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: rowSpacingCtrl,
-                                focusNode: rowSpacingFocus,
-                                textInputAction: TextInputAction.next,
-                                onFieldSubmitted: (_) => FocusScope.of(ctx)
-                                    .requestFocus(obstaclesFocus),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                        decimal: true),
-                                decoration: const InputDecoration(
-                                    labelText: 'Row Spacing (m)'),
-                                validator: (v) => (v == null || v.isEmpty)
-                                    ? 'Enter row spacing'
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: obstaclesCtrl,
-                                focusNode: obstaclesFocus,
-                                textInputAction: TextInputAction.next,
-                                onFieldSubmitted: (_) => FocusScope.of(ctx)
-                                    .requestFocus(treeCountFocus),
-                                decoration: const InputDecoration(
-                                    labelText: 'Obstacles (notes)'),
-                                validator: (v) => (v == null || v.isEmpty)
-                                    ? 'Enter obstacles (or -)'
-                                    : null,
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: treeCountCtrl,
-                                focusNode: treeCountFocus,
-                                textInputAction: TextInputAction.done,
-                                onFieldSubmitted: (_) =>
-                                    FocusScope.of(ctx).unfocus(),
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                    labelText: 'Total Trees'),
-                                validator: (v) => (v == null || v.isEmpty)
-                                    ? 'Enter total trees'
-                                    : null,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: () {
-                            if (!_formKey.currentState!.validate()) return;
-                            // collect form values and return them to the caller
-                            final result = <String, String>{
-                              'name': nameCtrl.text,
-                              'zip': zipCtrl.text,
-                              'bedHeight': bedHeightCtrl.text,
-                              'area': areaCtrl.text,
-                              'rowSpacing': rowSpacingCtrl.text,
-                              'obstacles': obstaclesCtrl.text,
-                              'treeCount': treeCountCtrl.text,
-                            };
-                            Navigator.of(ctx).pop(result);
-                          },
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12.0),
-                            child: Text('Save'),
-                          ),
-                        ),
-                        // extra bottom spacing so last field stays visible when keyboard is open
-                        SizedBox(height: insets),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
-    if (resMap != null) {
-      final owner = ref.read(authServiceProvider).currentUserId;
-      double? approx;
-      try {
-        approx = double.parse((resMap['area'] ?? '').toString());
-      } catch (e, st) {
-        debugPrint('map_screen._saveField parse area error: $e\n$st');
-        approx = null;
-      }
-      double? rowSpacing;
-      try {
-        rowSpacing = double.parse((resMap['rowSpacing'] ?? '').toString());
-      } catch (e, st) {
-        debugPrint('map_screen._saveField parse rowSpacing error: $e\n$st');
-        rowSpacing = null;
-      }
-      // note: obstacles input is collected but not stored in the canonical PlotModel
-      int? treeCount;
-      try {
-        treeCount = int.parse(resMap['treeCount'] ?? '');
-      } catch (e, st) {
-        debugPrint('map_screen._saveField parse treeCount error: $e\n$st');
-        treeCount = null;
-      }
-      // normalize polygon before saving
-      final normalizedPoints = _normalizePolygon(points);
-      ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
-
-      // map legacy form fields into the new PlotModel fields
-      final model = PlotModel(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          name: resMap['name'] ?? '',
-          bedHeight: (bedHeightCtrl.text.isEmpty)
-              ? null
-              : double.tryParse(resMap['bedHeight'] ?? ''),
-          area: approx,
-          rowSpacing: rowSpacing,
-          treeCount: treeCount,
-          polygon: normalizedPoints,
-          userId: owner);
-      final repo = ref.read(plotRepoProvider);
-      await repo.addPlot(model);
-      if (!mounted) return;
-      // Invalidate plots list so screens watching it refresh automatically
-      final currentUserId =
-          ref.read(authServiceProvider).currentUserId ?? 'demo_user';
-      ref.invalidate(plotsListProvider(currentUserId));
-      // Close the map screen (caller) after the bottom sheet and repo work
-      // have settled to avoid Navigator locked assertions. Schedule the pop
-      // to run after the current frame.
+    final saved =
+        await showPlotSaveSheet(context, ref, normalizedPoints, _computeAreaHa);
+    if (saved && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         Navigator.of(context).pop(true);
@@ -644,7 +375,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       final loc = await LocationService().getCurrentLocation();
       // Keep a sensible zoom level when centering on device
       const double zoom = 18.0;
-      _mapController.move(loc, zoom);
+      // If LocationService returned an invalid fallback (0,0) because
+      // permissions were denied, use a sensible default in India instead
+      // of moving to (0,0).
+      if ((loc.latitude == 0 && loc.longitude == 0)) {
+        final indiaCenter =
+            LatLng(22.3511148, 78.6677428); // geographic center of India
+        _mapController.move(indiaCenter, zoom);
+      } else {
+        _mapController.move(loc, zoom);
+      }
     } catch (e) {
       if (mounted) {
         showPolishedError(context, e, fallback: 'Location error');
@@ -736,128 +476,58 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       ),
       body: Stack(
         children: [
-          FlutterMap(
+          MapLayers(
             mapController: _mapController,
-            options: MapOptions(
-              onTap: _onTapTap,
-              initialZoom: 18.0,
-              minZoom: widget.minZoom,
-              maxZoom: widget.maxZoom,
-              // Disable map interactions when dragging a vertex
-              interactionOptions: InteractionOptions(
-                flags: absorbMap ? InteractiveFlag.none : InteractiveFlag.all,
-              ),
-            ),
-            children: [
-              TileLayer(
-                  urlTemplate:
-                      'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-                  subdomains: const ['a', 'b', 'c']),
-              if (points.isNotEmpty) ...[
-                PolygonLayer(polygons: [
-                  Polygon(
-                      points: points,
-                      color: Colors.blue.withAlpha(77),
-                      borderStrokeWidth: 3.0,
-                      borderColor: Colors.blue)
-                ]),
-                MarkerLayer(
-                  markers: List.generate(points.length, (i) {
-                    final p = points[i];
-                    return Marker(
-                      point: p,
-                      width: 44,
-                      height: 44,
-                      child: Listener(
-                        behavior: HitTestBehavior.opaque,
-                        onPointerDown: (event) {
-                          // Select vertex and disable map interactions
-                          final mapNotifier =
-                              ref.read(mapStateProvider.notifier);
-                          mapNotifier.selectVertex(i);
-                          mapNotifier.setAbsorbMap(true);
-                          _lastPointerPosition = event.position;
-                        },
-                        onPointerMove: (event) {
-                          if (selectedVertex != i ||
-                              _lastPointerPosition == null) return;
-
-                          try {
-                            // Get the map's camera
-                            final camera = _mapController.camera;
-
-                            // Get the render box to convert global position to local
-                            final RenderBox? box =
-                                context.findRenderObject() as RenderBox?;
-                            if (box == null) return;
-
-                            // Convert global positions to local widget positions
-                            final lastLocal =
-                                box.globalToLocal(_lastPointerPosition!);
-                            final currentLocal =
-                                box.globalToLocal(event.position);
-
-                            // Use camera's method to convert screen point to LatLng
-                            // The camera.pointToLatLng expects a point relative to the map
-                            final lastLatLng = camera.offsetToCrs(
-                                Offset(lastLocal.dx, lastLocal.dy));
-                            final currentLatLng = camera.offsetToCrs(
-                                Offset(currentLocal.dx, currentLocal.dy));
-
-                            // Calculate the delta in lat/lng space
-                            final deltaLat =
-                                currentLatLng.latitude - lastLatLng.latitude;
-                            final deltaLng =
-                                currentLatLng.longitude - lastLatLng.longitude;
-
-                            // Apply the delta to the vertex position
-                            final currentVertex = points[i];
-                            final newLat = currentVertex.latitude + deltaLat;
-                            final newLng = currentVertex.longitude + deltaLng;
-
-                            final mapNotifier =
-                                ref.read(mapStateProvider.notifier);
-                            if (selectedVertex != null &&
-                                selectedVertex < points.length) {
-                              mapNotifier.updatePoint(
-                                  selectedVertex, LatLng(newLat, newLng));
-                            }
-                            _lastPointerPosition = event.position;
-                          } catch (e, st) {
-                            debugPrint(
-                                'map_screen.onPointerMove error: $e\n$st');
-                            // If anything fails, just update the last position
-                            _lastPointerPosition = event.position;
-                          }
-                        },
-                        onPointerUp: (event) {
-                          final mapNotifier =
-                              ref.read(mapStateProvider.notifier);
-                          mapNotifier.setAbsorbMap(false);
-                          _lastPointerPosition = null;
-                        },
-                        onPointerCancel: (event) {
-                          final mapNotifier =
-                              ref.read(mapStateProvider.notifier);
-                          mapNotifier.setAbsorbMap(false);
-                          _lastPointerPosition = null;
-                        },
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color:
-                                selectedVertex == i ? Colors.red : Colors.white,
-                            border: Border.all(color: Colors.blue, width: 2),
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-              ]
-            ],
+            points: points,
+            selectedVertex: selectedVertex,
+            absorbMap: absorbMap,
+            minZoom: widget.minZoom,
+            maxZoom: widget.maxZoom,
+            onTap: _onTapTap,
+            onMarkerPointerDown: (i, event) {
+              final mapNotifier = ref.read(mapStateProvider.notifier);
+              mapNotifier.selectVertex(i);
+              mapNotifier.setAbsorbMap(true);
+              _lastPointerPosition = event.position;
+            },
+            onMarkerPointerMove: (i, event) {
+              if (selectedVertex != i || _lastPointerPosition == null) return;
+              try {
+                final camera = _mapController.camera;
+                final RenderBox? box = context.findRenderObject() as RenderBox?;
+                if (box == null) return;
+                final lastLocal = box.globalToLocal(_lastPointerPosition!);
+                final currentLocal = box.globalToLocal(event.position);
+                final lastLatLng =
+                    camera.offsetToCrs(Offset(lastLocal.dx, lastLocal.dy));
+                final currentLatLng = camera
+                    .offsetToCrs(Offset(currentLocal.dx, currentLocal.dy));
+                final deltaLat = currentLatLng.latitude - lastLatLng.latitude;
+                final deltaLng = currentLatLng.longitude - lastLatLng.longitude;
+                final currentVertex = points[i];
+                final newLat = currentVertex.latitude + deltaLat;
+                final newLng = currentVertex.longitude + deltaLng;
+                final mapNotifier = ref.read(mapStateProvider.notifier);
+                if (selectedVertex != null && selectedVertex < points.length) {
+                  mapNotifier.updatePoint(
+                      selectedVertex, LatLng(newLat, newLng));
+                }
+                _lastPointerPosition = event.position;
+              } catch (e, st) {
+                debugPrint('map_screen.onPointerMove error: $e\n$st');
+                _lastPointerPosition = event.position;
+              }
+            },
+            onMarkerPointerUp: (i, event) {
+              final mapNotifier = ref.read(mapStateProvider.notifier);
+              mapNotifier.setAbsorbMap(false);
+              _lastPointerPosition = null;
+            },
+            onMarkerPointerCancel: (i, event) {
+              final mapNotifier = ref.read(mapStateProvider.notifier);
+              mapNotifier.setAbsorbMap(false);
+              _lastPointerPosition = null;
+            },
           ),
           // ...existing code...
           Positioned(

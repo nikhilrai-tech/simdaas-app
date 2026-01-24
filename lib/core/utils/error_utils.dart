@@ -24,8 +24,9 @@ String extractErrorMessage(Object? error) {
           final parsed = json.decode(raw);
           if (parsed is String) return parsed;
           if (parsed is Map) {
-            if (parsed.containsKey('detail'))
+            if (parsed.containsKey('detail')) {
               return parsed['detail'].toString();
+            }
             final parts = <String>[];
             parsed.forEach((k, v) {
               if (v is List && v.isNotEmpty) {
@@ -46,8 +47,9 @@ String extractErrorMessage(Object? error) {
               final parsed = json.decode(candidate);
               if (parsed is String) return parsed;
               if (parsed is Map) {
-                if (parsed.containsKey('detail'))
+                if (parsed.containsKey('detail')) {
                   return parsed['detail'].toString();
+                }
                 final parts = <String>[];
                 parsed.forEach((k, v) {
                   if (v is List && v.isNotEmpty) {

@@ -224,7 +224,6 @@ class _DashboardCard extends StatelessWidget {
     required this.color,
     required this.onTap,
     this.info,
-    super.key,
   });
 
   @override

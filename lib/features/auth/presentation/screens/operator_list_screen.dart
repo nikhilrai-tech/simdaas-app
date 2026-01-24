@@ -5,18 +5,18 @@ import 'package:simdaas/core/widgets/api_error_widget.dart';
 
 class OperatorListScreen extends ConsumerWidget {
   final bool showFab;
-  const OperatorListScreen({Key? key, this.showFab = true}) : super(key: key);
+  const OperatorListScreen({super.key, this.showFab = true});
 
   Future<void> _showAddOperatorDialog(
       BuildContext context, WidgetRef ref) async {
-    final _nameController = TextEditingController();
-    final _phoneController = TextEditingController();
-    final _emailController = TextEditingController();
-    final _addressController = TextEditingController();
-    final _experienceController = TextEditingController();
-    final _assignedMachineController = TextEditingController();
-    final _shiftTimingController = TextEditingController();
-    bool _isActive = true;
+    final nameController = TextEditingController();
+    final phoneController = TextEditingController();
+    final emailController = TextEditingController();
+    final addressController = TextEditingController();
+    final experienceController = TextEditingController();
+    final assignedMachineController = TextEditingController();
+    final shiftTimingController = TextEditingController();
+    bool isActive = true;
 
     final result = await showDialog<bool>(
       context: context,
@@ -27,36 +27,36 @@ class OperatorListScreen extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: _nameController,
+                controller: nameController,
                 decoration: const InputDecoration(labelText: 'Name'),
               ),
               TextField(
-                controller: _phoneController,
+                controller: phoneController,
                 decoration: const InputDecoration(labelText: 'Phone Number'),
                 keyboardType: TextInputType.phone,
               ),
               TextField(
-                controller: _emailController,
+                controller: emailController,
                 decoration: const InputDecoration(labelText: 'Email'),
                 keyboardType: TextInputType.emailAddress,
               ),
               TextField(
-                controller: _addressController,
+                controller: addressController,
                 decoration: const InputDecoration(labelText: 'Address'),
               ),
               TextField(
-                controller: _experienceController,
+                controller: experienceController,
                 decoration:
                     const InputDecoration(labelText: 'Experience years'),
                 keyboardType: TextInputType.number,
               ),
               TextField(
-                controller: _assignedMachineController,
+                controller: assignedMachineController,
                 decoration:
                     const InputDecoration(labelText: 'Assigned machine'),
               ),
               TextField(
-                controller: _shiftTimingController,
+                controller: shiftTimingController,
                 decoration: const InputDecoration(labelText: 'Shift timing'),
               ),
               Row(
@@ -65,8 +65,8 @@ class OperatorListScreen extends ConsumerWidget {
                   const Spacer(),
                   StatefulBuilder(builder: (ctx, setState) {
                     return Switch(
-                      value: _isActive,
-                      onChanged: (v) => setState(() => _isActive = v),
+                      value: isActive,
+                      onChanged: (v) => setState(() => isActive = v),
                     );
                   })
                 ],
@@ -81,10 +81,10 @@ class OperatorListScreen extends ConsumerWidget {
           ),
           ElevatedButton(
             onPressed: () async {
-              final name = _nameController.text.trim();
+              final name = nameController.text.trim();
               if (name.isEmpty) return;
-              final phone = _phoneController.text.trim();
-              final email = _emailController.text.trim();
+              final phone = phoneController.text.trim();
+              final email = emailController.text.trim();
               final emailRegex = RegExp(r"^[^\s@]+@[^\s@]+\.[^\s@]+$");
               final phoneDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
               if (email.isNotEmpty && !emailRegex.hasMatch(email)) {
@@ -98,11 +98,11 @@ class OperatorListScreen extends ConsumerWidget {
                     const SnackBar(content: Text('Invalid phone number')));
                 return;
               }
-              final address = _addressController.text.trim();
+              final address = addressController.text.trim();
               final experience =
-                  int.tryParse(_experienceController.text.trim());
-              final assigned = _assignedMachineController.text.trim();
-              final shift = _shiftTimingController.text.trim();
+                  int.tryParse(experienceController.text.trim());
+              final assigned = assignedMachineController.text.trim();
+              final shift = shiftTimingController.text.trim();
               await ref.read(operatorsControllerProvider).createOperator(
                     name: name,
                     contactNumber: phone,
@@ -111,7 +111,7 @@ class OperatorListScreen extends ConsumerWidget {
                     experienceYears: experience,
                     assignedMachine: assigned,
                     shiftTiming: shift,
-                    isActive: _isActive,
+                    isActive: isActive,
                   );
               Navigator.of(context).pop(true);
             },

@@ -1,6 +1,4 @@
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:simdaas/core/services/api_service.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import '../models/job_model.dart';
@@ -23,8 +21,9 @@ class JobRemoteDataSourceImpl implements JobRemoteDataSource {
     bodyMap['name'] = j['name'];
     // normalize plot and control unit to primitive ids when possible
     if (j['plot'] != null) bodyMap['plot'] = _extractId(j['plot']);
-    if (j['controlUnit'] != null)
+    if (j['controlUnit'] != null) {
       bodyMap['control_unit'] = _extractId(j['controlUnit']);
+    }
 
     // schedule time: ensure ISO string where possible
     if (j['scheduleTime'] != null) {
@@ -83,37 +82,32 @@ class JobRemoteDataSourceImpl implements JobRemoteDataSource {
       }
     }
 
-    final body = json.encode(bodyMap);
     // do not log request body in production
-    await api.post('/jobs/api/',
-        headers: {'Content-Type': 'application/json'}, body: body);
+    await api.postJson('/jobs/api/', jsonBody: bodyMap);
   }
 
   @override
   Future<List<JobModel>> getJobs(String userId) async {
-    final candidates = [
-      '/jobs/api/',
-    ];
-    http.Response? lastResp;
+    final candidates = ['/jobs/api/'];
+    dynamic dataRaw;
     Exception? lastEx;
     for (final p in candidates) {
       try {
-        final resp = await api.get(p);
-        lastResp = resp;
-        break;
+        final dr = await api.getJson(p);
+        if (dr is List) {
+          dataRaw = dr;
+          break;
+        }
       } catch (e) {
-        // capture exception and try next candidate
         lastEx = e as Exception;
       }
     }
-    if (lastResp == null) {
+    if (dataRaw == null) {
       debugPrint('JobRemoteDataSource.getJobs failed: $lastEx');
       throw lastEx ?? Exception('Unknown error listing jobs');
     }
-
-    // If the server returned non-JSON (HTML error page), surface it for debugging
     try {
-      final data = json.decode(lastResp.body) as List<dynamic>;
+      final data = dataRaw as List<dynamic>;
       final out = <JobModel>[];
       for (final item in data) {
         final map = Map<String, dynamic>.from(item as Map);
@@ -122,13 +116,9 @@ class JobRemoteDataSourceImpl implements JobRemoteDataSource {
       }
       return out;
     } catch (e) {
-      debugPrint(
-          'Failed to parse jobs response (status=${lastResp.statusCode}). Body:\n${lastResp.body}');
-      // If we received a non-JSON response from the server, surface a
-      // structured ApiException so UI helpers can extract the server body.
-      throw ApiException(
-          lastResp.statusCode, 'Failed to parse jobs response: ${e.toString()}',
-          path: '/jobs/api/', body: lastResp.body);
+      debugPrint('Failed to parse jobs response: $e');
+      throw ApiException(null, 'Failed to parse jobs response: ${e.toString()}',
+          path: '/jobs/api/');
     }
   }
 
@@ -139,14 +129,17 @@ class JobRemoteDataSourceImpl implements JobRemoteDataSource {
     final bodyMap = <String, dynamic>{};
     if (j.containsKey('name')) bodyMap['name'] = j['name'];
     if (j.containsKey('plot')) bodyMap['plot'] = _extractId(j['plot']);
-    if (j.containsKey('controlUnit'))
+    if (j.containsKey('controlUnit')) {
       bodyMap['control_unit'] = _extractId(j['controlUnit']);
-    if (j.containsKey('scheduleTime'))
+    }
+    if (j.containsKey('scheduleTime')) {
       bodyMap['schedule_time'] = j['scheduleTime'] is DateTime
           ? (j['scheduleTime'] as DateTime).toIso8601String()
           : j['scheduleTime'];
-    if (j.containsKey('operator'))
+    }
+    if (j.containsKey('operator')) {
       bodyMap['operator'] = _extractId(j['operator']);
+    }
     if (j.containsKey('sprayRate')) bodyMap['spray_rate'] = j['sprayRate'];
     if (j.containsKey('productMix')) {
       final pm = j['productMix'];
@@ -175,10 +168,8 @@ class JobRemoteDataSourceImpl implements JobRemoteDataSource {
         bodyMap['product_mix'] = _extractId(pm);
       }
     }
-    final body = json.encode(bodyMap);
     // prefer PATCH for partial updates, but use POST if server expects it
-    await api.post('/jobs/api/${job.id}/',
-        headers: {'Content-Type': 'application/json'}, body: body);
+    await api.postJson('/jobs/api/${job.id}/', jsonBody: bodyMap);
   }
 
   dynamic _extractId(dynamic v) {

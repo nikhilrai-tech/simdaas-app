@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/utils/api_error.dart';
-import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 
 // Validation regexes
@@ -54,8 +53,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 validator: (v) {
                   if (v == null || v.isEmpty) return 'Username required';
                   if (v.trim().length > 100) return 'Username too long';
-                  if (!_usernameRegex.hasMatch(v.trim()))
+                  if (!_usernameRegex.hasMatch(v.trim())) {
                     return 'Invalid characters in username';
+                  }
                   return null;
                 },
               ),
@@ -92,11 +92,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 validator: (v) {
                   if (v == null || v.isEmpty) return 'Password required';
                   final t = v;
-                  if (t.length < 8)
+                  if (t.length < 8) {
                     return 'Password must be at least 8 characters';
+                  }
                   if (t.length > 128) return 'Password too long';
-                  if (!_passwordStrongRegex.hasMatch(t))
+                  if (!_passwordStrongRegex.hasMatch(t)) {
                     return 'Password must include letters and numbers';
+                  }
                   return null;
                 },
               ),
@@ -116,8 +118,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 maxLength: 128,
                 validator: (v) {
                   if (v == null || v.isEmpty) return 'Confirm password';
-                  if (v.length < 8)
+                  if (v.length < 8) {
                     return 'Password must be at least 8 characters';
+                  }
                   if (v.length > 128) return 'Password too long';
                   if (v != _password.text) return 'Passwords do not match';
                   return null;

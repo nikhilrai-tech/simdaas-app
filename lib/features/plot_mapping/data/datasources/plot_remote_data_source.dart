@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:simdaas/core/services/api_service.dart';
 import '../models/plot_model.dart';
 
@@ -33,17 +32,14 @@ class PlotRemoteDataSourceImpl implements PlotRemoteDataSource {
       'tree_count': plot.treeCount,
       'user_area_acre': plot.area,
       // backend sample used a string for bed_height; convert to string if present
-      'bed_height': plot.bedHeight != null ? plot.bedHeight.toString() : null,
+      'bed_height': plot.bedHeight?.toString(),
     };
-    final body = json.encode(payload);
-    await api.post('/plot/api/',
-        headers: {'Content-Type': 'application/json'}, body: body);
+    await api.postJson('/plot/api/', jsonBody: payload);
   }
 
   @override
   Future<List<PlotModel>> getPlots(String userId) async {
-    final resp = await api.get('/plot/api/');
-    final data = json.decode(resp.body) as List<dynamic>;
+    final data = await api.getJson('/plot/api/') as List<dynamic>;
     final List<PlotModel> out = [];
     for (final item in data) {
       final Map<String, dynamic> jsonItem = item as Map<String, dynamic>;
@@ -71,10 +67,8 @@ class PlotRemoteDataSourceImpl implements PlotRemoteDataSource {
   @override
   Future<void> updatePlot(PlotModel plot) async {
     final payload = plot.toJson();
-    final body = json.encode(payload);
     // PATCH to the specific plot endpoint; backend expected trailing slash
-    await api.patch('/plot/api/${plot.id}/',
-        headers: {'Content-Type': 'application/json'}, body: body);
+    await api.patchJson('/plot/api/${plot.id}/', jsonBody: payload);
   }
 
   @override

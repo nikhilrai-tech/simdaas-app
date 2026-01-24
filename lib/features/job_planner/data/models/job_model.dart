@@ -63,12 +63,13 @@ class JobModel extends JobEntity {
     // operator may be an id or an object
     String? operatorId;
     final opVal = json['operator'] ?? json['operatorId'] ?? json['operator_id'];
-    if (opVal is String)
+    if (opVal is String) {
       operatorId = opVal;
-    else if (opVal is int)
+    } else if (opVal is int) {
       operatorId = opVal.toString();
-    else if (opVal is Map)
+    } else if (opVal is Map) {
       operatorId = (opVal['id'] ?? opVal['pk'])?.toString();
+    }
 
     // productMix: normalize into a list of maps where possible
     List<Map<String, dynamic>>? normalizedProductMix;

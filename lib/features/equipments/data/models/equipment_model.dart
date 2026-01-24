@@ -29,10 +29,10 @@ class EquipmentModel extends EquipmentEntity {
 
   factory EquipmentModel.fromJson(String id, Map<String, dynamic> json) {
     // helper to read either snake_case or camelCase numeric fields
-    double? _num(String a, [String? b]) =>
+    double? readNum(String a, [String? b]) =>
         (json[a] as num?)?.toDouble() ??
         (b != null ? (json[b] as num?)?.toDouble() : null);
-    int? _int(String a, [String? b]) =>
+    int? readInt(String a, [String? b]) =>
         (json[a] as num?)?.toInt() ??
         (b != null ? (json[b] as num?)?.toInt() : null);
 
@@ -47,7 +47,7 @@ class EquipmentModel extends EquipmentEntity {
 
     final category = (json['category'] as String? ?? '').toString();
     // parse timestamps with snake_case fallback
-    DateTime? _parseTime(String a, [String? b]) {
+    DateTime? parseTime(String a, [String? b]) {
       final v = json[a] ?? (b != null ? json[b] : null);
       return v != null ? DateTime.tryParse(v.toString()) : null;
     }
@@ -60,15 +60,16 @@ class EquipmentModel extends EquipmentEntity {
         userId: json['user'].toString() as String? ?? userId,
         status: json['status'] as String?,
         controlUnitId: json['controlUnitId'] as String?,
-        mountingHeight: _num('mountingHeight', 'mounting_height'),
+        mountingHeight: readNum('mountingHeight', 'mounting_height'),
         lidarNozzleDistance:
-            _num('lidarNozzleDistance', 'lidar_nozzle_distance'),
-        ultrasonicDistance: _num('ultrasonicDistance', 'ultrasonic_distance'),
-        wheelDiameter: _num('wheelDiameter', 'wheel_diameter'),
-        screwsInWheel: _int('screwsInWheel', 'screws_per_wheel'),
-        axleLength: _num('axleLength', 'axle_length'),
-        createdAt: _parseTime('createdAt', 'created_at'),
-        updatedAt: _parseTime('updatedAt', 'updated_at'),
+            readNum('lidarNozzleDistance', 'lidar_nozzle_distance'),
+        ultrasonicDistance:
+            readNum('ultrasonicDistance', 'ultrasonic_distance'),
+        wheelDiameter: readNum('wheelDiameter', 'wheel_diameter'),
+        screwsInWheel: readInt('screwsInWheel', 'screws_per_wheel'),
+        axleLength: readNum('axleLength', 'axle_length'),
+        createdAt: parseTime('createdAt', 'created_at'),
+        updatedAt: parseTime('updatedAt', 'updated_at'),
       );
     } else if (category == 'control_unit') {
       return ControlUnitModel(
@@ -78,15 +79,15 @@ class EquipmentModel extends EquipmentEntity {
         userId: json['user'].toString() as String? ?? userId,
         status: json['status'] as String?,
         controlUnitId: json['controlUnitId'] as String?,
-        mountingHeight: _num('mount_height_of_lidar', 'mounting_height'),
-        lidarNozzleDistance: _num(
+        mountingHeight: readNum('mount_height_of_lidar', 'mounting_height'),
+        lidarNozzleDistance: readNum(
             'distance_b_w_sensor_and_nozzle_center', 'lidar_nozzle_distance'),
-        ultrasonicDistance: _num(
+        ultrasonicDistance: readNum(
             'distance_of_us_sensor_from_center_line', 'ultrasonic_distance'),
-        wheelDiameter: _num('wheelDiameter', 'wheel_diameter'),
-        screwsInWheel: _int('screwsInWheel', 'screws_per_wheel'),
+        wheelDiameter: readNum('wheelDiameter', 'wheel_diameter'),
+        screwsInWheel: readInt('screwsInWheel', 'screws_per_wheel'),
         hingeToControlUnit:
-            _num('hingeToControlUnit', 'distance_hinge_control_unit'),
+            readNum('hingeToControlUnit', 'distance_hinge_control_unit'),
         macAddress:
             json['mac_addr'] as String? ?? json['mac_address'] as String?,
         linkedSprayerId: json['sprayer']['id'].toString() as String? ??
@@ -95,8 +96,8 @@ class EquipmentModel extends EquipmentEntity {
             json['linked_tractor_id'].toString() as String?,
         linkedPlotId: json['plot']['id'].toString() as String? ??
             json['linked_plot_id'].toString() as String?,
-        createdAt: _parseTime('createdAt', 'created_at'),
-        updatedAt: _parseTime('updatedAt', 'updated_at'),
+        createdAt: parseTime('createdAt', 'created_at'),
+        updatedAt: parseTime('updatedAt', 'updated_at'),
       );
     } else {
       // default to SprayerModel
@@ -108,21 +109,22 @@ class EquipmentModel extends EquipmentEntity {
         status: json['status'] as String?,
         controlUnitId: json['controlUnitId'] as String? ??
             json['control_unit_id'] as String?,
-        mountingHeight: _num('mountingHeight', 'mounting_height'),
+        mountingHeight: readNum('mountingHeight', 'mounting_height'),
         lidarNozzleDistance:
-            _num('lidarNozzleDistance', 'lidar_nozzle_distance'),
-        ultrasonicDistance: _num('ultrasonicDistance', 'ultrasonic_distance'),
-        wheelDiameter: _num('wheelDiameter', 'wheel_diameter'),
-        screwsInWheel: _int('screwsInWheel', 'screws_per_wheel'),
-        axleLength: _num('axleLength', 'axle_length'),
-        nozzleCount: _int('nozzleCount', 'nozzle_count'),
-        tankCapacity: _num('tankCapacity', 'tank_capacity'),
-        hingeToAxle: _num('hingeToAxle', 'distance_hinge_axle'),
-        hingeToNozzle: _num('hingeToNozzle', 'distance_hinge_nozzle'),
+            readNum('lidarNozzleDistance', 'lidar_nozzle_distance'),
+        ultrasonicDistance:
+            readNum('ultrasonicDistance', 'ultrasonic_distance'),
+        wheelDiameter: readNum('wheelDiameter', 'wheel_diameter'),
+        screwsInWheel: readInt('screwsInWheel', 'screws_per_wheel'),
+        axleLength: readNum('axleLength', 'axle_length'),
+        nozzleCount: readInt('nozzleCount', 'nozzle_count'),
+        tankCapacity: readNum('tankCapacity', 'tank_capacity'),
+        hingeToAxle: readNum('hingeToAxle', 'distance_hinge_axle'),
+        hingeToNozzle: readNum('hingeToNozzle', 'distance_hinge_nozzle'),
         hingeToControlUnit:
-            _num('hingeToControlUnit', 'distance_hinge_control_unit'),
-        createdAt: _parseTime('createdAt', 'created_at'),
-        updatedAt: _parseTime('updatedAt', 'updated_at'),
+            readNum('hingeToControlUnit', 'distance_hinge_control_unit'),
+        createdAt: parseTime('createdAt', 'created_at'),
+        updatedAt: parseTime('updatedAt', 'updated_at'),
       );
     }
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/services/connectivity_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:math' as math;
@@ -9,11 +10,40 @@ import 'dart:ui' as ui;
 import '../providers/plot_providers.dart';
 import 'map_screen.dart';
 
-class PlotListScreen extends ConsumerWidget {
+class PlotListScreen extends ConsumerStatefulWidget {
   const PlotListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PlotListScreen> createState() => _PlotListScreenState();
+}
+
+class _PlotListScreenState extends ConsumerState<PlotListScreen>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      final userId = ref.read(authServiceProvider).currentUserId;
+      if (userId != null) {
+        ref.invalidate(plotsListProvider(userId));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final userId = ref.read(authServiceProvider).currentUserId;
     if (userId == null) {
       return Scaffold(
@@ -24,57 +54,93 @@ class PlotListScreen extends ConsumerWidget {
 
     final plotsAsync = ref.watch(plotsListProvider(userId));
 
+    final conn = ref.watch(isOnlineStreamProvider);
+    final online = conn.asData?.value ?? true;
     return Scaffold(
-      appBar: AppBar(title: const Text('Plots')),
+      appBar: AppBar(
+          title: const Text('Plots'),
+          bottom: online
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(28),
+                  child: Container(
+                    height: 28,
+                    color: Colors.red.shade700,
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'Offline — showing last known data',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                )),
       body: plotsAsync.when(
-        data: (plots) => ListView.builder(
-          itemCount: plots.length,
-          itemBuilder: (context, idx) {
-            final f = plots[idx];
-            final summary = <String>[];
-            if (f.area != null) summary.add('${f.area} ha');
-            if (f.rowSpacing != null) summary.add('${f.rowSpacing} m');
-            if (f.treeCount != null) summary.add('${f.treeCount} trees');
-            if (f.bedHeight != null) summary.add('Bed H: ${f.bedHeight} m');
-
-            return ListTile(
-              leading: SizedBox(
-                width: 120,
-                height: 80,
-                child: PlotThumbnail(polygon: f.polygon),
-              ),
-              title: Text(f.name),
-              subtitle: Text(summary.where((s) => s.isNotEmpty).join(' • ')),
-              onTap: () {
-                showDialog<void>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                          title: Text(f.name),
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (f.bedHeight != null)
-                                Text('Bed Height: ${f.bedHeight} m'),
-                              if (f.area != null) Text('Area: ${f.area} ha'),
-                              if (f.rowSpacing != null)
-                                Text('Row Spacing: ${f.rowSpacing} m'),
-                              if (f.treeCount != null)
-                                Text('Total Trees: ${f.treeCount}'),
-                            ],
-                          ),
-                          actions: [
-                            TextButton(
-                                onPressed: () => Navigator.of(ctx).pop(),
-                                child: const Text('Close')),
-                          ],
-                        ));
-              },
-            );
+        data: (plots) => RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(plotsListProvider(userId));
+            try {
+              await ref.read(plotsListProvider(userId).future);
+            } catch (_) {}
           },
+          child: ListView.builder(
+            itemCount: plots.length,
+            itemBuilder: (context, idx) {
+              final f = plots[idx];
+              final summary = <String>[];
+              if (f.area != null) summary.add('${f.area} ha');
+              if (f.rowSpacing != null) summary.add('${f.rowSpacing} m');
+              if (f.treeCount != null) summary.add('${f.treeCount} trees');
+              if (f.bedHeight != null) summary.add('Bed H: ${f.bedHeight} m');
+
+              return ListTile(
+                leading: SizedBox(
+                  width: 120,
+                  height: 80,
+                  child: PlotThumbnail(polygon: f.polygon),
+                ),
+                title: Text(f.name),
+                subtitle: Text(summary.where((s) => s.isNotEmpty).join(' • ')),
+                onTap: () {
+                  showDialog<void>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                            title: Text(f.name),
+                            content: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (f.bedHeight != null)
+                                  Text('Bed Height: ${f.bedHeight} m'),
+                                if (f.area != null) Text('Area: ${f.area} ha'),
+                                if (f.rowSpacing != null)
+                                  Text('Row Spacing: ${f.rowSpacing} m'),
+                                if (f.treeCount != null)
+                                  Text('Total Trees: ${f.treeCount}'),
+                              ],
+                            ),
+                            actions: [
+                              TextButton(
+                                  onPressed: () => Navigator.of(ctx).pop(),
+                                  child: const Text('Close')),
+                            ],
+                          ));
+                },
+              );
+            },
+          ),
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, st) => Center(child: Text(extractErrorMessage(e))),
+        error: (e, st) => RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(plotsListProvider(userId));
+            try {
+              await ref.read(plotsListProvider(userId).future);
+            } catch (_) {}
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [Center(child: Text(extractErrorMessage(e)))],
+          ),
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
@@ -172,10 +238,11 @@ class PlotPolygonPainter extends CustomPainter {
       final x = offsetX + ((p.longitude - minLng) * scale);
       // invert latitude to y coordinate (lat increases northwards)
       final y = offsetY + usedHeight - ((p.latitude - minLat) * scale);
-      if (i == 0)
+      if (i == 0) {
         path.moveTo(x, y);
-      else
+      } else {
         path.lineTo(x, y);
+      }
     }
     path.close();
 

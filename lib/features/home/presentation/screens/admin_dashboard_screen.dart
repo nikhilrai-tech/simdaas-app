@@ -147,9 +147,10 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                           data: (users) {
                             return fieldsAsync.when(
                               data: (fields) {
-                                if (jobs.isEmpty)
+                                if (jobs.isEmpty) {
                                   return const Center(
                                       child: Text('No jobs yet'));
+                                }
                                 // Sort jobs
                                 final sortedJobs = [...jobs];
                                 sortedJobs.sort((a, b) {
@@ -207,8 +208,9 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                                           final name = data?['name'] as String?;
                                           final email =
                                               data?['email'] as String?;
-                                          if (name != null && name.isNotEmpty)
+                                          if (name != null && name.isNotEmpty) {
                                             return name;
+                                          }
                                           return email ?? job.userId;
                                         }
                                       } catch (e, st) {
@@ -258,7 +260,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                              '${plot?.name ?? 'Unknown farm'}'),
+                                              plot?.name ?? 'Unknown farm'),
                                           Text(
                                               'Spray rate: ${job.sprayRate ?? '-'}'),
                                         ],

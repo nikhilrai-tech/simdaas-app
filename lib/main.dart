@@ -6,6 +6,8 @@ import 'features/auth/presentation/screens/login_screen.dart';
 import 'features/auth/presentation/screens/auth_gate.dart';
 // role selection now uses the unified three-button dashboard
 import 'features/plot_mapping/presentation/screens/plot_list_screen.dart';
+import 'features/plot_mapping/presentation/providers/plot_providers.dart'
+    as plot_provs;
 import 'features/plot_mapping/presentation/screens/map_screen.dart';
 import 'features/job_planner/presentation/screens/job_planner_screen.dart';
 import 'features/job_planner/presentation/screens/create_job_screen.dart';
@@ -29,6 +31,7 @@ import 'features/auth/presentation/screens/forgot_password_confirm_screen.dart';
 // temp
 import 'temp_features/control_centres_dashboard.dart';
 import 'core/services/telemetry_service.dart';
+import 'core/services/connectivity_service.dart';
 import 'debug/telemetry_debug_screen.dart';
 import 'core/services/auth_service.dart';
 import 'core/utils/mac_utils.dart';
@@ -58,6 +61,9 @@ class MyApp extends StatelessWidget {
       theme: AppTheme.lightTheme,
       // Use AuthGate as home so we can wait for persisted tokens to load
       // Wrap with WillPopScope to confirm app exit when at the root.
+      // Deprecated replacement 'PopScope' requires API changes; keep
+      // WillPopScope and ignore deprecation for now to preserve behavior.
+      // ignore: deprecated_member_use
       home: WillPopScope(
         onWillPop: () async {
           // Use the app-level navigator key to check stack state so we're
@@ -65,7 +71,6 @@ class MyApp extends StatelessWidget {
           // navigator.
           final nav = appNavKey.currentState;
           if (nav != null && nav.canPop()) return true;
-
           // Otherwise ask for confirmation. Use the app-level context so the
           // dialog is shown on the root navigator.
           final doExit = await showDialog<bool>(
@@ -167,24 +172,7 @@ class TelemetryBootstrapper extends ConsumerWidget {
             final ids = <String>[];
             for (final cu in items) {
               try {
-                final dynCu = cu as dynamic;
-                String id = '';
-                try {
-                  final maybe = dynCu['mac'] ??
-                      dynCu['mac_address'] ??
-                      dynCu['controlUnitId'] ??
-                      dynCu['control_unit_id'] ??
-                      dynCu['id'];
-                  if (maybe != null) id = maybe.toString();
-                } catch (_) {
-                  try {
-                    id = (dynCu.macAddress ?? dynCu.controlUnitId ?? dynCu.id)
-                            ?.toString() ??
-                        '';
-                  } catch (_) {
-                    id = '';
-                  }
-                }
+                final id = extractDeviceId(cu);
                 if (id.isNotEmpty) ids.add(id);
               } catch (e) {
                 debugPrint(
@@ -209,6 +197,30 @@ class TelemetryBootstrapper extends ConsumerWidget {
       }
     });
 
+    // Listen for connectivity changes and attempt to re-fetch and subscribe
+    // when network becomes available.
+    ref.listen<AsyncValue<bool>>(isOnlineStreamProvider, (prev, next) {
+      try {
+        final online = next.value ?? true;
+        if (online) {
+          final userId = ref.read(authServiceProvider).currentUserId ?? '';
+          if (userId.isNotEmpty) {
+            // Re-fetch control units and re-subscribe telemetry channels.
+            Future.microtask(() => _fetchAndSubscribe(ref, userId));
+            // Also invalidate list providers so UI list screens refresh.
+            try {
+              ref.invalidate(eq_provs.equipmentsListProvider(userId));
+            } catch (_) {}
+            try {
+              ref.invalidate(plot_provs.plotsListProvider(userId));
+            } catch (_) {}
+          }
+        }
+      } catch (e) {
+        debugPrint('TelemetryBootstrapper connectivity listener error: $e');
+      }
+    });
+
     return child;
   }
 
@@ -223,24 +235,7 @@ class TelemetryBootstrapper extends ConsumerWidget {
       final ids = <String>[];
       for (final cu in items) {
         try {
-          final dynCu = cu as dynamic;
-          String id = '';
-          try {
-            final maybe = dynCu['mac'] ??
-                dynCu['mac_address'] ??
-                dynCu['controlUnitId'] ??
-                dynCu['control_unit_id'] ??
-                dynCu['id'];
-            if (maybe != null) id = maybe.toString();
-          } catch (_) {
-            try {
-              id = (dynCu.macAddress ?? dynCu.controlUnitId ?? dynCu.id)
-                      ?.toString() ??
-                  '';
-            } catch (_) {
-              id = '';
-            }
-          }
+          final id = extractDeviceId(cu);
           if (id.isNotEmpty) ids.add(id);
         } catch (e) {
           debugPrint('TelemetryBootstrapper: error extracting id from cu: $e');

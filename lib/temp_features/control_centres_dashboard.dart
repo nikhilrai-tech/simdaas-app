@@ -17,7 +17,7 @@ import '../features/equipments/presentation/screens/scan_control_unit_screen.dar
 /// Temporary dashboard that resembles the main three-button dashboard but
 /// includes a quick control-centres status card for development/testing.
 class TempDashboard extends ConsumerWidget {
-  const TempDashboard({Key? key}) : super(key: key);
+  const TempDashboard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -269,8 +269,7 @@ String? _extractPlotNameFromLinked(String linked, Map<String, String> plotMap) {
 
 class _ControlUnitsListScreen extends ConsumerStatefulWidget {
   final List items;
-  const _ControlUnitsListScreen({required this.items, Key? key})
-      : super(key: key);
+  const _ControlUnitsListScreen({required this.items});
 
   @override
   ConsumerState<_ControlUnitsListScreen> createState() =>
@@ -356,7 +355,7 @@ class _ControlUnitsListScreenState
                   final dyn = cu as dynamic;
                   final mac = (() {
                     try {
-                      return dyn.macAddress ?? dyn.mac ?? dyn['mac'] ?? null;
+                      return dyn.macAddress ?? dyn.mac ?? dyn['mac'];
                     } catch (_) {
                       return null;
                     }
@@ -365,15 +364,14 @@ class _ControlUnitsListScreenState
                     try {
                       return dyn.controlUnitId ??
                           dyn['controlUnitId'] ??
-                          dyn['control_unit_id'] ??
-                          null;
+                          dyn['control_unit_id'];
                     } catch (_) {
                       return null;
                     }
                   })();
                   final idField = (() {
                     try {
-                      return dyn.id ?? dyn['id'] ?? null;
+                      return dyn.id ?? dyn['id'];
                     } catch (_) {
                       return null;
                     }

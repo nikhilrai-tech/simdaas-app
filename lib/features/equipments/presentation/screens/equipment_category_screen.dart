@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'equipment_list_screen.dart';
 import 'equipment_troubleshooting_screen.dart';
 
 class EquipmentCategoryScreen extends StatelessWidget {
@@ -102,7 +101,7 @@ class EquipmentCategoryScreen extends StatelessWidget {
                         title: 'Sprayers',
                         subtitle: 'Sprayers and nozzle configs',
                         icon: Icons.invert_colors,
-                        color: cs.tertiary ?? cs.secondary,
+                        color: cs.tertiary,
                         onTap: () => Navigator.of(context).pushNamed(
                             '/equipments',
                             arguments: {'category': 'sprayer'}),

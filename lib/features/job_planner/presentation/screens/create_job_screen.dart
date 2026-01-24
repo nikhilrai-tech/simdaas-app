@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/utils/api_error.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
@@ -23,6 +22,7 @@ import '../../../equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
 import '../widgets/material_dialog.dart';
 import 'package:simdaas/core/widgets/api_error_widget.dart';
+import '../widgets/boundary_picker.dart';
 
 // Operator roles removed — add-operator dialog simplified to name + contact number
 
@@ -136,7 +136,9 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                   onPressed: () async {
                     if (creatingNotifier.value) return;
                     if (formKeyOp.currentState == null ||
-                        !formKeyOp.currentState!.validate()) return;
+                        !formKeyOp.currentState!.validate()) {
+                      return;
+                    }
                     creatingNotifier.value = true;
                     try {
                       final opId = await ref
@@ -152,8 +154,9 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                               shiftTiming: shiftTimingCtrl.text.trim(),
                               isActive: isActive);
                       ref.invalidate(users_provs.operatorsListProvider);
-                      if (ctx.mounted)
+                      if (ctx.mounted) {
                         showSuccessSnackBar(parentCtx, 'Created operator');
+                      }
                       Navigator.of(ctx).pop(opId);
                     } catch (e) {
                       if (ctx.mounted) {
@@ -189,21 +192,24 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
         final exists = latest.any((m) =>
             (m['id']?.toString() ?? m['pk']?.toString() ?? '') == createdId);
         if (exists) {
-          if (mounted)
+          if (mounted) {
             ref.read(createJobFormProvider.notifier).setOperatorId(createdId);
+          }
         } else {
           // fallback: still set it (rare) — but do so on next frame to avoid assertion
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted)
+            if (mounted) {
               ref.read(createJobFormProvider.notifier).setOperatorId(createdId);
+            }
           });
         }
       } catch (e, st) {
         debugPrint('create_job_screen: operator provider read failed: $e\n$st');
         // if provider read failed, set selected id defensively on next frame
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted)
+          if (mounted) {
             ref.read(createJobFormProvider.notifier).setOperatorId(createdId);
+          }
         });
       }
     }
@@ -321,67 +327,8 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                               child: TextButton(
                                   onPressed: () async {
                                     // open dialog to pick a single boundary from plots
-                                    final picked = await showDialog<String?>(
-                                        context: context,
-                                        builder: (ctx) {
-                                          String? temp = formState.plotId;
-                                          return StatefulBuilder(
-                                            builder: (ctx2, setStateDialog) =>
-                                                AlertDialog(
-                                              title:
-                                                  const Text('Select Boundary'),
-                                              content: SizedBox(
-                                                width: double.maxFinite,
-                                                child: ListView.builder(
-                                                  shrinkWrap: true,
-                                                  itemCount: fields.length,
-                                                  itemBuilder: (c, i) {
-                                                    final f = fields[i]
-                                                        as fm_models.PlotModel;
-                                                    return RadioListTile<
-                                                        String>(
-                                                      title: Text(f.name),
-                                                      subtitle: Column(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .start,
-                                                        children: [
-                                                          if (f.bedHeight !=
-                                                              null)
-                                                            Text(
-                                                                'Bed H: ${f.bedHeight} m'),
-                                                          if (f.area != null)
-                                                            Text(
-                                                                'Area: ${f.area} ha'),
-                                                        ],
-                                                      ),
-                                                      value: f.id,
-                                                      groupValue: temp,
-                                                      onChanged: (v) {
-                                                        setStateDialog(() {
-                                                          temp = v;
-                                                        });
-                                                      },
-                                                    );
-                                                  },
-                                                ),
-                                              ),
-                                              actions: [
-                                                TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.of(ctx)
-                                                            .pop(null),
-                                                    child:
-                                                        const Text('Cancel')),
-                                                ElevatedButton(
-                                                    onPressed: () =>
-                                                        Navigator.of(ctx)
-                                                            .pop(temp),
-                                                    child: const Text('OK'))
-                                              ],
-                                            ),
-                                          );
-                                        });
+                                    final picked = await showBoundaryPicker(
+                                        context, fields, formState.plotId);
                                     if (picked != null) {
                                       ref
                                           .read(createJobFormProvider.notifier)
@@ -424,10 +371,12 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                         final idRaw = op['id'] ?? op['pk'];
                                         if (idRaw == null) continue;
                                         final id = idRaw.toString();
-                                        if (id.isEmpty)
+                                        if (id.isEmpty) {
                                           continue; // skip empty ids
-                                        if (!byId.containsKey(id))
+                                        }
+                                        if (!byId.containsKey(id)) {
                                           byId[id] = op;
+                                        }
                                       }
                                       // Build a map of DropdownMenuItem by value to forcibly collapse duplicates
                                       final Map<String,
@@ -464,16 +413,17 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                           formState.operatorId != null) {
                                         WidgetsBinding.instance
                                             .addPostFrameCallback((_) {
-                                          if (mounted)
+                                          if (mounted) {
                                             ref
                                                 .read(createJobFormProvider
                                                     .notifier)
                                                 .setOperatorId(null);
+                                          }
                                         });
                                       }
 
                                       return DropdownButtonFormField<String>(
-                                        value: formState.operatorId,
+                                        initialValue: formState.operatorId,
                                         decoration: const InputDecoration(
                                             labelText: 'Operator'),
                                         items: items,
@@ -526,7 +476,7 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                       data: (items) {
                                         // items are already control units
                                         return DropdownButtonFormField<String>(
-                                          value: formState.controlUnitId,
+                                          initialValue: formState.controlUnitId,
                                           decoration: const InputDecoration(
                                               labelText: 'Control unit'),
                                           items: items
@@ -625,7 +575,7 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                                             : 'Unnamed');
                                                 return Text(
                                                     '$display — Qty: ${f['quantity'] ?? ''}');
-                                              }).toList()
+                                              })
                                           ],
                                         ),
                                         trailing: IconButton(
@@ -663,10 +613,8 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                                 const Text('No fertilizers'),
                                               if (ferts != null &&
                                                   ferts.isNotEmpty)
-                                                ...ferts
-                                                    .map((f) => Text(
-                                                        '${f['name']?.toString() ?? f['fertilizer']?.toString() ?? ''} — Qty: ${f['quantity'] ?? ''}'))
-                                                    .toList()
+                                                ...ferts.map((f) => Text(
+                                                    '${f['name']?.toString() ?? f['fertilizer']?.toString() ?? ''} — Qty: ${f['quantity'] ?? ''}'))
                                             ]),
                                         trailing: IconButton(
                                             icon: const Icon(Icons.delete),
@@ -703,10 +651,8 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                                 const Text('No fertilizers'),
                                               if (ferts != null &&
                                                   ferts.isNotEmpty)
-                                                ...ferts
-                                                    .map((f) => Text(
-                                                        '${f['name']?.toString() ?? f['fertilizer']?.toString() ?? ''} — Qty: ${f['quantity'] ?? ''}'))
-                                                    .toList()
+                                                ...ferts.map((f) => Text(
+                                                    '${f['name']?.toString() ?? f['fertilizer']?.toString() ?? ''} — Qty: ${f['quantity'] ?? ''}'))
                                             ]),
                                         trailing: IconButton(
                                             icon: const Icon(Icons.delete),
@@ -825,11 +771,12 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                       onPressed: () async {
                                         final newMat =
                                             await showMaterialDialog(context);
-                                        if (newMat != null)
+                                        if (newMat != null) {
                                           ref
                                               .read(createJobFormProvider
                                                   .notifier)
                                               .addMaterial(newMat);
+                                        }
                                       },
                                       child: const Text('Add Material')),
                                 ],
@@ -933,8 +880,9 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                     onPressed: () async {
                                       // Validate form (basic validation for name)
                                       if (_formKey.currentState == null ||
-                                          !_formKey.currentState!.validate())
+                                          !_formKey.currentState!.validate()) {
                                         return;
+                                      }
 
                                       // Ensure we have a date/time for the job
                                       final dt =

@@ -61,16 +61,15 @@ String extractDeviceId(dynamic cu) {
     final candidates = ['mac', 'macAddress', 'controlUnitId', 'id'];
     for (final name in candidates) {
       try {
-        final val = dyn?.__getProperty?.call(name) ?? null;
+        final val = dyn?.__getProperty?.call(name);
         if (val != null) {
           final s = val.toString();
           if (s.trim().isNotEmpty) return canonicalizeMac(s);
         }
       } catch (_) {
         try {
-          final val2 = dyn.toString().contains(name)
-              ? dyn
-              : null; // cheap check - ignore
+          // cheap check - ignore result, avoid creating unused local
+          dyn.toString().contains(name);
         } catch (_) {}
       }
     }

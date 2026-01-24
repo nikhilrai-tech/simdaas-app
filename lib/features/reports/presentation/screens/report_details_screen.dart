@@ -4,7 +4,7 @@ import '../../domain/report.dart';
 class ReportDetailsScreen extends StatelessWidget {
   final Report report;
 
-  const ReportDetailsScreen({required this.report, Key? key}) : super(key: key);
+  const ReportDetailsScreen({required this.report, super.key});
 
   Widget _metricCircle(String label, String value, double percent) {
     return Column(

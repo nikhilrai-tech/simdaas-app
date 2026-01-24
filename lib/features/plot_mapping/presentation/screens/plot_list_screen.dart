@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/services/connectivity_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:latlong2/latlong.dart';
@@ -10,12 +11,41 @@ import '../providers/plot_providers.dart';
 import 'map_screen.dart';
 import 'plot_details_screen.dart';
 
-class PlotListScreen extends ConsumerWidget {
+class PlotListScreen extends ConsumerStatefulWidget {
   final bool showFab;
   const PlotListScreen({super.key, this.showFab = true});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PlotListScreen> createState() => _PlotListScreenState();
+}
+
+class _PlotListScreenState extends ConsumerState<PlotListScreen>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      final userId = ref.read(authServiceProvider).currentUserId;
+      if (userId != null) {
+        ref.invalidate(plotsListProvider(userId));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final userId = ref.read(authServiceProvider).currentUserId;
     if (userId == null) {
       return Scaffold(
@@ -39,152 +69,207 @@ class PlotListScreen extends ConsumerWidget {
 
     final plotsAsync = ref.watch(plotsListProvider(userId));
 
+    final conn = ref.watch(isOnlineStreamProvider);
+    final online = conn.asData?.value ?? true;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Plots'),
         elevation: 0,
+        bottom: online
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(28),
+                child: Container(
+                  height: 28,
+                  color: Colors.red.shade700,
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'Offline — showing last known data',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ),
       ),
       body: plotsAsync.when(
         data: (plots) {
           if (plots.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+            return RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(plotsListProvider(userId));
+                try {
+                  await ref.read(plotsListProvider(userId).future);
+                } catch (_) {}
+              },
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 children: [
-                  Icon(
-                    Icons.map_outlined,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No plots yet',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Tap the + button to add your first plot',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.map_outlined,
+                          size: 64,
                           color: Theme.of(context).colorScheme.secondary,
                         ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No plots yet',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Tap the + button to add your first plot',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.secondary,
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: plots.length,
-            itemBuilder: (context, idx) {
-              final f = plots[idx];
-              final summary = <String>[];
-              if (f.area != null) summary.add('${f.area} ha');
-              if (f.rowSpacing != null) summary.add('${f.rowSpacing} m');
-              if (f.treeCount != null) summary.add('${f.treeCount} trees');
-              if (f.bedHeight != null) summary.add('Bed H: ${f.bedHeight} m');
+          return RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(plotsListProvider(userId));
+                try {
+                  await ref.read(plotsListProvider(userId).future);
+                } catch (_) {}
+              },
+              child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: plots.length,
+                  itemBuilder: (context, idx) {
+                    final f = plots[idx];
+                    final summary = <String>[];
+                    if (f.area != null) summary.add('${f.area} ha');
+                    if (f.rowSpacing != null) summary.add('${f.rowSpacing} m');
+                    if (f.treeCount != null)
+                      summary.add('${f.treeCount} trees');
+                    if (f.bedHeight != null)
+                      summary.add('Bed H: ${f.bedHeight} m');
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: InkWell(
-                  onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                        builder: (c) => PlotDetailsScreen(plot: f)));
-                  },
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            width: 100,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .primary
-                                    .withAlpha(77),
-                                width: 1,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: PlotThumbnail(polygon: f.polygon),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 6),
+                      child: InkWell(
+                        onTap: () {
+                          Navigator.of(context).push(MaterialPageRoute(
+                              builder: (c) => PlotDetailsScreen(plot: f)));
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                f.name,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.bold,
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  width: 100,
+                                  height: 80,
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary
+                                          .withAlpha(77),
+                                      width: 1,
                                     ),
-                              ),
-                              const SizedBox(height: 8),
-                              if (summary.isNotEmpty)
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 4,
-                                  children: summary
-                                      .map((s) => Chip(
-                                            backgroundColor: Colors.white,
-                                            label: Text(
-                                              s,
-                                              style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: Colors.black),
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 0,
-                                            ),
-                                            materialTapTargetSize:
-                                                MaterialTapTargetSize
-                                                    .shrinkWrap,
-                                          ))
-                                      .toList(),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: PlotThumbnail(polygon: f.polygon),
                                 ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      f.name,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    if (summary.isNotEmpty)
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 4,
+                                        children: summary
+                                            .map((s) => Chip(
+                                                  backgroundColor: Colors.white,
+                                                  label: Text(
+                                                    s,
+                                                    style: const TextStyle(
+                                                        fontSize: 11,
+                                                        color: Colors.black),
+                                                  ),
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 0,
+                                                  ),
+                                                  materialTapTargetSize:
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
+                                                ))
+                                            .toList(),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
                             ],
                           ),
                         ),
-                        Icon(
-                          Icons.chevron_right,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          );
+                      ),
+                    );
+                  }));
         },
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, st) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+        error: (e, st) => RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(plotsListProvider(userId));
+            try {
+              await ref.read(plotsListProvider(userId).future);
+            } catch (_) {}
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             children: [
-              Icon(
-                Icons.error_outline,
-                size: 64,
-                color: Theme.of(context).colorScheme.error,
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(extractErrorMessage(e)),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
-              Text(extractErrorMessage(e)),
             ],
           ),
         ),
       ),
-      floatingActionButton: showFab
+      floatingActionButton: widget.showFab
           ? FloatingActionButton.extended(
               onPressed: () async {
                 final result = await Navigator.of(context).push<bool?>(
@@ -289,10 +374,11 @@ class PlotPolygonPainter extends CustomPainter {
       final p = polygon[i];
       final x = offsetX + ((p.longitude - minLng) * scale);
       final y = offsetY + usedHeight - ((p.latitude - minLat) * scale);
-      if (i == 0)
+      if (i == 0) {
         path.moveTo(x, y);
-      else
+      } else {
         path.lineTo(x, y);
+      }
     }
     path.close();
 

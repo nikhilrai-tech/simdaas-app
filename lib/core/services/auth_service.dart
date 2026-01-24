@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'api_service.dart';
+import 'api_exception.dart';
 import '../config.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -59,18 +60,15 @@ class AuthService extends ChangeNotifier {
   Future<bool> signIn(String username, String password) async {
     // Postman collection: POST {{baseUrl}}/api/auth/login/ -> returns { access, refresh }
     // IMPORTANT: requiresAuth = false - you can't be authenticated before logging in!
-    final resp = await _api.post('/api/auth/login/',
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'username': username, 'password': password}),
+    final dataRaw = await _api.postJson('/api/auth/login/',
+        jsonBody: {'username': username, 'password': password},
         requiresAuth: false);
-    // Debug: log response for troubleshooting
-    debugPrint('AuthService.signIn -> status: ${resp.statusCode}');
-    debugPrint('AuthService.signIn -> body: ${resp.body}');
-
-    if (resp.statusCode == 200 || resp.statusCode == 201) {
-      final Map data = json.decode(resp.body) as Map<String, dynamic>;
+    debugPrint('AuthService.signIn -> data: ${dataRaw ?? '<empty>'}');
+    if (dataRaw is Map<String, dynamic>) {
+      final Map data = dataRaw;
       _token = data['access'] as String?;
       _refreshToken = data['refresh'] as String?;
+
       // persist tokens
       try {
         if (_token != null) {
@@ -84,6 +82,7 @@ class AuthService extends ChangeNotifier {
       } catch (e) {
         debugPrint('AuthService: failed writing tokens to storage: $e');
       }
+
       // persist user object if server returned it (convenience for profile UI)
       try {
         if (data.containsKey('user') && data['user'] is Map<String, dynamic>) {
@@ -105,7 +104,7 @@ class AuthService extends ChangeNotifier {
       // schedule automatic refresh based on token expiry
       _scheduleRefreshFromToken();
       debugPrint(
-          'AuthService.signIn: Set token on ApiService, token starts with: ${_token!.substring(0, 20)}...');
+          'AuthService.signIn: Set token on ApiService, token starts with: ${_token != null ? _token!.substring(0, 20) : '<null>'}...');
       // extract user id from JWT payload if present
       if (_token != null) {
         try {
@@ -133,13 +132,12 @@ class AuthService extends ChangeNotifier {
     // call backend logout if needed
     if (_token != null || _refreshToken != null) {
       try {
-        final headers = <String, String>{'Content-Type': 'application/json'};
+        final headers = <String, String>{};
         if (_token != null) {
           headers['Authorization'] = 'Bearer $_token';
         }
-        final body = json.encode({'refresh_token': _refreshToken});
-        // Postman collection: POST {{baseUrl}}/api/auth/logout/ with body { refresh_token }
-        await _api.post('/api/auth/logout/', headers: headers, body: body);
+        await _api.postJson('/api/auth/logout/',
+            headers: headers, jsonBody: {'refresh_token': _refreshToken});
       } catch (_) {}
     }
     _token = null;
@@ -175,9 +173,9 @@ class AuthService extends ChangeNotifier {
         }
       }
       debugPrint(
-          'AuthService._loadFromStorage -> access: ${a == null ? 'null' : (a.length > 8 ? a.substring(0, 8) + '...' : a)}');
+          'AuthService._loadFromStorage -> access: ${a == null ? 'null' : (a.length > 8 ? '${a.substring(0, 8)}...' : a)}');
       debugPrint(
-          'AuthService._loadFromStorage -> refresh: ${r == null ? 'null' : (r.length > 8 ? r.substring(0, 8) + '...' : r)}');
+          'AuthService._loadFromStorage -> refresh: ${r == null ? 'null' : (r.length > 8 ? '${r.substring(0, 8)}...' : r)}');
       if (a != null) {
         _token = a;
         _api.setAuthToken(_token);
@@ -276,34 +274,31 @@ class AuthService extends ChangeNotifier {
       debugPrint(
           'AuthService.refreshAccessToken: Calling /api/auth/token/refresh/');
       debugPrint(
-          'AuthService.refreshAccessToken: Using refresh token prefix: ${refresh.length > 8 ? refresh.substring(0, 8) + '...' : refresh}');
+          'AuthService.refreshAccessToken: Using refresh token prefix: ${refresh.length > 8 ? '${refresh.substring(0, 8)}...' : refresh}');
       // IMPORTANT: requiresAuth = false to avoid infinite loop - refresh endpoint should NOT have Authorization header
-      var resp = await _api.post('/api/auth/token/refresh/',
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode({'refresh': refresh}),
-          requiresAuth: false);
-
-      debugPrint(
-          'AuthService.refreshAccessToken: Response status ${resp.statusCode}');
-      // If server rejects payload key 'refresh', try common alternative 'refresh_token'
-      if (resp.statusCode == 401 || resp.statusCode == 400) {
-        debugPrint(
-            'AuthService.refreshAccessToken: First refresh attempt failed (${resp.statusCode}), trying alternate payload key refresh_token');
-        try {
-          final resp2 = await _api.post('/api/auth/token/refresh/',
-              headers: {'Content-Type': 'application/json'},
-              body: json.encode({'refresh_token': refresh}),
-              requiresAuth: false);
+      dynamic dataRaw;
+      try {
+        dataRaw = await _api.postJson('/api/auth/token/refresh/',
+            jsonBody: {'refresh': refresh}, requiresAuth: false);
+      } on ApiException catch (e) {
+        if (e.statusCode == 401 || e.statusCode == 400) {
           debugPrint(
-              'AuthService.refreshAccessToken: Alternate attempt status ${resp2.statusCode}');
-          resp = resp2;
-        } catch (e) {
+              'AuthService.refreshAccessToken: First refresh attempt failed (${e.statusCode}), trying alternate payload key refresh_token');
+          try {
+            dataRaw = await _api.postJson('/api/auth/token/refresh/',
+                jsonBody: {'refresh_token': refresh}, requiresAuth: false);
+          } catch (e2) {
+            debugPrint(
+                'AuthService.refreshAccessToken: Alternate refresh attempt failed with error: $e2');
+          }
+        } else {
           debugPrint(
-              'AuthService.refreshAccessToken: Alternate refresh attempt failed with error: $e');
+              'AuthService.refreshAccessToken: Refresh failed with exception: $e');
         }
       }
-      if (resp.statusCode == 200 || resp.statusCode == 201) {
-        final data = json.decode(resp.body) as Map<String, dynamic>;
+
+      if (dataRaw is Map<String, dynamic>) {
+        final data = dataRaw;
         final newAccess = data['access'] as String?;
         final newRefresh = data['refresh'] as String?;
         if (newAccess != null) {
@@ -354,7 +349,7 @@ class AuthService extends ChangeNotifier {
         return true;
       }
       debugPrint(
-          'AuthService.refreshAccessToken: Refresh failed with status ${resp.statusCode}');
+          'AuthService.refreshAccessToken: Refresh did not return new tokens');
     } catch (e) {
       debugPrint('AuthService.refreshAccessToken: Error during refresh: $e');
     }
@@ -456,14 +451,12 @@ class AuthService extends ChangeNotifier {
   /// Register a new user. Throws [ApiException] on failure.
   Future<void> register(String username, String email, String password,
       String confirmPassword) async {
-    await _api.post('/api/auth/register/',
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'username': username,
-          'email': email,
-          'password': password,
-          'confirm_password': confirmPassword
-        }));
+    await _api.postJson('/api/auth/register/', jsonBody: {
+      'username': username,
+      'email': email,
+      'password': password,
+      'confirm_password': confirmPassword
+    });
     // If ApiService returns without throwing, registration succeeded (201/200).
     return;
   }
@@ -471,11 +464,9 @@ class AuthService extends ChangeNotifier {
   /// Verify email with code
   Future<bool> verifyEmail(String email, String code) async {
     try {
-      final resp = await _api.post('/api/auth/verify-email/',
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode({'email': email, 'code': code}));
-      if (resp.statusCode == 200 || resp.statusCode == 201) return true;
-      return false;
+      await _api.postJson('/api/auth/verify-email/',
+          jsonBody: {'email': email, 'code': code});
+      return true;
     } catch (_) {
       return false;
     }
@@ -484,11 +475,9 @@ class AuthService extends ChangeNotifier {
   /// Resend verification code
   Future<bool> resendVerification(String email) async {
     try {
-      final resp = await _api.post('/api/auth/resend-verification-code/',
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode({'email': email}));
-      if (resp.statusCode == 200 || resp.statusCode == 201) return true;
-      return false;
+      await _api.postJson('/api/auth/resend-verification-code/',
+          jsonBody: {'email': email});
+      return true;
     } catch (_) {
       return false;
     }
@@ -497,14 +486,10 @@ class AuthService extends ChangeNotifier {
   /// Request password reset (send OTP to email)
   Future<bool> requestPasswordReset(String email) async {
     try {
-      final resp = await _api.post('/api/auth/password/reset/',
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode({'email': email}),
-          requiresAuth: false);
-      if (resp.statusCode == 200 || resp.statusCode == 201) return true;
-      return false;
+      await _api.postJson('/api/auth/password/reset/',
+          jsonBody: {'email': email}, requiresAuth: false);
+      return true;
     } catch (e) {
-      // propagate ApiException so callers can inspect .body
       rethrow;
     }
   }
@@ -512,13 +497,9 @@ class AuthService extends ChangeNotifier {
   /// Resend verification code for password reset
   Future<bool> resendPasswordReset(String email) async {
     try {
-      final resp = await _api.post(
-          '/api/auth/resend-verification-code-password/',
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode({'email': email}),
-          requiresAuth: false);
-      if (resp.statusCode == 200 || resp.statusCode == 201) return true;
-      return false;
+      await _api.postJson('/api/auth/resend-verification-code-password/',
+          jsonBody: {'email': email}, requiresAuth: false);
+      return true;
     } catch (e) {
       rethrow;
     }
@@ -528,13 +509,10 @@ class AuthService extends ChangeNotifier {
   Future<bool> confirmPasswordReset(
       String email, String code, String newPassword) async {
     try {
-      final resp = await _api.post('/api/auth/password/reset/confirm/',
-          headers: {'Content-Type': 'application/json'},
-          body: json.encode(
-              {'email': email, 'code': code, 'new_password': newPassword}),
+      await _api.postJson('/api/auth/password/reset/confirm/',
+          jsonBody: {'email': email, 'code': code, 'new_password': newPassword},
           requiresAuth: false);
-      if (resp.statusCode == 200 || resp.statusCode == 201) return true;
-      return false;
+      return true;
     } catch (e) {
       rethrow;
     }

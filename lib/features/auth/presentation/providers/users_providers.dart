@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart';
 import 'package:simdaas/core/services/api_service.dart';
@@ -21,35 +19,18 @@ class UsersController {
   /// Returns a list of user maps. Each map contains an `id` key.
   Future<List<Map<String, dynamic>>> listUsers() async {
     try {
-      final candidates = [
-        '/api/users/',
-        '/api/users',
-        '/users/api/',
-        '/users/api',
-        '/users/',
-        '/users'
-      ];
-      http.Response? lastResp;
-      Exception? lastEx;
-      for (final p in candidates) {
-        try {
-          final resp = await _api.get(p);
-          lastResp = resp;
-          break;
-        } catch (e) {
-          lastEx = e as Exception;
-          // try next
-        }
+      // Canonical endpoint (required): list of users
+      final dr = await _api.getJson('/api/users/');
+      if (dr == null) {
+        throw ApiException(null, 'Empty response from /api/users/');
       }
-      if (lastResp == null) {
-        debugPrint('UsersController.listUsers error: $lastEx');
-        throw lastEx ?? Exception('Unknown error');
+      if (dr is! List) {
+        throw ApiException(null, 'Unexpected response type from /api/users/');
       }
-      if (lastResp.statusCode != 200) return [];
-      final arr = json.decode(lastResp.body) as List<dynamic>;
+      final arr = dr;
       final out = <Map<String, dynamic>>[];
       for (final item in arr) {
-        final map = Map<String, dynamic>.from(item as Map);
+        final map = Map<String, dynamic>.from(item);
         final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
         map['id'] = id;
         out.add(map);
@@ -67,47 +48,17 @@ class UsersController {
   /// Returns null when the user cannot be found or on error.
   Future<Map<String, dynamic>?> getUserById(String id) async {
     try {
-      final candidates = [
-        '/api/users/$id/',
-        '/api/users/$id',
-        '/users/$id',
-        '/users/$id/',
-        '/users/api/$id',
-        '/users/api/$id/',
-        // Some backends expose a query param endpoint
-        '/api/users/?id=$id',
-        '/api/users/?pk=$id',
-      ];
-      http.Response? lastResp;
-      Exception? lastEx;
-      for (final p in candidates) {
-        try {
-          final resp = await _api.get(p);
-          if (resp.statusCode == 200) {
-            lastResp = resp;
-            break;
-          }
-        } catch (e) {
-          lastEx = e as Exception;
-        }
-      }
-      if (lastResp == null) {
-        debugPrint(
-            'UsersController.getUserById: no successful response for $id: $lastEx');
-        return null;
-      }
-      final data = json.decode(lastResp.body);
-      if (data == null) return null;
-      if (data is List && data.isNotEmpty) {
-        // sometimes query endpoints return a list
-        final map =
-            Map<String, dynamic>.from(data.first as Map<String, dynamic>);
+      // Canonical endpoint: fetch single user by id
+      final dr = await _api.getJson('/api/users/$id/');
+      if (dr == null) return null;
+      if (dr is List && dr.isNotEmpty) {
+        final map = Map<String, dynamic>.from(dr.first);
         final uid = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
         map['id'] = uid;
         return map;
       }
-      if (data is Map) {
-        final map = Map<String, dynamic>.from(data as Map<String, dynamic>);
+      if (dr is Map) {
+        final map = Map<String, dynamic>.from(dr);
         final uid = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
         map['id'] = uid;
         return map;
@@ -127,48 +78,20 @@ class UsersController {
       required String name,
       String? phone,
       List<String>? roles}) async {
-    final body = json.encode({
+    final bodyMap = {
       'email': email,
       'password': password,
       'name': name,
       'phone': phone ?? '',
       'roles': roles ?? ['operator']
-    });
-    final candidates = [
-      '/api/users/',
-      '/api/users',
-      '/users/api/',
-      '/users/api',
-      '/users/',
-      '/users'
-    ];
-    http.Response? lastResp;
-    Exception? lastEx;
-    for (final p in candidates) {
-      try {
-        final resp = await _api.post(p,
-            headers: {'Content-Type': 'application/json'}, body: body);
-        lastResp = resp;
-        break;
-      } catch (e) {
-        lastEx = e as Exception;
-      }
-    }
-    if (lastResp != null &&
-        (lastResp.statusCode == 200 || lastResp.statusCode == 201)) {
-      final data = json.decode(lastResp.body) as Map<String, dynamic>;
-      final id = (data['id']?.toString() ?? data['pk']?.toString() ?? '');
-      ref.invalidate(usersListProvider);
+    };
+    final dr = await _api.postJson('/api/users/', jsonBody: bodyMap);
+    ref.invalidate(usersListProvider);
+    if (dr is Map) {
+      final id = (dr['id']?.toString() ?? dr['pk']?.toString() ?? '');
       return id;
     }
-    ref.invalidate(usersListProvider);
-    if (lastResp != null) {
-      throw ApiException(lastResp.statusCode,
-          'Create user failed with status ${lastResp.statusCode}',
-          body: lastResp.body);
-    }
-    throw ApiException(null, 'Create user failed',
-        body: lastEx?.toString() ?? '');
+    throw ApiException(null, 'Create user failed');
   }
 }
 
@@ -183,39 +106,26 @@ class OperatorsController {
 
   Future<List<Map<String, dynamic>>> listOperators() async {
     try {
-      final candidates = [
-        '/api/operators/',
-        '/api/operators',
-        '/operators/api/',
-        '/operators/api',
-        '/operators/',
-        '/operators'
-      ];
-      http.Response? lastResp;
-      Exception? lastEx;
-      for (final p in candidates) {
-        try {
-          final resp = await _api.get(p);
-          lastResp = resp;
-          break;
-        } catch (e) {
-          lastEx = e as Exception;
-        }
+      // Canonical endpoint for operators
+      final dr = await _api.getJson('/api/operators/');
+      if (dr == null) {
+        throw ApiException(null, 'Empty response from /api/operators/');
       }
-      if (lastResp == null) {
-        debugPrint('OperatorsController.listOperators error: $lastEx');
-        throw lastEx ?? Exception('Unknown error');
+      if (dr is! List) {
+        throw ApiException(
+            null, 'Unexpected response type from /api/operators/');
       }
-      if (lastResp.statusCode != 200) return [];
-      final arr = json.decode(lastResp.body) as List<dynamic>;
+      final arr = dr;
       final out = <Map<String, dynamic>>[];
       for (final item in arr) {
-        final map = Map<String, dynamic>.from(item as Map);
+        final map = Map<String, dynamic>.from(item);
         // normalize snake_case -> camelCase for UI
-        if (map.containsKey('contact_number'))
+        if (map.containsKey('contact_number')) {
           map['phone'] = map['contact_number'];
-        if (map.containsKey('experience_years'))
+        }
+        if (map.containsKey('experience_years')) {
           map['experienceYears'] = map['experience_years'];
+        }
         final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
         map['id'] = id;
         out.add(map);
@@ -251,43 +161,13 @@ class OperatorsController {
       'is_active': isActive ?? true,
     };
 
-    final body = json.encode(bodyMap);
-
-    final candidates = [
-      '/api/operators/',
-      '/api/operators',
-      '/operators/api/',
-      '/operators/api',
-      '/operators/',
-      '/operators'
-    ];
-    http.Response? lastResp;
-    Exception? lastEx;
-    for (final p in candidates) {
-      try {
-        final resp = await _api.post(p,
-            headers: {'Content-Type': 'application/json'}, body: body);
-        lastResp = resp;
-        break;
-      } catch (e) {
-        lastEx = e as Exception;
-      }
-    }
-    if (lastResp != null &&
-        (lastResp.statusCode == 200 || lastResp.statusCode == 201)) {
-      final data = json.decode(lastResp.body) as Map<String, dynamic>;
-      final id = (data['id']?.toString() ?? data['pk']?.toString() ?? '');
-      ref.invalidate(operatorsListProvider);
+    final dr = await _api.postJson('/api/operators/', jsonBody: bodyMap);
+    ref.invalidate(operatorsListProvider);
+    if (dr is Map) {
+      final id = (dr['id']?.toString() ?? dr['pk']?.toString() ?? '');
       return id;
     }
-    ref.invalidate(operatorsListProvider);
-    if (lastResp != null) {
-      throw ApiException(lastResp.statusCode,
-          'Create operator failed with status ${lastResp.statusCode}',
-          body: lastResp.body);
-    }
-    throw ApiException(null, 'Create operator failed',
-        body: lastEx?.toString() ?? '');
+    throw ApiException(null, 'Create operator failed');
   }
 }
 

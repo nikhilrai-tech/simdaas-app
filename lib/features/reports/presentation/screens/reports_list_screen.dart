@@ -3,7 +3,7 @@ import '../../domain/report.dart';
 import 'report_details_screen.dart';
 
 class ReportsListScreen extends StatelessWidget {
-  const ReportsListScreen({Key? key}) : super(key: key);
+  const ReportsListScreen({super.key});
 
   // Dummy reports
   List<Report> _dummy() => [

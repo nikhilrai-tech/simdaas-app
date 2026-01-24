@@ -132,10 +132,14 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
+                                  const Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text('Tractor name'),
+                                  ),
                                   TextFormField(
                                     controller: _name,
                                     decoration: const InputDecoration(
-                                        labelText: 'Tractor name'),
+                                        hintText: 'Tractor name'),
                                     validator: (v) => (v == null || v.isEmpty)
                                         ? 'Enter name'
                                         : null,
@@ -166,12 +170,16 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
+                                  const Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text('Wheel diameter'),
+                                  ),
                                   Row(children: [
                                     Expanded(
                                       child: TextFormField(
                                         controller: _wheelDiameter,
                                         decoration: const InputDecoration(
-                                            labelText: 'Wheel diameter'),
+                                            hintText: 'Wheel diameter'),
                                         keyboardType:
                                             TextInputType.numberWithOptions(
                                                 decimal: true),
@@ -227,10 +235,15 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
+                                  const Align(
+                                    alignment: Alignment.centerLeft,
+                                    child:
+                                        Text('Number of screws/nuts in wheel'),
+                                  ),
                                   TextFormField(
                                     controller: _screwsInWheel,
                                     decoration: const InputDecoration(
-                                        labelText:
+                                        hintText:
                                             'Number of screws/nuts in wheel'),
                                     keyboardType: TextInputType.number,
                                     validator: (v) => (v == null || v.isEmpty)
@@ -263,12 +276,16 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
+                                  const Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text('Axle length'),
+                                  ),
                                   Row(children: [
                                     Expanded(
                                       child: TextFormField(
                                         controller: _axleLength,
                                         decoration: const InputDecoration(
-                                            labelText: 'Axle length'),
+                                            hintText: 'Axle length'),
                                         keyboardType:
                                             TextInputType.numberWithOptions(
                                                 decimal: true),

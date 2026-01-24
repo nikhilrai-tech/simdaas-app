@@ -15,6 +15,7 @@ import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/telemetry_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
 import 'dart:async';
+import 'package:simdaas/core/services/connectivity_service.dart';
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   final String? plotId;
@@ -30,6 +31,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
   StreamSubscription<TelemetryData>? _deviceSub;
+  OverlayEntry? _tankOverlayEntry;
+  OverlayEntry? _solenoidOverlayEntry;
+  OverlayEntry? _sensorOverlayEntry;
   final MapController _mapController = MapController();
   bool _outOfPlotSnackVisible = false;
 
@@ -86,6 +90,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               });
             }
           });
+          // Refresh tank overlay if visible so it shows realtime updates
+          try {
+            if (_tankOverlayEntry != null) _tankOverlayEntry!.markNeedsBuild();
+            if (_solenoidOverlayEntry != null)
+              _solenoidOverlayEntry!.markNeedsBuild();
+            if (_sensorOverlayEntry != null)
+              _sensorOverlayEntry!.markNeedsBuild();
+          } catch (_) {}
           // Show or hide persistent out-of-plot snackbar based on payload.
           _updateOutOfPlotSnack(t);
         });
@@ -100,8 +112,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   void dispose() {
     // Hide any visible snack before leaving the screen.
     try {
-      if (_outOfPlotSnackVisible)
+      if (_outOfPlotSnackVisible) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      }
     } catch (e, st) {
       debugPrint('MonitoringScreen.dispose: hideCurrentSnackBar error: $e');
       debugPrint('stack: $st');
@@ -111,24 +124,29 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   }
 
   int getSignalBars(int signalQuality) {
-    if (signalQuality > -73)
+    if (signalQuality > -73) {
       return 5;
-    else if (signalQuality > -83 && signalQuality <= -73)
+    } else if (signalQuality > -83 && signalQuality <= -73) {
       return 4;
-    else if (signalQuality > -93 && signalQuality <= -83)
+    } else if (signalQuality > -93 && signalQuality <= -83) {
       return 3;
-    else if (signalQuality > -103 && signalQuality <= -93)
+    } else if (signalQuality > -103 && signalQuality <= -93) {
       return 2;
-    else if (signalQuality > -113 && signalQuality <= -103)
+    } else if (signalQuality > -113 && signalQuality <= -103) {
       return 1;
-    else
+    } else {
       return 0;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final conn = ref.watch(isOnlineStreamProvider);
+    final online = conn.asData?.value ?? true;
+
     final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
+    final sprayersAsync = ref.watch(eq_provs.sprayersProvider(userId));
     final plotsAsync = ref.watch(fm_providers.plotsListProvider(userId));
     final metricsAsync = ref.watch(monitoringStreamProvider(userId));
 
@@ -147,7 +165,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     // Determine a suitable AppBar title. If a deviceId was provided and we
     // can resolve a matching control unit, show its name; otherwise fall
     // back to the generic label.
-    String? _resolvedControlUnitName;
+    String? resolvedControlUnitName;
     try {
       final cuList = controlUnitsAsync.asData?.value;
       if (widget.deviceId != null && cuList != null) {
@@ -159,7 +177,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                 widget.deviceId != null &&
                 canonicalizeMac(candidate) ==
                     canonicalizeMac(widget.deviceId!)) {
-              _resolvedControlUnitName = cu.name;
+              resolvedControlUnitName = cu.name;
               break;
             }
           } catch (_) {}
@@ -168,52 +186,68 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     } catch (_) {}
 
     // Compute simple state indicators from the latest telemetry snapshot.
-    final _t = latestTelemetry;
-    final bool _ptoOnTop =
-        _t != null && (_t.ptoState != null && _t.ptoState == 1);
-    final bool _autoOnTop =
-        _t != null && (_t.sprayMode != null && _t.sprayMode == 1);
+    final t0 = latestTelemetry;
+    final bool ptoOnTop =
+        t0 != null && (t0.ptoState != null && t0.ptoState == 1);
+    final bool autoOnTop =
+        t0 != null && (t0.sprayMode != null && t0.sprayMode == 1);
     // Left/right solenoid states (used for the top-left L/R indicators)
-    final bool _leftNozzleOn = _t != null &&
-        (_t.leftSolenoidState != null && _t.leftSolenoidState == 1);
-    final bool _rightNozzleOn = _t != null &&
-        (_t.rightSolenoidState != null && _t.rightSolenoidState == 1);
+    final bool leftNozzleOn = t0 != null &&
+        (t0.leftSolenoidState != null && t0.leftSolenoidState == 1);
+    final bool rightNozzleOn = t0 != null &&
+        (t0.rightSolenoidState != null && t0.rightSolenoidState == 1);
 
     return Scaffold(
       appBar: AppBar(
+          bottom: online
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(28),
+                  child: Container(
+                    height: 28,
+                    color: Colors.red.shade700,
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'Offline — showing last known telemetry',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ),
           title: Row(children: [
-        Text(_resolvedControlUnitName ?? 'Data Monitoring'),
-        const Spacer(),
-        if (latestTelemetry != null) ...[
-          // GPS quality
-          Builder(builder: (ctx) {
-            final g = latestTelemetry!.gpsSignalQuality;
-            Color col = Colors.grey;
-            String lbl = '-';
-            if (g != null) {
-              lbl = g.toString();
-              col =
-                  g >= 3 ? Colors.white : (g >= 1 ? Colors.orange : Colors.red);
-            }
-            return signalChip(Icons.gps_fixed, lbl, col);
-          }),
-          const SizedBox(width: 15),
-          SignalStrengthIndicator.bars(
-            value: latestTelemetry!.simSignalQuality != null
-                ? getSignalBars(latestTelemetry!.simSignalQuality!) / 5
-                : 0,
-            size: 20,
-            barCount: 5,
-            spacing: 0.5,
-            activeColor: Colors.white,
-            inactiveColor: Colors.blueGrey,
-          )
-        ]
-      ])),
+            Text(resolvedControlUnitName ?? 'Data Monitoring'),
+            const Spacer(),
+            if (latestTelemetry != null) ...[
+              // GPS quality
+              Builder(builder: (ctx) {
+                final g = latestTelemetry!.gpsSignalQuality;
+                Color col = Colors.grey;
+                String lbl = '-';
+                if (g != null) {
+                  lbl = g.toString();
+                  col = g >= 3
+                      ? Colors.white
+                      : (g >= 1 ? Colors.orange : Colors.red);
+                }
+                return signalChip(Icons.gps_fixed, lbl, col);
+              }),
+              const SizedBox(width: 15),
+              SignalStrengthIndicator.bars(
+                value: latestTelemetry!.simSignalQuality != null
+                    ? getSignalBars(latestTelemetry!.simSignalQuality!) / 5
+                    : 0,
+                size: 20,
+                barCount: 5,
+                spacing: 0.5,
+                activeColor: Colors.white,
+                inactiveColor: Colors.blueGrey,
+              )
+            ]
+          ])),
       body: plotsAsync.when(
         data: (plots) {
-          if (plots.isEmpty)
+          if (plots.isEmpty) {
             return const Center(child: Text('No plots available'));
+          }
           final plot = widget.plotId != null
               ? plots.cast<fm_models.PlotModel>().firstWhere(
                   (f) => f.id == widget.plotId,
@@ -265,11 +299,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   ])
               ],
             ),
-            // Top-right map overlay for PTO and Auto/Manual indicators
+            // Top-right map overlay for PTO and Auto/Manual indicators.
+            // Positioned below the menu button so it doesn't overlap the menu.
             Positioned(
-              top: 12,
-              // leave space on the right so the menu button can sit there
-              right: 72,
+              top: 72,
+              right: 12,
               child: SafeArea(
                 child: Card(
                   color: Colors.white.withAlpha(220),
@@ -284,7 +318,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                         width: 10,
                         height: 10,
                         decoration: BoxDecoration(
-                            color: _ptoOnTop ? Colors.green : Colors.red,
+                            color: ptoOnTop ? Colors.green : Colors.red,
                             shape: BoxShape.circle),
                       ),
                       const SizedBox(width: 8),
@@ -293,9 +327,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                            color: _autoOnTop ? Colors.green : Colors.grey,
+                            color: autoOnTop ? Colors.green : Colors.grey,
                             borderRadius: BorderRadius.circular(12)),
-                        child: Text(_autoOnTop ? 'A' : 'M',
+                        child: Text(autoOnTop ? 'A' : 'M',
                             style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold)),
@@ -325,8 +359,37 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                           child: PopupMenuButton<String>(
                             icon: const Icon(Icons.menu, size: 18),
                             onSelected: (v) {
-                              if (v == null) return;
-                              // _openMonitoringView(v);
+                              if (v == 'tank_level') {
+                                try {
+                                  _toggleTankLevelOverlay(
+                                      controlUnitsAsync.asData?.value,
+                                      sprayersAsync.asData?.value,
+                                      userId);
+                                } catch (e, st) {
+                                  debugPrint('Popup onSelected error: $e');
+                                  debugPrint('stack: $st');
+                                }
+                              } else if (v == 'spray_on_off') {
+                                try {
+                                  _toggleSolenoidOverlay(
+                                      controlUnitsAsync.asData?.value,
+                                      sprayersAsync.asData?.value,
+                                      userId);
+                                } catch (e, st) {
+                                  debugPrint('Popup onSelected error: $e');
+                                  debugPrint('stack: $st');
+                                }
+                              } else if (v == 'sensor_data') {
+                                try {
+                                  _toggleSensorOverlay(
+                                      controlUnitsAsync.asData?.value,
+                                      sprayersAsync.asData?.value,
+                                      userId);
+                                } catch (e, st) {
+                                  debugPrint('Popup onSelected error: $e');
+                                  debugPrint('stack: $st');
+                                }
+                              }
                             },
                             itemBuilder: (ctx) => [
                               const PopupMenuItem<String>(
@@ -387,7 +450,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                             height: 10,
                             decoration: BoxDecoration(
                                 color:
-                                    _leftNozzleOn ? Colors.green : Colors.grey,
+                                    leftNozzleOn ? Colors.green : Colors.grey,
                                 shape: BoxShape.circle),
                           ),
                           const SizedBox(height: 6),
@@ -405,7 +468,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                             height: 10,
                             decoration: BoxDecoration(
                                 color:
-                                    _rightNozzleOn ? Colors.green : Colors.grey,
+                                    rightNozzleOn ? Colors.green : Colors.grey,
                                 shape: BoxShape.circle),
                           ),
                           const SizedBox(height: 6),
@@ -430,18 +493,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   // Prefer live telemetry values when available, otherwise fall back
                   // to the metrics provider values.
                   final t = latestTelemetry;
-                  final leftNozzle = t != null && t.leftSolenoidState != null
-                      ? t.leftSolenoidState.toString()
-                      : "-";
-                  final rightNozzle = t != null && t.rightSolenoidState != null
-                      ? t.rightSolenoidState.toString()
-                      : "-";
-                  final leftUltra = t != null && t.leftDistance != null
-                      ? t.leftDistance!.toStringAsFixed(2)
-                      : read(m['leftUltrasonic'] ?? m['ultraLeft']);
-                  final rightUltra = t != null && t.rightDistance != null
-                      ? t.rightDistance!.toStringAsFixed(2)
-                      : read(m['rightUltrasonic'] ?? m['ultraRight']);
                   final coverage = t != null && t.jobCompletionPercent != null
                       ? t.jobCompletionPercent!
                       : (m['coveragePercent'] ?? m['coverage'] ?? 0).toDouble();
@@ -466,15 +517,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   final speed = t != null && t.speed != null
                       ? t.speed!.toStringAsFixed(2)
                       : read(m['tractorSpeed'] ?? m['speed']);
-                  final tank = t != null && t.tankLevel != null
-                      ? t.tankLevel!.toStringAsFixed(2)
-                      : read(m['tankLevel']);
+
                   final ptoOn = t != null && t.ptoState != null
                       ? (t.ptoState == 1)
                       : ((m['ptoState'] ?? m['pto'] ?? false) == true);
-                  final autoOn = t != null && t.sprayMode != null
-                      ? (t.sprayMode == 1)
-                      : ((m['autoMode'] ?? m['auto'] ?? false) == true);
 
                   return Stack(children: [
                     // (Top overlay removed - moved metrics elsewhere)
@@ -589,6 +635,371 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     );
   }
 
+  void _showTankLevelOverlay(
+      List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
+    // insert overlay entry that reads latestTelemetry from state each build
+    try {
+      _tankOverlayEntry = OverlayEntry(builder: (ctx) {
+        // Determine matching control unit and capacity
+        dynamic matchedCu;
+        try {
+          if (widget.deviceId != null && controlUnits != null) {
+            for (final cu in controlUnits) {
+              try {
+                final candidate =
+                    (cu.macAddress ?? cu.controlUnitId ?? cu.id).toString();
+                if (candidate.isNotEmpty &&
+                    canonicalizeMac(candidate) ==
+                        canonicalizeMac(widget.deviceId!)) {
+                  matchedCu = cu;
+                  break;
+                }
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+
+        double? tankCapacity;
+        if (matchedCu != null) {
+          try {
+            final linked = matchedCu.linkedSprayerId as String?;
+            if (linked != null && sprayers != null) {
+              for (final s in sprayers) {
+                try {
+                  if ((s.id ?? s['id']).toString() == linked.toString()) {
+                    tankCapacity = s.tankCapacity ?? s['tankCapacity'];
+                    break;
+                  }
+                } catch (_) {}
+              }
+            }
+          } catch (_) {}
+        }
+
+        double percent = 0.0;
+        String pctLabel = '-';
+        double? liters;
+        final t = latestTelemetry;
+        if (t != null && t.tankLevel != null) {
+          percent = t.tankLevel!.toDouble().clamp(0.0, 100.0);
+          pctLabel = '${percent.toStringAsFixed(0)}%';
+          if (tankCapacity != null) {
+            try {
+              final cap = double.tryParse(tankCapacity.toString());
+              if (cap != null && cap > 0) {
+                liters = (percent / 100.0) * cap;
+              }
+            } catch (_) {}
+          }
+        }
+
+        const imgWidth = 160.0;
+        const imgHeight = 220.0;
+        final fillHeight = imgHeight * (percent / 100.0);
+
+        return Positioned(
+          top: 120,
+          right: 12,
+          child: SafeArea(
+            child: Card(
+              color: Colors.white.withAlpha(230),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: imgWidth,
+                      height: imgHeight,
+                      child: Stack(alignment: Alignment.center, children: [
+                        Image.asset('assets/monitoring/tank_level.png',
+                            width: imgWidth,
+                            height: imgHeight,
+                            fit: BoxFit.contain),
+                        Positioned(
+                          bottom: 0,
+                          child: Container(
+                            width: imgWidth,
+                            height: fillHeight,
+                            color: Colors.blue.withOpacity(0.45),
+                          ),
+                        ),
+                        Text(pctLabel,
+                            style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color:
+                                    percent < 30 ? Colors.red : Colors.black)),
+                      ]),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                        'Cap: ${tankCapacity != null ? '${tankCapacity.toString()} L' : '-'}'),
+                    const SizedBox(height: 6),
+                    Text(
+                        'Now: ${liters != null ? '${liters.toStringAsFixed(2)} L' : pctLabel}'),
+                    const SizedBox(height: 8),
+                    TextButton(
+                        onPressed: _hideTankLevelOverlay,
+                        child: const Text('Close'))
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      });
+      Overlay.of(context)?.insert(_tankOverlayEntry!);
+    } catch (e, st) {
+      debugPrint('Error showing tank overlay: $e');
+      debugPrint('stack: $st');
+      _tankOverlayEntry = null;
+    }
+  }
+
+  void _hideTankLevelOverlay() {
+    try {
+      if (_tankOverlayEntry != null) _tankOverlayEntry!.remove();
+    } catch (_) {}
+    _tankOverlayEntry = null;
+  }
+
+  void _toggleTankLevelOverlay(
+      List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
+    try {
+      if (_tankOverlayEntry == null) {
+        _showTankLevelOverlay(controlUnits, sprayers, userId);
+      } else {
+        _hideTankLevelOverlay();
+      }
+    } catch (e, st) {
+      debugPrint('Error toggling tank overlay: $e');
+      debugPrint('stack: $st');
+    }
+  }
+
+  void _showSolenoidOverlay(
+      List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
+    try {
+      _solenoidOverlayEntry = OverlayEntry(builder: (ctx) {
+        final t = latestTelemetry;
+        final leftOn = t != null && t.leftSolenoidState == 1;
+        final rightOn = t != null && t.rightSolenoidState == 1;
+
+        const imgWidth = 260.0;
+        const imgHeight = 140.0;
+
+        return Positioned(
+          top: 120,
+          right: 12,
+          child: SafeArea(
+            child: Card(
+              color: Colors.white.withAlpha(230),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: imgWidth,
+                      height: imgHeight,
+                      child: Stack(alignment: Alignment.center, children: [
+                        Image.asset('assets/monitoring/solenoid.png',
+                            width: imgWidth,
+                            height: imgHeight,
+                            fit: BoxFit.contain),
+                        // Left indicator
+                        Positioned(
+                          left: 90,
+                          top: imgHeight * 0.40,
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                                color: leftOn ? Colors.green : Colors.red,
+                                shape: BoxShape.circle,
+                                border:
+                                    Border.all(color: Colors.white, width: 2)),
+                          ),
+                        ),
+                        // Right indicator
+                        Positioned(
+                          right: 90,
+                          top: imgHeight * 0.40,
+                          child: Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                                color: rightOn ? Colors.green : Colors.red,
+                                shape: BoxShape.circle,
+                                border:
+                                    Border.all(color: Colors.white, width: 2)),
+                          ),
+                        ),
+                      ]),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text('L: ${leftOn ? 'ON' : 'OFF'}'),
+                      const SizedBox(width: 12),
+                      Text('R: ${rightOn ? 'ON' : 'OFF'}'),
+                    ]),
+                    const SizedBox(height: 8),
+                    TextButton(
+                        onPressed: _hideSolenoidOverlay,
+                        child: const Text('Close'))
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      });
+      Overlay.of(context)?.insert(_solenoidOverlayEntry!);
+    } catch (e, st) {
+      debugPrint('Error showing solenoid overlay: $e');
+      debugPrint('stack: $st');
+      _solenoidOverlayEntry = null;
+    }
+  }
+
+  void _hideSolenoidOverlay() {
+    try {
+      if (_solenoidOverlayEntry != null) _solenoidOverlayEntry!.remove();
+    } catch (_) {}
+    _solenoidOverlayEntry = null;
+  }
+
+  void _toggleSolenoidOverlay(
+      List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
+    try {
+      if (_solenoidOverlayEntry == null) {
+        _showSolenoidOverlay(controlUnits, sprayers, userId);
+      } else {
+        _hideSolenoidOverlay();
+      }
+    } catch (e, st) {
+      debugPrint('Error toggling solenoid overlay: $e');
+      debugPrint('stack: $st');
+    }
+  }
+
+  void _showSensorOverlay(
+      List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
+    try {
+      _sensorOverlayEntry = OverlayEntry(builder: (ctx) {
+        final t = latestTelemetry;
+        final leftDist = t != null && t.leftDistance != null
+            ? t.leftDistance!.toStringAsFixed(2)
+            : '-';
+        final rightDist = t != null && t.rightDistance != null
+            ? t.rightDistance!.toStringAsFixed(2)
+            : '-';
+        final leftStr = t != null && t.leftDensity != null
+            ? t.leftDensity!.toStringAsFixed(2)
+            : '-';
+        final rightStr = t != null && t.rightDensity != null
+            ? t.rightDensity!.toStringAsFixed(2)
+            : '-';
+
+        return Positioned(
+          top: 100,
+          right: 12,
+          child: SafeArea(
+            child: Card(
+              color: Colors.white.withAlpha(240),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16.0, vertical: 14.0),
+                child: SizedBox(
+                  width: 340,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Sensor Data',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).primaryColor)),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Distance',
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text('$leftDist   $rightDist',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(fontSize: 14)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Strength',
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text('$leftStr   $rightStr',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(fontSize: 14)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                            onPressed: _hideSensorOverlay,
+                            child: const Text('Close')),
+                      )
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      });
+      Overlay.of(context)?.insert(_sensorOverlayEntry!);
+    } catch (e, st) {
+      debugPrint('Error showing sensor overlay: $e');
+      debugPrint('stack: $st');
+      _sensorOverlayEntry = null;
+    }
+  }
+
+  void _hideSensorOverlay() {
+    try {
+      if (_sensorOverlayEntry != null) _sensorOverlayEntry!.remove();
+    } catch (_) {}
+    _sensorOverlayEntry = null;
+  }
+
+  void _toggleSensorOverlay(
+      List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
+    try {
+      if (_sensorOverlayEntry == null) {
+        _showSensorOverlay(controlUnits, sprayers, userId);
+      } else {
+        _hideSensorOverlay();
+      }
+    } catch (e, st) {
+      debugPrint('Error toggling sensor overlay: $e');
+      debugPrint('stack: $st');
+    }
+  }
+
   Color _markerColorForTelemetry(TelemetryData t) {
     try {
       final inPlot = t.deviceInPlot == true ||
@@ -631,118 +1042,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       }
     } catch (e, st) {
       debugPrint('MonitoringScreen._goToCurrentPosition error: $e');
-      debugPrint('stack: $st');
-    }
-  }
-
-  void _openMonitoringView(String view) {
-    // Present a bottom sheet placeholder for the chosen view. Replace with
-    // real implementations (charts, overlays, etc.) as needed.
-    try {
-      showModalBottomSheet<void>(
-          context: context,
-          builder: (ctx) {
-            String title;
-            Widget body;
-            switch (view) {
-              case 'spraying_heatmap':
-                title = 'Spraying heat map';
-                body = const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Text('Spraying heat map view (placeholder)'),
-                );
-                break;
-              case 'speed_heatmap':
-                title = 'Speed heat map';
-                body = const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Text('Speed heat map view (placeholder)'),
-                );
-                break;
-              case 'sensor_data':
-                title = 'Sensor data view';
-                body = const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Text('Sensor data view (placeholder)'),
-                );
-                break;
-              case 'spray_on_off':
-                title = 'Spray on/off view';
-                body = const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Text('Spray on/off view (placeholder)'),
-                );
-                break;
-              case 'tank_level':
-                title = 'PTO status';
-                try {
-                  final ptoOn = latestTelemetry != null &&
-                      (latestTelemetry!.ptoState != null &&
-                          latestTelemetry!.ptoState == 1);
-                  final updated = latestTelemetry?.timestamp;
-                  body = Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                                color: ptoOn ? Colors.green : Colors.red,
-                                shape: BoxShape.circle),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(ptoOn ? 'PTO: ON' : 'PTO: OFF',
-                              style: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold)),
-                        ]),
-                        const SizedBox(height: 8),
-                        if (updated != null)
-                          Text('Last updated: ${updated.toLocal()}'),
-                      ],
-                    ),
-                  );
-                } catch (e) {
-                  body = Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text('Unable to read PTO status: $e'),
-                  );
-                }
-                break;
-              default:
-                title = 'View';
-                body = Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text('Unknown view: $view'),
-                );
-            }
-
-            return SafeArea(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                          child: Text(title,
-                              style: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold))),
-                      IconButton(
-                          onPressed: () => Navigator.of(ctx).pop(),
-                          icon: const Icon(Icons.close))
-                    ],
-                  ),
-                ),
-                body,
-                const SizedBox(height: 12)
-              ]),
-            );
-          });
-    } catch (e, st) {
-      debugPrint('MonitoringScreen._openMonitoringView error: $e');
       debugPrint('stack: $st');
     }
   }
@@ -844,19 +1143,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
     return result;
   }
-}
-
-Widget _metricBlock(String title, String value) {
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54)),
-      const SizedBox(height: 6),
-      Text(value,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-    ]),
-  );
 }
 
 Widget _smallStat(String label, String value) {

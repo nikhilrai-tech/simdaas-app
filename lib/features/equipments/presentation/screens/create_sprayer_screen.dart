@@ -149,10 +149,12 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                const Text('Sprayer name'),
+                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _name,
                                   decoration: const InputDecoration(
-                                      labelText: 'Sprayer name'),
+                                      hintText: 'Sprayer name'),
                                   validator: (v) => (v == null || v.isEmpty)
                                       ? 'Enter name'
                                       : null,
@@ -185,16 +187,25 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                 const SizedBox(height: 12),
                                 Row(children: [
                                   Expanded(
-                                    child: TextFormField(
-                                      controller: _wheelDiameter,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Wheel diameter'),
-                                      keyboardType:
-                                          TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      validator: (v) => (v == null || v.isEmpty)
-                                          ? 'Enter wheel diameter'
-                                          : null,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        const Text('Wheel diameter'),
+                                        const SizedBox(height: 6),
+                                        TextFormField(
+                                          controller: _wheelDiameter,
+                                          decoration: const InputDecoration(
+                                              hintText: 'Wheel diameter'),
+                                          keyboardType:
+                                              TextInputType.numberWithOptions(
+                                                  decimal: true),
+                                          validator: (v) =>
+                                              (v == null || v.isEmpty)
+                                                  ? 'Enter wheel diameter'
+                                                  : null,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -243,10 +254,12 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                const Text('Number of screws/nuts in wheel'),
+                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _screwsInWheel,
                                   decoration: const InputDecoration(
-                                      labelText:
+                                      hintText:
                                           'Number of screws/nuts in wheel'),
                                   keyboardType: TextInputType.number,
                                   validator: (v) => (v == null || v.isEmpty)
@@ -281,16 +294,25 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                 const SizedBox(height: 12),
                                 Row(children: [
                                   Expanded(
-                                    child: TextFormField(
-                                      controller: _axleLength,
-                                      decoration: const InputDecoration(
-                                          labelText: 'Axle length'),
-                                      keyboardType:
-                                          TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      validator: (v) => (v == null || v.isEmpty)
-                                          ? 'Enter axle length'
-                                          : null,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        const Text('Axle length'),
+                                        const SizedBox(height: 6),
+                                        TextFormField(
+                                          controller: _axleLength,
+                                          decoration: const InputDecoration(
+                                              hintText: 'Axle length'),
+                                          keyboardType:
+                                              TextInputType.numberWithOptions(
+                                                  decimal: true),
+                                          validator: (v) =>
+                                              (v == null || v.isEmpty)
+                                                  ? 'Enter axle length'
+                                                  : null,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -339,10 +361,12 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                const Text('Number of nozzles'),
+                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _nozzleCount,
                                   decoration: const InputDecoration(
-                                      labelText: 'Number of nozzles'),
+                                      hintText: 'Number of nozzles'),
                                   keyboardType: TextInputType.number,
                                   validator: (v) => (v == null || v.isEmpty)
                                       ? 'Enter nozzle count'
@@ -374,10 +398,12 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                const Text('Tank capacity (L)'),
+                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _tankCapacity,
                                   decoration: const InputDecoration(
-                                      labelText: 'Tank capacity (L)'),
+                                      hintText: 'Tank capacity (L)'),
                                   keyboardType: TextInputType.numberWithOptions(
                                       decimal: true),
                                   validator: (v) => (v == null || v.isEmpty)
@@ -412,17 +438,27 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                 const SizedBox(height: 12),
                                 Row(children: [
                                   Expanded(
-                                    child: TextFormField(
-                                      controller: _hingeToAxle,
-                                      decoration: const InputDecoration(
-                                          labelText:
-                                              'Distance between hinge point and axle'),
-                                      keyboardType:
-                                          TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      validator: (v) => (v == null || v.isEmpty)
-                                          ? 'Enter hinge->axle distance'
-                                          : null,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        const Text(
+                                            'Distance between hinge point and axle'),
+                                        const SizedBox(height: 6),
+                                        TextFormField(
+                                          controller: _hingeToAxle,
+                                          decoration: const InputDecoration(
+                                              hintText:
+                                                  'Distance between hinge point and axle'),
+                                          keyboardType:
+                                              TextInputType.numberWithOptions(
+                                                  decimal: true),
+                                          validator: (v) =>
+                                              (v == null || v.isEmpty)
+                                                  ? 'Enter hinge->axle distance'
+                                                  : null,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -473,17 +509,27 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                 const SizedBox(height: 12),
                                 Row(children: [
                                   Expanded(
-                                    child: TextFormField(
-                                      controller: _hingeToNozzle,
-                                      decoration: const InputDecoration(
-                                          labelText:
-                                              'Distance between hinge point and nozzle'),
-                                      keyboardType:
-                                          TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      validator: (v) => (v == null || v.isEmpty)
-                                          ? 'Enter hinge->nozzle distance'
-                                          : null,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        const Text(
+                                            'Distance between hinge point and nozzle'),
+                                        const SizedBox(height: 6),
+                                        TextFormField(
+                                          controller: _hingeToNozzle,
+                                          decoration: const InputDecoration(
+                                              hintText:
+                                                  'Distance between hinge point and nozzle'),
+                                          keyboardType:
+                                              TextInputType.numberWithOptions(
+                                                  decimal: true),
+                                          validator: (v) => (v == null ||
+                                                  v.isEmpty)
+                                              ? 'Enter hinge->nozzle distance'
+                                              : null,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -534,17 +580,27 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                 const SizedBox(height: 12),
                                 Row(children: [
                                   Expanded(
-                                    child: TextFormField(
-                                      controller: _hingeToControlUnit,
-                                      decoration: const InputDecoration(
-                                          labelText:
-                                              'Distance between hinge point and control unit mounting'),
-                                      keyboardType:
-                                          TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      validator: (v) => (v == null || v.isEmpty)
-                                          ? 'Enter hinge->control unit distance'
-                                          : null,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        const Text(
+                                            'Distance between hinge point and control unit mounting'),
+                                        const SizedBox(height: 6),
+                                        TextFormField(
+                                          controller: _hingeToControlUnit,
+                                          decoration: const InputDecoration(
+                                              hintText:
+                                                  'Distance between hinge point and control unit mounting'),
+                                          keyboardType:
+                                              TextInputType.numberWithOptions(
+                                                  decimal: true),
+                                          validator: (v) => (v == null ||
+                                                  v.isEmpty)
+                                              ? 'Enter hinge->control unit distance'
+                                              : null,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),

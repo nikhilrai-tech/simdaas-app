@@ -95,7 +95,7 @@ class _BlinkDotState extends State<BlinkDot>
   @override
   void initState() {
     super.initState();
-    if ((widget.frequencyHz ?? 0) > 0) {
+    if (widget.frequencyHz > 0) {
       final periodMs = (1000 / widget.frequencyHz).round();
       _ctrl = AnimationController(
           vsync: this, duration: Duration(milliseconds: periodMs))

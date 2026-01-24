@@ -9,6 +9,16 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+# Project-specific analyzer overrides. Placing the `include` first ensures
+# the settings below override the included defaults when necessary.
+analyzer:
+  errors:
+    # Ignore build-context-across-async gaps lint globally per request.
+    use_build_context_synchronously: ignore
+    # Suppress this warning for optional parameters that are intentionally
+    # provided as nullable and not passed by callers in many dashboard cards.
+    unused_element_parameter: ignore
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

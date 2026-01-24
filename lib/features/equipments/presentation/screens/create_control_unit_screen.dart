@@ -4,7 +4,6 @@ import '../providers/equipment_providers.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import 'package:simdaas/core/services/auth_service.dart';
-import 'dart:convert';
 import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/utils/api_error.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
@@ -42,7 +41,6 @@ class _KeepAliveState extends State<_KeepAlive>
 
 class _CreateControlUnitScreenState
     extends ConsumerState<CreateControlUnitScreen> {
-  final _formKey = GlobalKey<FormState>();
   late final List<GlobalKey<FormState>> _pageKeys;
   final _pageController = PageController();
   int _currentPage = 0;
@@ -104,6 +102,9 @@ class _CreateControlUnitScreenState
     // If this screen was opened as part of the "Add Plot -> Add Control Unit"
     // guided flow, intercept back navigation and return the user to the
     // plot-creation screen instead of the previous dashboard.
+    // Keep using WillPopScope (deprecated) to preserve current behavior.
+    // We'll ignore deprecation until a careful replacement is implemented.
+    // ignore: deprecated_member_use
     return WillPopScope(
       onWillPop: () async {
         if (widget.returnToAddPlot) {
@@ -266,8 +267,26 @@ class _CreateControlUnitScreenState
       debugPrint('stack: $st');
     }
 
-    // Build a multi-page wizard: main page + three image pages
-    final totalPages = 4;
+    // Build a multi-page wizard. Visible pages depend on selected sensor type:
+    // - sensor 'lidar' -> pages [0,1,2]
+    // - sensor 'ultrasonic' -> pages [0,3]
+    List<int> visiblePages() {
+      final v = <int>[0];
+      if (_sensorType == 'lidar') {
+        v.addAll([1, 2]);
+      } else {
+        v.addAll([1, 3]);
+      }
+      return v;
+    }
+
+    final visible = visiblePages();
+    final totalPages = visible.length;
+
+    int visiblePositionOf(int pageIndex) {
+      final pos = visible.indexOf(pageIndex);
+      return pos < 0 ? 0 : pos;
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -280,7 +299,8 @@ class _CreateControlUnitScreenState
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
                 child: LinearProgressIndicator(
-                  value: (1.0 * (_currentPage + 1)) / totalPages,
+                  value: (1.0 * (visiblePositionOf(_currentPage) + 1)) /
+                      totalPages,
                 ),
               ),
               Expanded(
@@ -301,40 +321,53 @@ class _CreateControlUnitScreenState
                                     MediaQuery.of(context).viewInsets.bottom),
                             child: Column(
                               children: [
+                                const Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text('Control Unit name'),
+                                ),
                                 TextFormField(
                                   controller: _name,
                                   enabled: !_prefilledName,
                                   decoration: const InputDecoration(
-                                      labelText: 'Control Unit name'),
+                                      hintText: 'Control Unit name'),
                                   validator: (v) => (v == null || v.isEmpty)
                                       ? 'Enter name'
                                       : null,
                                 ),
                                 const SizedBox(height: 12),
+                                const Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text('Control unit ID'),
+                                ),
                                 TextFormField(
                                   controller: _controlUnitId,
                                   enabled:
                                       !_prefilledControlUnitId && !_isEditing,
                                   decoration: const InputDecoration(
-                                      labelText: 'Control unit ID'),
+                                      hintText: 'Control unit ID'),
                                   validator: (v) => (v == null || v.isEmpty)
                                       ? 'Enter control unit id'
                                       : null,
                                 ),
                                 const SizedBox(height: 8),
+                                const Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text('MAC address'),
+                                ),
                                 TextFormField(
                                   controller: _macAddress,
                                   enabled: !_prefilledMac,
                                   decoration: const InputDecoration(
-                                      labelText: 'MAC address'),
+                                      hintText: 'MAC address'),
                                   validator: (v) {
                                     final val = v?.trim() ?? '';
                                     if (val.isEmpty) return 'Enter MAC address';
                                     final norm = val
                                         .replaceAll(RegExp(r'[^A-Fa-f0-9]'), '')
                                         .toLowerCase();
-                                    if (norm.isEmpty)
+                                    if (norm.isEmpty) {
                                       return 'Enter valid MAC address';
+                                    }
                                     if (_existingMacs.isNotEmpty) {
                                       final own = widget
                                           .existingData?['macAddress']
@@ -345,12 +378,16 @@ class _CreateControlUnitScreenState
                                       for (final e in _existingMacs) {
                                         if (own != null &&
                                             own == e &&
-                                            e == norm) continue;
-                                        if (e == norm)
+                                            e == norm) {
+                                          continue;
+                                        }
+                                        if (e == norm) {
                                           return 'MAC address already exists';
+                                        }
                                         if (e.contains(norm) ||
-                                            norm.contains(e))
+                                            norm.contains(e)) {
                                           return 'MAC address too similar to existing device';
+                                        }
                                       }
                                     }
                                     return null;
@@ -374,7 +411,7 @@ class _CreateControlUnitScreenState
                                             .toList();
                                         final dropdown =
                                             DropdownButtonFormField<String?>(
-                                          value: _linkedSprayerId,
+                                          initialValue: _linkedSprayerId,
                                           decoration: const InputDecoration(
                                               labelText: 'Linked sprayer'),
                                           items: [
@@ -391,8 +428,9 @@ class _CreateControlUnitScreenState
                                               : (v) => setState(
                                                   () => _linkedSprayerId = v),
                                           validator: (v) {
-                                            if (v == null || v.isEmpty)
+                                            if (v == null || v.isEmpty) {
                                               return 'Select a linked sprayer';
+                                            }
                                             return null;
                                           },
                                         );
@@ -437,7 +475,7 @@ class _CreateControlUnitScreenState
                                             .toList();
                                         final dropdown =
                                             DropdownButtonFormField<String?>(
-                                          value: _linkedTractorId,
+                                          initialValue: _linkedTractorId,
                                           decoration: const InputDecoration(
                                               labelText: 'Linked tractor'),
                                           items: [
@@ -454,8 +492,9 @@ class _CreateControlUnitScreenState
                                               : (v) => setState(
                                                   () => _linkedTractorId = v),
                                           validator: (v) {
-                                            if (v == null || v.isEmpty)
+                                            if (v == null || v.isEmpty) {
                                               return 'Select a linked tractor';
+                                            }
                                             return null;
                                           },
                                         );
@@ -495,7 +534,7 @@ class _CreateControlUnitScreenState
                                   return plotsAsync.when(
                                       data: (items) {
                                         return DropdownButtonFormField<String?>(
-                                          value: _linkedPlotId,
+                                          initialValue: _linkedPlotId,
                                           decoration: const InputDecoration(
                                               labelText: 'Default plot'),
                                           items: [
@@ -512,8 +551,9 @@ class _CreateControlUnitScreenState
                                               : (v) => setState(
                                                   () => _linkedPlotId = v),
                                           validator: (v) {
-                                            if (v == null || v.isEmpty)
+                                            if (v == null || v.isEmpty) {
                                               return 'Select a default plot';
+                                            }
                                             return null;
                                           },
                                         );
@@ -524,7 +564,7 @@ class _CreateControlUnitScreenState
                                 }),
                                 const SizedBox(height: 8),
                                 DropdownButtonFormField<String>(
-                                  value: _sensorType,
+                                  initialValue: _sensorType,
                                   decoration: const InputDecoration(
                                       labelText: 'Sensor type'),
                                   items: const [
@@ -545,6 +585,20 @@ class _CreateControlUnitScreenState
                                             } else {
                                               _mountHeightOfLidar.clear();
                                               _lidarNozzleDistance.clear();
+                                            }
+                                          });
+                                          // If the current page is not visible for the
+                                          // newly selected sensor type, jump back to
+                                          // the first visible page (main page).
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                            final v = visiblePages();
+                                            if (!v.contains(_currentPage)) {
+                                              _pageController.animateToPage(
+                                                  v.first,
+                                                  duration: const Duration(
+                                                      milliseconds: 250),
+                                                  curve: Curves.easeInOut);
                                             }
                                           });
                                         },
@@ -575,7 +629,7 @@ class _CreateControlUnitScreenState
                               SizedBox(
                                 height: 200,
                                 child: Image.asset(
-                                  'assets/lidar_nozzle_distance.png',
+                                  'assets/control_unit/lidar_nozzle_distance.png',
                                   fit: BoxFit.contain,
                                   errorBuilder: (ctx, err, st) => const Center(
                                     child: Icon(Icons.image_not_supported,
@@ -590,7 +644,7 @@ class _CreateControlUnitScreenState
                                     controller: _lidarNozzleDistance,
                                     enabled: !_prefilledLidarNozzle,
                                     decoration: const InputDecoration(
-                                        labelText:
+                                        hintText:
                                             'Distance b/w sensor and nozzle center'),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -604,7 +658,7 @@ class _CreateControlUnitScreenState
                                 SizedBox(
                                   width: 110,
                                   child: DropdownButtonFormField<String>(
-                                    value: _lidarNozzleDistanceUnit,
+                                    initialValue: _lidarNozzleDistanceUnit,
                                     items: const [
                                       DropdownMenuItem(
                                           value: 'm', child: Text('m')),
@@ -615,8 +669,8 @@ class _CreateControlUnitScreenState
                                     ],
                                     onChanged: (v) => setState(() =>
                                         _lidarNozzleDistanceUnit = v ?? 'm'),
-                                    decoration: const InputDecoration(
-                                        labelText: 'Unit'),
+                                    decoration:
+                                        const InputDecoration(hintText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -638,7 +692,7 @@ class _CreateControlUnitScreenState
                               SizedBox(
                                 height: 200,
                                 child: Image.asset(
-                                  'assets/mount_height_lidar.png',
+                                  'assets/control_unit/mount_height_lidar.png',
                                   fit: BoxFit.contain,
                                   errorBuilder: (ctx, err, st) => const Center(
                                     child: Icon(Icons.image_not_supported,
@@ -653,7 +707,7 @@ class _CreateControlUnitScreenState
                                     controller: _mountHeightOfLidar,
                                     enabled: !_prefilledMountHeight,
                                     decoration: const InputDecoration(
-                                        labelText: 'Mount height of LIDAR'),
+                                        hintText: 'Mount height of LIDAR'),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
                                             decimal: true),
@@ -664,7 +718,7 @@ class _CreateControlUnitScreenState
                                 SizedBox(
                                   width: 110,
                                   child: DropdownButtonFormField<String>(
-                                    value: _mountHeightUnit,
+                                    initialValue: _mountHeightUnit,
                                     items: const [
                                       DropdownMenuItem(
                                           value: 'm', child: Text('m')),
@@ -675,8 +729,8 @@ class _CreateControlUnitScreenState
                                     ],
                                     onChanged: (v) => setState(
                                         () => _mountHeightUnit = v ?? 'm'),
-                                    decoration: const InputDecoration(
-                                        labelText: 'Unit'),
+                                    decoration:
+                                        const InputDecoration(hintText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -698,7 +752,7 @@ class _CreateControlUnitScreenState
                               SizedBox(
                                 height: 200,
                                 child: Image.asset(
-                                  'assets/ultrasonic_distance.png',
+                                  'assets/control_unit/ultrasonic_distance.png',
                                   fit: BoxFit.contain,
                                   errorBuilder: (ctx, err, st) => const Center(
                                     child: Icon(Icons.image_not_supported,
@@ -713,7 +767,7 @@ class _CreateControlUnitScreenState
                                     controller: _ultrasonicDistance,
                                     enabled: !_prefilledUltrasonic,
                                     decoration: const InputDecoration(
-                                        labelText:
+                                        hintText:
                                             'Distance of US sensor from center line'),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -725,7 +779,7 @@ class _CreateControlUnitScreenState
                                 SizedBox(
                                   width: 110,
                                   child: DropdownButtonFormField<String>(
-                                    value: _ultrasonicDistanceUnit,
+                                    initialValue: _ultrasonicDistanceUnit,
                                     items: const [
                                       DropdownMenuItem(
                                           value: 'm', child: Text('m')),
@@ -736,8 +790,8 @@ class _CreateControlUnitScreenState
                                     ],
                                     onChanged: (v) => setState(() =>
                                         _ultrasonicDistanceUnit = v ?? 'm'),
-                                    decoration: const InputDecoration(
-                                        labelText: 'Unit'),
+                                    decoration:
+                                        const InputDecoration(hintText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -756,11 +810,12 @@ class _CreateControlUnitScreenState
                     horizontal: 12.0, vertical: 12.0),
                 child: Row(
                   children: [
-                    if (_currentPage > 0)
+                    if (visiblePositionOf(_currentPage) > 0)
                       Expanded(
                         child: OutlinedButton(
                           onPressed: () {
-                            final prev = _currentPage - 1;
+                            final pos = visiblePositionOf(_currentPage);
+                            final prev = visible[pos - 1];
                             _pageController.animateToPage(prev,
                                 duration: const Duration(milliseconds: 250),
                                 curve: Curves.easeInOut);
@@ -777,10 +832,12 @@ class _CreateControlUnitScreenState
                             : () async {
                                 // validate current page
                                 final key = _pageKeys[_currentPage];
-                                if (!(key.currentState?.validate() ?? false))
+                                if (!(key.currentState?.validate() ?? false)) {
                                   return;
-                                if (_currentPage < totalPages - 1) {
-                                  final next = _currentPage + 1;
+                                }
+                                final pos = visiblePositionOf(_currentPage);
+                                if (pos < totalPages - 1) {
+                                  final next = visible[pos + 1];
                                   _pageController.animateToPage(next,
                                       duration:
                                           const Duration(milliseconds: 250),
@@ -791,8 +848,8 @@ class _CreateControlUnitScreenState
                                 debugPrint(
                                     'CreateControlUnitScreen: Save pressed, currentPage=$_currentPage');
                                 FocusScope.of(context).unfocus();
-                                // validate all pages with logging
-                                for (var i = 0; i < totalPages; i++) {
+                                // validate only visible pages with logging
+                                for (final i in visible) {
                                   debugPrint(
                                       'CreateControlUnitScreen: validating page $i');
                                   final k = _pageKeys[i];
@@ -905,8 +962,9 @@ class _CreateControlUnitScreenState
                                   }
 
                                   if (!mounted) return;
-                                  if (mounted)
+                                  if (mounted) {
                                     setState(() => _isSaving = false);
+                                  }
                                   ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                           content: Text(_isEditing
@@ -926,15 +984,18 @@ class _CreateControlUnitScreenState
                                         context, e.toString());
                                   }
                                 } finally {
-                                  if (mounted)
+                                  if (mounted) {
                                     setState(() => _isSaving = false);
+                                  }
                                 }
                               },
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 24.0, vertical: 12.0),
                           child: Text(
-                              _currentPage < totalPages - 1 ? 'Next' : 'Save'),
+                              visiblePositionOf(_currentPage) < totalPages - 1
+                                  ? 'Next'
+                                  : 'Save'),
                         ),
                       ),
                     ),

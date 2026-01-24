@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
@@ -78,12 +76,14 @@ class _ForgotPasswordConfirmScreenState
                       keyboardType: TextInputType.emailAddress,
                       maxLength: 254,
                       validator: (v) {
-                        if (v == null || v.isEmpty)
+                        if (v == null || v.isEmpty) {
                           return 'Please enter your email';
+                        }
                         final t = v.trim();
                         if (t.length > 254) return 'Email too long';
-                        if (!_emailRegex.hasMatch(t))
+                        if (!_emailRegex.hasMatch(t)) {
                           return 'Invalid email format';
+                        }
                         return null;
                       },
                     ),
@@ -112,8 +112,9 @@ class _ForgotPasswordConfirmScreenState
                       ),
                       validator: (v) {
                         if (v == null || v.isEmpty) return 'Enter password';
-                        if (!_validatePassword(v))
+                        if (!_validatePassword(v)) {
                           return 'Password must be stronger';
+                        }
                         return null;
                       },
                     ),
@@ -125,8 +126,9 @@ class _ForgotPasswordConfirmScreenState
                           const InputDecoration(labelText: 'Confirm password'),
                       validator: (v) {
                         if (v == null || v.isEmpty) return 'Confirm password';
-                        if (v != _passwordCtrl.text)
+                        if (v != _passwordCtrl.text) {
                           return 'Passwords do not match';
+                        }
                         return null;
                       },
                     ),

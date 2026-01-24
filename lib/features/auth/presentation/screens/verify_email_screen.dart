@@ -54,8 +54,9 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen> {
                           _email ?? '', _code.text.trim());
                       setState(() => _loading = false);
                       if (ok) {
-                        if (mounted)
+                        if (mounted) {
                           Navigator.of(context).pushReplacementNamed('/login');
+                        }
                       } else {
                         showGenericErrorSnackBar(context, 'Verification failed',
                             isWarning: true);
@@ -73,11 +74,12 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen> {
                   if ((_email ?? '').isEmpty) return;
                   final svc = ref.read(authServiceProvider);
                   final ok = await svc.resendVerification(_email ?? '');
-                  if (ok)
+                  if (ok) {
                     showSuccessSnackBar(context, 'Code resent');
-                  else
+                  } else {
                     showGenericErrorSnackBar(context, 'Resend failed',
                         isWarning: true);
+                  }
                 },
                 child: const Text('Resend code'))
           ],

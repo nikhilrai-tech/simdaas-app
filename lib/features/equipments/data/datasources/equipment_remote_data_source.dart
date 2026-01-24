@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:simdaas/core/services/api_service.dart';
 import '../models/equipment_model.dart';
@@ -47,9 +46,7 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['contact_number'] = data['contactNumber'];
       }
 
-      final body = json.encode(bodyMap);
-      await api.post('/api/tractors/',
-          headers: {'Content-Type': 'application/json'}, body: body);
+      await api.postJson('/api/tractors/', jsonBody: bodyMap);
       return;
     } else if (category == 'sprayer') {
       final bodyMap = <String, dynamic>{};
@@ -88,9 +85,7 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
             data['hingeToControlUnit'].toString();
       }
 
-      final body = json.encode(bodyMap);
-      await api.post('/api/sprayers/',
-          headers: {'Content-Type': 'application/json'}, body: body);
+      await api.postJson('/api/sprayers/', jsonBody: bodyMap);
       return;
     } else if (category == 'control_unit') {
       final bodyMap = <String, dynamic>{};
@@ -119,25 +114,24 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         final p = int.tryParse(data['linkedTractorId'].toString());
         if (p != null) bodyMap['tractor'] = p;
       }
-      if (data['lidarNozzleDistance'] != null)
+      if (data['lidarNozzleDistance'] != null) {
         bodyMap['distance_b_w_sensor_and_nozzle_center'] =
             data['lidarNozzleDistance'];
-      if (data['mountingHeight'] != null)
+      }
+      if (data['mountingHeight'] != null) {
         bodyMap['mount_height_of_lidar'] = data['mountingHeight'];
-      if (data['ultrasonicDistance'] != null)
+      }
+      if (data['ultrasonicDistance'] != null) {
         bodyMap['distance_of_us_sensor_from_center_line'] =
             data['ultrasonicDistance'];
+      }
 
-      final body = json.encode(bodyMap);
-      await api.post('/api/control-units/',
-          headers: {'Content-Type': 'application/json'}, body: body);
+      await api.postJson('/api/control-units/', jsonBody: bodyMap);
       return;
     }
 
     // Fallback: generic equipments endpoint - send whatever we have
-    final body = json.encode(data);
-    await api.post('/api/equipments/',
-        headers: {'Content-Type': 'application/json'}, body: body);
+    await api.postJson('/api/equipments/', jsonBody: data);
   }
 
   @override
@@ -154,19 +148,21 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['user_id'] = parsed ?? userId;
         bodyMap['user'] = parsed ?? userId;
       }
-      if (data['wheelDiameter'] != null)
+      if (data['wheelDiameter'] != null) {
         bodyMap['wheel_diameter'] = data['wheelDiameter'];
-      if (data['screwsInWheel'] != null)
+      }
+      if (data['screwsInWheel'] != null) {
         bodyMap['screws_per_wheel'] = data['screwsInWheel'];
-      if (data['axleLength'] != null)
+      }
+      if (data['axleLength'] != null) {
         bodyMap['axle_length'] = data['axleLength'].toString();
-      if (data['contactNumber'] != null)
+      }
+      if (data['contactNumber'] != null) {
         bodyMap['contact_number'] = data['contactNumber'];
+      }
 
-      final body = json.encode(bodyMap);
       // Use PATCH for partial updates
-      await api.patch('/api/tractors/$id/',
-          headers: {'Content-Type': 'application/json'}, body: body);
+      await api.patchJson('/api/tractors/$id/', jsonBody: bodyMap);
       return;
     } else if (category == 'sprayer') {
       final bodyMap = <String, dynamic>{};
@@ -176,28 +172,34 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['user_id'] = parsed ?? userId;
         bodyMap['user'] = parsed ?? userId;
       }
-      if (data['nozzleCount'] != null)
+      if (data['nozzleCount'] != null) {
         bodyMap['nozzle_count'] = data['nozzleCount'];
-      if (data['tankCapacity'] != null)
+      }
+      if (data['tankCapacity'] != null) {
         bodyMap['tank_capacity'] = data['tankCapacity'];
-      if (data['wheelDiameter'] != null)
+      }
+      if (data['wheelDiameter'] != null) {
         bodyMap['wheel_diameter'] = data['wheelDiameter'].toString();
-      if (data['screwsInWheel'] != null)
+      }
+      if (data['screwsInWheel'] != null) {
         bodyMap['screws_per_wheel'] = data['screwsInWheel'];
-      if (data['axleLength'] != null)
+      }
+      if (data['axleLength'] != null) {
         bodyMap['axle_length'] = data['axleLength'].toString();
-      if (data['hingeToAxle'] != null)
+      }
+      if (data['hingeToAxle'] != null) {
         bodyMap['distance_hinge_axle'] = data['hingeToAxle'].toString();
-      if (data['hingeToNozzle'] != null)
+      }
+      if (data['hingeToNozzle'] != null) {
         bodyMap['distance_hinge_nozzle'] = data['hingeToNozzle'].toString();
-      if (data['hingeToControlUnit'] != null)
+      }
+      if (data['hingeToControlUnit'] != null) {
         bodyMap['distance_hinge_control_unit'] =
             data['hingeToControlUnit'].toString();
+      }
 
-      final body = json.encode(bodyMap);
       // Use PATCH for partial updates
-      await api.patch('/api/sprayers/$id/',
-          headers: {'Content-Type': 'application/json'}, body: body);
+      await api.patchJson('/api/sprayers/$id/', jsonBody: bodyMap);
       return;
     }
 
@@ -210,8 +212,9 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['user_id'] = parsed ?? userId;
         bodyMap['user'] = parsed ?? userId;
       }
-      if (data.containsKey('macAddress'))
+      if (data.containsKey('macAddress')) {
         bodyMap['mac_addr'] = data['macAddress'];
+      }
       // Respect explicit presence of keys even when null so callers can clear
       // links by sending `linkedSprayerId: null` etc.
       if (data.containsKey('linkedSprayerId')) {
@@ -232,8 +235,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
           if (p != null) bodyMap['tractor'] = p;
         }
       }
-      print("linkedPlotId check-----------------------------");
-      print(data);
+      debugPrint("linkedPlotId check-----------------------------");
+      debugPrint(data.toString());
       if (data.containsKey('linkedPlotId')) {
         final raw = data['linkedPlotId'];
         if (raw == null) {
@@ -243,29 +246,27 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
           if (p != null) bodyMap['plot'] = p;
         }
       }
-      if (data.containsKey('lidarNozzleDistance'))
+      if (data.containsKey('lidarNozzleDistance')) {
         bodyMap['distance_b_w_sensor_and_nozzle_center'] =
             data['lidarNozzleDistance'];
-      if (data.containsKey('mountingHeight'))
+      }
+      if (data.containsKey('mountingHeight')) {
         bodyMap['mount_height_of_lidar'] = data['mountingHeight'];
-      if (data.containsKey('ultrasonicDistance'))
+      }
+      if (data.containsKey('ultrasonicDistance')) {
         bodyMap['distance_of_us_sensor_from_center_line'] =
             data['ultrasonicDistance'];
+      }
 
-      final body = json.encode(bodyMap);
       // Debug: log outgoing payload for easier troubleshooting
-      // ignore: avoid_print
-      print('PATCH /api/control-units/$id/ payload: $body');
+      debugPrint('PATCH /api/control-units/$id/ payload: $bodyMap');
       // Use PATCH for partial updates
-      await api.patch('/api/control-units/$id/',
-          headers: {'Content-Type': 'application/json'}, body: body);
+      await api.patchJson('/api/control-units/$id/', jsonBody: bodyMap);
       return;
     }
 
-    final body = json.encode(data);
     // Fallback: use PATCH for partial update on generic endpoint
-    await api.patch('/api/equipments/$id/',
-        headers: {'Content-Type': 'application/json'}, body: body);
+    await api.patchJson('/api/equipments/$id/', jsonBody: data);
   }
 
   @override
@@ -289,11 +290,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
   @override
   Future<List<EquipmentEntity>> getEquipments(String userId) async {
     // Merge tractors and sprayers lists
-    final tractorsResp = await api.get('/api/tractors/');
-    final sprayersResp = await api.get('/api/sprayers/');
-    final controlUnitsResp = await api.get('/api/control-units/');
     final List<EquipmentEntity> out = [];
-    final arrT = json.decode(tractorsResp.body) as List<dynamic>;
+    final arrT = (await api.getJson('/api/tractors/')) as List<dynamic>;
     for (final item in arrT) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
@@ -301,7 +299,7 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
       normalized['category'] = 'tractor';
       out.add(EquipmentModel.fromJson(id, normalized));
     }
-    final arrS = json.decode(sprayersResp.body) as List<dynamic>;
+    final arrS = (await api.getJson('/api/sprayers/')) as List<dynamic>;
     for (final item in arrS) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
@@ -311,7 +309,7 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
     }
     // control units
     try {
-      final arrC = json.decode(controlUnitsResp.body) as List<dynamic>;
+      final arrC = (await api.getJson('/api/control-units/')) as List<dynamic>;
       for (final item in arrC) {
         final map = Map<String, dynamic>.from(item as Map);
         final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
@@ -331,9 +329,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
 
   @override
   Future<List<EquipmentEntity>> getTractors(String userId) async {
-    final resp = await api.get('/api/tractors/');
     final List<EquipmentEntity> out = [];
-    final arr = json.decode(resp.body) as List<dynamic>;
+    final arr = (await api.getJson('/api/tractors/')) as List<dynamic>;
     for (final item in arr) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
@@ -346,9 +343,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
 
   @override
   Future<List<EquipmentEntity>> getSprayers(String userId) async {
-    final resp = await api.get('/api/sprayers/');
     final List<EquipmentEntity> out = [];
-    final arr = json.decode(resp.body) as List<dynamic>;
+    final arr = (await api.getJson('/api/sprayers/')) as List<dynamic>;
     for (final item in arr) {
       final map = Map<String, dynamic>.from(item as Map);
       final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');
@@ -364,11 +360,8 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
     try {
       debugPrint(
           'EquipmentRemoteDataSource: GET /api/control-units/ (userId=$userId)');
-      final resp = await api.get('/api/control-units/');
-      debugPrint(
-          'EquipmentRemoteDataSource: /api/control-units/ status=${resp.statusCode} body_len=${resp.body.length}');
       final List<EquipmentEntity> out = [];
-      final arr = json.decode(resp.body) as List<dynamic>;
+      final arr = (await api.getJson('/api/control-units/')) as List<dynamic>;
       for (final item in arr) {
         final map = Map<String, dynamic>.from(item as Map);
         final id = (map['id']?.toString() ?? map['pk']?.toString() ?? '');

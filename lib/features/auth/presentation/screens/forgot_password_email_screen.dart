@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/api_exception.dart';
@@ -76,7 +74,6 @@ class _ForgotPasswordEmailScreenState
                                 arguments: {'email': email});
                           }
                         } catch (e) {
-                          String msg;
                           if (e is ApiException) {
                             final err =
                                 ApiError.fromResponse(e.statusCode, e.body);

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'api_exception.dart';
 import 'package:flutter/foundation.dart';
@@ -80,6 +81,20 @@ class ApiService {
     }
   }
 
+  /// Convenience: perform GET and decode JSON body.
+  /// Throws [ApiException] on non-2xx or network errors.
+  Future<dynamic> getJson(String path, {bool requiresAuth = true}) async {
+    final resp = await get(path, requiresAuth: requiresAuth);
+    try {
+      if (resp.body.isEmpty) return null;
+      return json.decode(resp.body);
+    } catch (e) {
+      debugPrint('ApiService.getJson decode error for $path: $e');
+      // return raw body as fallback
+      return resp.body;
+    }
+  }
+
   Future<http.Response> post(String path,
       {Map<String, String>? headers,
       Object? body,
@@ -129,6 +144,25 @@ class ApiService {
     }
   }
 
+  /// Convenience: POST with JSON body and return decoded JSON response.
+  Future<dynamic> postJson(String path,
+      {Map<String, String>? headers,
+      Object? jsonBody,
+      bool requiresAuth = true}) async {
+    final encoded = jsonBody == null ? null : json.encode(jsonBody);
+    final hdrs = <String, String>{'Content-Type': 'application/json'};
+    if (headers != null) hdrs.addAll(headers);
+    final resp = await post(path,
+        headers: hdrs, body: encoded, requiresAuth: requiresAuth);
+    try {
+      if (resp.body.isEmpty) return null;
+      return json.decode(resp.body);
+    } catch (e) {
+      debugPrint('ApiService.postJson decode error for $path: $e');
+      return resp.body;
+    }
+  }
+
   Future<http.Response> put(String path,
       {Map<String, String>? headers, Object? body}) async {
     try {
@@ -165,8 +199,8 @@ class ApiService {
           'ApiService.PATCH $path with auth: ${h.containsKey('Authorization')}');
       final resp = await c.patch(url(path), headers: h, body: body);
 
-      print('PATCH Response status: ${resp.statusCode}');
-      print('PATCH Response body: ${resp.body}');
+      debugPrint('PATCH Response status: ${resp.statusCode}');
+      debugPrint('PATCH Response body: ${resp.body}');
 
       if (resp.statusCode == 401 && requiresAuth && onTokenExpired != null) {
         debugPrint(
@@ -189,6 +223,25 @@ class ApiService {
       debugPrint('ApiService.PATCH $path error: $e');
       if (e is ApiException) rethrow;
       throw ApiException(null, 'Network error: $e', path: path);
+    }
+  }
+
+  /// Convenience: PATCH with JSON body and return decoded JSON response.
+  Future<dynamic> patchJson(String path,
+      {Map<String, String>? headers,
+      Object? jsonBody,
+      bool requiresAuth = true}) async {
+    final encoded = jsonBody == null ? null : json.encode(jsonBody);
+    final hdrs = <String, String>{'Content-Type': 'application/json'};
+    if (headers != null) hdrs.addAll(headers);
+    final resp = await patch(path,
+        headers: hdrs, body: encoded, requiresAuth: requiresAuth);
+    try {
+      if (resp.body.isEmpty) return null;
+      return json.decode(resp.body);
+    } catch (e) {
+      debugPrint('ApiService.patchJson decode error for $path: $e');
+      return resp.body;
     }
   }
 

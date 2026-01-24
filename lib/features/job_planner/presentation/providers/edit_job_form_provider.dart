@@ -45,7 +45,7 @@ class EditJobFormState {
 
 /// StateNotifier for managing edit job form state
 class EditJobFormNotifier extends StateNotifier<EditJobFormState> {
-  EditJobFormNotifier(EditJobFormState initialState) : super(initialState);
+  EditJobFormNotifier(super.initialState);
 
   void setEquipmentId(String? id) {
     state = state.copyWith(

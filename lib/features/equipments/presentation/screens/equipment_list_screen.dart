@@ -9,6 +9,7 @@ import 'scan_control_unit_screen.dart';
 import 'equipment_troubleshooting_screen.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/widgets/api_error_widget.dart';
+import 'package:simdaas/core/services/connectivity_service.dart';
 
 /// Equipment list screen with three category buttons and a filtered list.
 class EquipmentListScreen extends ConsumerStatefulWidget {
@@ -19,8 +20,35 @@ class EquipmentListScreen extends ConsumerStatefulWidget {
       _EquipmentListScreenState();
 }
 
-class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen> {
-  String _filterCategory = 'all';
+class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
+    with WidgetsBindingObserver {
+  final String _filterCategory = 'all';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      final currentUserId = ref.read(authServiceProvider).currentUserId;
+      if (currentUserId != null) {
+        ref.invalidate(equipmentsListProvider(currentUserId));
+        ref.invalidate(controlUnitsProvider(currentUserId));
+        ref.invalidate(tractorsProvider(currentUserId));
+        ref.invalidate(sprayersProvider(currentUserId));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,10 +70,26 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen> {
             : (routeCategory.toLowerCase() == 'tractor'
                 ? ref.watch(tractorsProvider(userId))
                 : ref.watch(sprayersProvider(userId))));
+    final conn = ref.watch(isOnlineStreamProvider);
+    final online = conn.asData?.value ?? true;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Equipments'),
         elevation: 0,
+        bottom: online
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(28),
+                child: Container(
+                  height: 28,
+                  color: Colors.red.shade700,
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'Offline — showing last known data',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ),
       ),
       body: itemsAsync.when(
         data: (items) {
@@ -124,194 +168,249 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen> {
                     ],
                   ),
                 ),
-              if (filtered.isEmpty)
-                Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.precision_manufacturing_outlined,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.secondary,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No equipment yet',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap the + button to add equipment',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.secondary,
+              Expanded(
+                child: filtered.isEmpty
+                    ? RefreshIndicator(
+                        onRefresh: () async {
+                          final currentUserId =
+                              ref.read(authServiceProvider).currentUserId ??
+                                  'demo_user';
+                          if (routeCategory == null) {
+                            ref.invalidate(
+                                equipmentsListProvider(currentUserId));
+                            try {
+                              await ref.read(
+                                  equipmentsListProvider(currentUserId).future);
+                            } catch (_) {}
+                          } else if (routeCategory.toLowerCase() ==
+                              'control_unit') {
+                            ref.invalidate(controlUnitsProvider(currentUserId));
+                            try {
+                              await ref.read(
+                                  controlUnitsProvider(currentUserId).future);
+                            } catch (_) {}
+                          } else if (routeCategory.toLowerCase() == 'tractor') {
+                            ref.invalidate(tractorsProvider(currentUserId));
+                            try {
+                              await ref
+                                  .read(tractorsProvider(currentUserId).future);
+                            } catch (_) {}
+                          } else if (routeCategory.toLowerCase() == 'sprayer') {
+                            ref.invalidate(sprayersProvider(currentUserId));
+                            try {
+                              await ref
+                                  .read(sprayersProvider(currentUserId).future);
+                            } catch (_) {}
+                          }
+                        },
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.6,
+                              child: Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.precision_manufacturing_outlined,
+                                      size: 64,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .secondary,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'No equipment yet',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleLarge,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Tap the + button to add equipment',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .secondary,
+                                          ),
+                                    ),
+                                  ],
+                                ),
                               ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: filtered.length,
-                    itemBuilder: (c, i) {
-                      final e = filtered[i];
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () async {
+                          final currentUserId =
+                              ref.read(authServiceProvider).currentUserId ??
+                                  'demo_user';
+                          if (routeCategory == null) {
+                            ref.invalidate(
+                                equipmentsListProvider(currentUserId));
+                            try {
+                              await ref.read(
+                                  equipmentsListProvider(currentUserId).future);
+                            } catch (_) {}
+                          } else if (routeCategory.toLowerCase() ==
+                              'control_unit') {
+                            ref.invalidate(controlUnitsProvider(currentUserId));
+                            try {
+                              await ref.read(
+                                  controlUnitsProvider(currentUserId).future);
+                            } catch (_) {}
+                          } else if (routeCategory.toLowerCase() == 'tractor') {
+                            ref.invalidate(tractorsProvider(currentUserId));
+                            try {
+                              await ref
+                                  .read(tractorsProvider(currentUserId).future);
+                            } catch (_) {}
+                          } else if (routeCategory.toLowerCase() == 'sprayer') {
+                            ref.invalidate(sprayersProvider(currentUserId));
+                            try {
+                              await ref
+                                  .read(sprayersProvider(currentUserId).future);
+                            } catch (_) {}
+                          }
+                        },
+                        child: ListView.builder(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          itemCount: filtered.length,
+                          itemBuilder: (c, i) {
+                            final e = filtered[i];
 
-                      final status = (e.status ?? 'vacant').toLowerCase();
-                      final isAssigned = status != 'vacant';
+                            final details = (e.category == 'sprayer')
+                                ? 'Mount H: ${e.mountingHeight ?? '-'} m • Lidar-Nozzle: ${e.lidarNozzleDistance ?? '-'} m'
+                                : e.category;
 
-                      final details = (e.category == 'sprayer')
-                          ? 'Mount H: ${e.mountingHeight ?? '-'} m • Lidar-Nozzle: ${e.lidarNozzleDistance ?? '-'} m'
-                          : e.category;
-
-                      IconData getCategoryIcon(String category) {
-                        switch (category.toLowerCase()) {
-                          case 'control_unit':
-                            return Icons.memory;
-                          case 'tractor':
-                            return Icons.agriculture;
-                          case 'sprayer':
-                            return Icons.water_drop;
-                          default:
-                            return Icons.precision_manufacturing;
-                        }
-                      }
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 6),
-                        child: InkWell(
-                          onTap: () async {
-                            final res = await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) => EquipmentDetailsScreen(
-                                        equipment: e, readOnly: readOnly)));
-                            if (res == true) {
-                              final currentUserId =
-                                  ref.read(authServiceProvider).currentUserId ??
-                                      'demo_user';
-                              ref.invalidate(
-                                  equipmentsListProvider(currentUserId));
-                              switch (e.category.toLowerCase()) {
+                            IconData getCategoryIcon(String category) {
+                              switch (category.toLowerCase()) {
                                 case 'control_unit':
-                                  ref.invalidate(
-                                      controlUnitsProvider(currentUserId));
-                                  break;
-                                case 'sprayer':
-                                  ref.invalidate(
-                                      sprayersProvider(currentUserId));
-                                  break;
+                                  return Icons.memory;
                                 case 'tractor':
-                                  ref.invalidate(
-                                      tractorsProvider(currentUserId));
-                                  break;
+                                  return Icons.agriculture;
+                                case 'sprayer':
+                                  return Icons.water_drop;
                                 default:
-                                  break;
+                                  return Icons.precision_manufacturing;
                               }
                             }
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary
-                                        .withAlpha(26),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Icon(
-                                    getCategoryIcon(e.category),
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                    size: 28,
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 6),
+                              child: InkWell(
+                                onTap: () async {
+                                  final res = await Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                          builder: (_) =>
+                                              EquipmentDetailsScreen(
+                                                  equipment: e,
+                                                  readOnly: readOnly)));
+                                  if (res == true) {
+                                    final currentUserId = ref
+                                            .read(authServiceProvider)
+                                            .currentUserId ??
+                                        'demo_user';
+                                    ref.invalidate(
+                                        equipmentsListProvider(currentUserId));
+                                    switch (e.category.toLowerCase()) {
+                                      case 'control_unit':
+                                        ref.invalidate(controlUnitsProvider(
+                                            currentUserId));
+                                        break;
+                                      case 'sprayer':
+                                        ref.invalidate(
+                                            sprayersProvider(currentUserId));
+                                        break;
+                                      case 'tractor':
+                                        ref.invalidate(
+                                            tractorsProvider(currentUserId));
+                                        break;
+                                      default:
+                                        break;
+                                    }
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16.0),
+                                  child: Row(
                                     children: [
-                                      Text(
-                                        e.name,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.bold,
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                              .withAlpha(26),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: Icon(
+                                          getCategoryIcon(e.category),
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          size: 28,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              e.name,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        e.category,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .secondary,
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              e.category,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .secondary,
+                                                  ),
                                             ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              details,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        details,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      const SizedBox(width: 8),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isAssigned
-                                        ? const Color(0xFFAA2424)
-                                            .withAlpha(26) // Warning Red
-                                        : const Color(0xFF2E7D32)
-                                            .withAlpha(26), // Primary Green
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                    status.toUpperCase(),
-                                    style: TextStyle(
-                                      color: isAssigned
-                                          ? const Color(
-                                              0xFFAA2424) // Warning Red
-                                          : const Color(
-                                              0xFF2E7D32), // Primary Green
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
-                ),
+                      ),
+              ),
             ],
           );
         },

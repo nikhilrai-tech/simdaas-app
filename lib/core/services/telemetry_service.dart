@@ -219,19 +219,18 @@ class TelemetryService {
         final keys = actives.map((a) => a.deviceId).toList();
         debugPrint('Telemetry.pruner: active keys -> $keys');
       } catch (_) {}
-      // Determine which stored device ids are now considered offline and
-      // clear their stored telemetry and position history to avoid showing
-      // stale data in the UI.
+      // Determine which stored device ids are now considered offline. Do NOT
+      // clear their stored telemetry so the UI can continue to show the
+      // last-known values while marking them stale (by timestamp). Clearing
+      // cached telemetry caused abrupt disappearance of markers when the
+      // network dropped; keeping the last value improves UX during retries.
       try {
         final activeIds = actives.map((a) => a.deviceId).toSet();
         final storedIds = _latest.keys.toList();
         for (final id in storedIds) {
           if (!activeIds.contains(id)) {
-            // remove latest telemetry and positional history
-            _latest.remove(id);
-            _positions.remove(id);
             debugPrint(
-                'Telemetry.pruner: cleared stored telemetry for offline id $id');
+                'Telemetry.pruner: $id is offline (keeping cached telemetry)');
           }
         }
       } catch (_) {}

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/utils/api_error.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
@@ -29,7 +28,7 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
       TextEditingController(text: existing?['description'] as String? ?? '');
   final addNameCtrl = TextEditingController();
   final addQtyCtrl = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
+  final formKey = GlobalKey<FormState>();
   String? selectedIdFromList;
   bool adding = false;
 
@@ -46,7 +45,7 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                     : 'Edit Material Mix'),
                 content: SingleChildScrollView(
                   child: Form(
-                    key: _formKey,
+                    key: formKey,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -113,7 +112,7 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                                           onPressed: () => setStateOuter(
                                               () => currentFerts.remove(e))),
                                     );
-                                  }).toList(),
+                                  }),
                                 const SizedBox(height: 8),
                                 // Add fertilizer inline: Autocomplete + quantity + Add button
                                 Row(children: [
@@ -123,8 +122,9 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                                       optionsBuilder: (textEditingValue) {
                                         final input =
                                             textEditingValue.text.toLowerCase();
-                                        if (input.isEmpty)
+                                        if (input.isEmpty) {
                                           return const Iterable<String>.empty();
+                                        }
                                         return fertNames.where((n) =>
                                             n.toLowerCase().contains(input));
                                       },
@@ -247,14 +247,12 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                                 if (currentFerts.isEmpty)
                                   const Text('No fertilizers added'),
                                 if (currentFerts.isNotEmpty)
-                                  ...currentFerts
-                                      .map((e) => ListTile(
-                                          title: Text(e['name']?.toString() ??
-                                              e['fertilizer']?.toString() ??
-                                              ''),
-                                          subtitle: Text(
-                                              'Qty: ${e['quantity'] ?? ''}')))
-                                      .toList(),
+                                  ...currentFerts.map((e) => ListTile(
+                                      title: Text(e['name']?.toString() ??
+                                          e['fertilizer']?.toString() ??
+                                          ''),
+                                      subtitle:
+                                          Text('Qty: ${e['quantity'] ?? ''}'))),
                               ],
                             );
                           },
@@ -264,14 +262,12 @@ Future<Map<String, dynamic>?> showMaterialDialog(BuildContext parentCtx,
                               if (currentFerts.isEmpty)
                                 const Text('No fertilizers added'),
                               if (currentFerts.isNotEmpty)
-                                ...currentFerts
-                                    .map((e) => ListTile(
-                                        title: Text(e['name']?.toString() ??
-                                            e['fertilizer']?.toString() ??
-                                            ''),
-                                        subtitle: Text(
-                                            'Qty: ${e['quantity'] ?? ''}')))
-                                    .toList(),
+                                ...currentFerts.map((e) => ListTile(
+                                    title: Text(e['name']?.toString() ??
+                                        e['fertilizer']?.toString() ??
+                                        ''),
+                                    subtitle:
+                                        Text('Qty: ${e['quantity'] ?? ''}'))),
                             ],
                           ),
                         ),

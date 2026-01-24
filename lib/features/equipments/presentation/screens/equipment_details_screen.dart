@@ -102,10 +102,10 @@ class _EquipmentDetailsScreenState
               id;
         },
         orElse: () =>
-            _extractNameFromLinked(id ?? '', {
+            _extractNameFromLinked(id, {
               for (var e in listAsync.value ?? []) e.id: e.name,
             }) ??
-            (id));
+            id);
   }
 
   String? _extractNameFromLinked(String linked, Map<String, String> plotMap) {
@@ -170,10 +170,10 @@ class _EquipmentDetailsScreenState
               id;
         },
         orElse: () =>
-            _extractNameFromLinked(id ?? '', {
+            _extractNameFromLinked(id, {
               for (var e in plotsAsync.value ?? []) e.id: e.name,
             }) ??
-            (id));
+            id);
   }
 
   @override
@@ -189,7 +189,6 @@ class _EquipmentDetailsScreenState
     final currentUserId = ref.read(authServiceProvider).currentUserId ??
         widget.equipment.userId ??
         'demo_user';
-    final status = (displayedEquipment.status ?? 'vacant').toUpperCase();
     // watch other equipment/plot lists so we can display names instead of ids
     final sprayersAsync = ref.watch(sprayersProvider(currentUserId));
     final tractorsAsync = ref.watch(tractorsProvider(currentUserId));
@@ -367,13 +366,6 @@ class _EquipmentDetailsScreenState
                     Text(displayedEquipment.category, softWrap: true),
                   ]),
             ),
-
-            const SizedBox(width: 12),
-            // right: status chip
-            Chip(
-              label: Text(status, style: const TextStyle(color: Colors.white)),
-              backgroundColor: status == 'VACANT' ? Colors.green : Colors.red,
-            )
           ]),
           const SizedBox(height: 16),
           // allow owner and other fields to wrap and flow vertically

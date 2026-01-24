@@ -194,12 +194,12 @@ class TechnicianDashboardScreen extends StatelessWidget {
 
 class _DashboardCard extends StatelessWidget {
   const _DashboardCard({
-    this.info,
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.color,
     required this.onTap,
+    this.info,
   });
 
   final String? info;

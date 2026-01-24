@@ -437,10 +437,11 @@ class PlotPreviewPainter extends CustomPainter {
       final p = points[i];
       final x = ((p.longitude - minLng) / lngRange) * size.width;
       final y = size.height - ((p.latitude - minLat) / latRange) * size.height;
-      if (i == 0)
+      if (i == 0) {
         uiPath.moveTo(x, y);
-      else
+      } else {
         uiPath.lineTo(x, y);
+      }
     }
     uiPath.close();
     final paintFill = Paint()..color = Colors.green.withAlpha(64);

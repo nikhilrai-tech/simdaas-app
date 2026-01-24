@@ -16,11 +16,12 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   @override
   Future<UserModel> signIn(String email, String password) async {
     // Postman: POST /api/auth/login/ with { username, password } -> returns { access, refresh }
-    final resp = await api.post('/api/auth/login/',
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'username': email, 'password': password}));
-    if (resp.statusCode == 200 || resp.statusCode == 201) {
-      final data = json.decode(resp.body) as Map<String, dynamic>;
+    final dataRaw = await api.postJson('/api/auth/login/',
+        jsonBody: {'username': email, 'password': password},
+        requiresAuth: false);
+    final data =
+        (dataRaw is Map<String, dynamic>) ? dataRaw : <String, dynamic>{};
+    if (data.isNotEmpty) {
       // user info may not be present; attempt to extract user_id from access token
       String id = '';
       if (data['access'] != null) {
@@ -43,8 +44,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       }
       return UserModel(id: id, email: email);
     }
-    throw ApiException(resp.statusCode, 'HTTP ${resp.statusCode}',
-        path: '/api/auth/login/', body: resp.body);
+    throw ApiException(null, 'Authentication failed', path: '/api/auth/login/');
   }
 
   @override
@@ -53,9 +53,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     // and body { refresh_token: "..." }
     if (token == null) return;
     // token here we assume is the access token; logout endpoint may need the refresh token in body
-    await api.post('/api/auth/logout/', headers: {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json'
-    });
+    await api.postJson('/api/auth/logout/',
+        headers: {'Authorization': 'Bearer $token'});
   }
 }

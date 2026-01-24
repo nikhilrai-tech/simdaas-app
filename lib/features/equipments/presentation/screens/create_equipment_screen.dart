@@ -94,6 +94,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
               onChanged: (v) => setState(() => _category = v ?? 'tractor'),
               decoration: const InputDecoration(labelText: 'Category'),
             ),
+            const Text('Equipment Name'),
+            const SizedBox(height: 6),
             TextFormField(
                 controller: _name,
                 decoration: const InputDecoration(labelText: 'Equipment Name'),
@@ -116,12 +118,19 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
               if (_sprayerType == 'lidar') ...[
                 Row(children: [
                   Expanded(
-                    child: TextFormField(
-                        controller: _mountingHeight,
-                        decoration: const InputDecoration(
-                            labelText: 'Mounting height of lidar'),
-                        keyboardType:
-                            TextInputType.numberWithOptions(decimal: true)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Mounting height of lidar'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                            controller: _mountingHeight,
+                            decoration: const InputDecoration(
+                                labelText: 'Mounting height of lidar'),
+                            keyboardType:
+                                TextInputType.numberWithOptions(decimal: true)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
@@ -141,12 +150,19 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                 ]),
                 Row(children: [
                   Expanded(
-                    child: TextFormField(
-                        controller: _lidarNozzleDistance,
-                        decoration: const InputDecoration(
-                            labelText: 'Distance between lidar and nozzle'),
-                        keyboardType:
-                            TextInputType.numberWithOptions(decimal: true)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Distance between lidar and nozzle'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                            controller: _lidarNozzleDistance,
+                            decoration: const InputDecoration(
+                                labelText: 'Distance between lidar and nozzle'),
+                            keyboardType:
+                                TextInputType.numberWithOptions(decimal: true)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
@@ -166,12 +182,20 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                 ]),
                 Row(children: [
                   Expanded(
-                    child: TextFormField(
-                        controller: _hingeToAxle,
-                        decoration: const InputDecoration(
-                            labelText: 'Distance between hinge point and axle'),
-                        keyboardType:
-                            TextInputType.numberWithOptions(decimal: true)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Distance between hinge point and axle'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                            controller: _hingeToAxle,
+                            decoration: const InputDecoration(
+                                labelText:
+                                    'Distance between hinge point and axle'),
+                            keyboardType:
+                                TextInputType.numberWithOptions(decimal: true)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
@@ -191,13 +215,20 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                 ]),
                 Row(children: [
                   Expanded(
-                    child: TextFormField(
-                        controller: _hingeToNozzle,
-                        decoration: const InputDecoration(
-                            labelText:
-                                'Distance between hinge point and nozzle'),
-                        keyboardType:
-                            TextInputType.numberWithOptions(decimal: true)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Distance between hinge point and nozzle'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                            controller: _hingeToNozzle,
+                            decoration: const InputDecoration(
+                                labelText:
+                                    'Distance between hinge point and nozzle'),
+                            keyboardType:
+                                TextInputType.numberWithOptions(decimal: true)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
@@ -217,13 +248,21 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                 ]),
                 Row(children: [
                   Expanded(
-                    child: TextFormField(
-                        controller: _hingeToControlUnit,
-                        decoration: const InputDecoration(
-                            labelText:
-                                'Distance between hinge point and control unit mounting'),
-                        keyboardType:
-                            TextInputType.numberWithOptions(decimal: true)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                            'Distance between hinge point and control unit mounting'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                            controller: _hingeToControlUnit,
+                            decoration: const InputDecoration(
+                                labelText:
+                                    'Distance between hinge point and control unit mounting'),
+                            keyboardType:
+                                TextInputType.numberWithOptions(decimal: true)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
@@ -244,12 +283,20 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
               ] else ...[
                 Row(children: [
                   Expanded(
-                    child: TextFormField(
-                        controller: _ultrasonicDistance,
-                        decoration: const InputDecoration(
-                            labelText: 'Distance of sensor from center line'),
-                        keyboardType:
-                            TextInputType.numberWithOptions(decimal: true)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Distance of sensor from center line'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                            controller: _ultrasonicDistance,
+                            decoration: const InputDecoration(
+                                labelText:
+                                    'Distance of sensor from center line'),
+                            keyboardType:
+                                TextInputType.numberWithOptions(decimal: true)),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 8),
                   SizedBox(
@@ -270,12 +317,19 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
             ] else if (_category == 'tractor') ...[
               Row(children: [
                 Expanded(
-                  child: TextFormField(
-                      controller: _wheelDiameter,
-                      decoration:
-                          const InputDecoration(labelText: 'Wheel diameter'),
-                      keyboardType:
-                          TextInputType.numberWithOptions(decimal: true)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('Wheel diameter'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                          controller: _wheelDiameter,
+                          decoration: const InputDecoration(
+                              labelText: 'Wheel diameter'),
+                          keyboardType:
+                              TextInputType.numberWithOptions(decimal: true)),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
@@ -293,6 +347,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                   ),
                 )
               ]),
+              const Text('Number of screws/Nuts in wheel'),
+              const SizedBox(height: 6),
               TextFormField(
                   controller: _screwsInWheel,
                   decoration: const InputDecoration(
@@ -300,12 +356,19 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                   keyboardType: TextInputType.number),
               Row(children: [
                 Expanded(
-                  child: TextFormField(
-                      controller: _axleLength,
-                      decoration:
-                          const InputDecoration(labelText: 'Axle length'),
-                      keyboardType:
-                          TextInputType.numberWithOptions(decimal: true)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('Axle length'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                          controller: _axleLength,
+                          decoration:
+                              const InputDecoration(labelText: 'Axle length'),
+                          keyboardType:
+                              TextInputType.numberWithOptions(decimal: true)),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
@@ -324,6 +387,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                 )
               ]),
             ] else if (_category == 'control_unit') ...[
+              const Text('Control unit ID'),
+              const SizedBox(height: 6),
               TextFormField(
                   controller: _controlUnitId,
                   decoration:
@@ -331,15 +396,24 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                   validator: (v) => (v == null || v.isEmpty)
                       ? 'Enter control unit id'
                       : null),
+              const SizedBox(height: 12),
+              const Text('MAC address'),
+              const SizedBox(height: 6),
               TextFormField(
                   controller: _macAddress,
                   decoration: const InputDecoration(labelText: 'MAC address'),
                   keyboardType: TextInputType.text),
+              const SizedBox(height: 12),
+              const Text('Linked sprayer ID'),
+              const SizedBox(height: 6),
               TextFormField(
                   controller: _linkedSprayerId,
                   decoration:
                       const InputDecoration(labelText: 'Linked sprayer ID'),
                   keyboardType: TextInputType.text),
+              const SizedBox(height: 12),
+              const Text('Linked tractor ID'),
+              const SizedBox(height: 6),
               TextFormField(
                   controller: _linkedTractorId,
                   decoration:
