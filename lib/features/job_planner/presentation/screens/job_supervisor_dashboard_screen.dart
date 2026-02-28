@@ -39,7 +39,7 @@ class JobSupervisorDashboardScreen extends StatelessWidget {
                 onTap: () => Navigator.of(context).pushNamed('/create_job')),
             _buildTile(context,
                 icon: Icons.report,
-                title: 'Job Reports',
+                title: '',
                 subtitle: 'View job reports',
                 color: Theme.of(context).colorScheme.surface.withAlpha(10),
                 onTap: openReports),

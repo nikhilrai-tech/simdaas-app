@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../providers/job_providers.dart';
 import '../providers/job_sort_provider.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
@@ -160,8 +161,6 @@ class JobPlannerScreen extends ConsumerWidget {
                                   (f) => f?.id == job.plotId,
                                   orElse: () => null,
                                 );
-
-                        String supervisorDisplay() => job.userId;
                         final jobStatus = job.status;
                         // Map server-provided status to UI colors
                         final Color statusColor;
@@ -194,15 +193,28 @@ class JobPlannerScreen extends ConsumerWidget {
                                   builder: (_) => JobDetailsScreen(job: job)));
                             },
                             borderRadius: BorderRadius.circular(12),
-                            child: Padding(
+                                    child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                        CrossAxisAlignment.center,
                                     children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: statusColor.withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Icon(
+                                          Icons.agriculture, // Use relevant icon
+                                          color: statusColor,
+                                          size: 20,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment:
@@ -210,31 +222,18 @@ class JobPlannerScreen extends ConsumerWidget {
                                           children: [
                                             Text(
                                               job.name,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleMedium
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                              ),
                                             ),
-                                            const SizedBox(height: 8),
-                                            Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.person_outline,
-                                                  size: 14,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .secondary,
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  supervisorDisplay(),
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .bodySmall,
-                                                ),
-                                              ],
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              DateFormat('MMM d, h:mm a').format((job.scheduleTime ?? job.createdAt).toLocal()),
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey[600],
+                                              ),
                                             ),
                                           ],
                                         ),
@@ -245,9 +244,10 @@ class JobPlannerScreen extends ConsumerWidget {
                                           vertical: 6,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: statusColor.withAlpha(26),
+                                          color: statusColor.withValues(alpha: 0.1),
                                           borderRadius:
-                                              BorderRadius.circular(20),
+                                              BorderRadius.circular(100),
+                                          border: Border.all(color: statusColor.withValues(alpha: 0.5)),
                                         ),
                                         child: Text(
                                           jobStatus
@@ -259,10 +259,15 @@ class JobPlannerScreen extends ConsumerWidget {
                                             color: statusColor,
                                             fontSize: 11,
                                             fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.5,
                                           ),
                                         ),
                                       ),
                                     ],
+                                  ),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 12),
+                                    child: Divider(height: 1),
                                   ),
                                   const SizedBox(height: 12),
                                   Row(

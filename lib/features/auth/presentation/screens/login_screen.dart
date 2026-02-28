@@ -11,12 +11,15 @@ class LoginScreen extends ConsumerWidget {
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
             colors: [
-              Theme.of(context).colorScheme.primary,
-              Theme.of(context).colorScheme.primary.withAlpha(179),
+              Theme.of(context).primaryColor,
+              Theme.of(context).primaryColor.withValues(alpha: 0.8),
+              Theme.of(context).scaffoldBackgroundColor,
+              Theme.of(context).scaffoldBackgroundColor,
             ],
+            stops: const [0.0, 0.4, 0.4, 1.0],
           ),
         ),
         child: SafeArea(
@@ -28,22 +31,22 @@ class LoginScreen extends ConsumerWidget {
                 children: [
                   // Logo/Icon section
                   Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withAlpha(26),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10),
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 30,
+                          offset: const Offset(0, 15),
                         ),
                       ],
                     ),
-                    child: const Icon(
-                      Icons.agriculture,
-                      size: 64,
-                      color: Color(0xFF2E7D32),
+                    child: Icon(
+                      Icons.agriculture_rounded,
+                      size: 72,
+                      color: Theme.of(context).primaryColor,
                     ),
                   ),
                   const SizedBox(height: 32),
@@ -51,31 +54,39 @@ class LoginScreen extends ConsumerWidget {
                   // App title
                   Text(
                     'Smart Sprayer',
-                    style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
                           color: Colors.white,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Precision Agriculture Management',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Colors.white.withAlpha(230),
+                          color: Colors.white.withValues(alpha: 0.9),
                         ),
                   ),
                   const SizedBox(height: 48),
 
                   // Login form card
-                  Card(
-                    elevation: 8,
-                    shadowColor: Colors.black.withAlpha(77),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                  Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 30,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
                     ),
-                    child: Container(
-                      padding: const EdgeInsets.all(24.0),
-                      constraints: const BoxConstraints(maxWidth: 400),
-                      child: const LoginForm(),
+                    child: const Padding(
+                      padding: EdgeInsets.all(32.0),
+                      child: LoginForm(),
                     ),
                   ),
                   const SizedBox(height: 24),

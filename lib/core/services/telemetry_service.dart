@@ -604,7 +604,7 @@ class _LatLonEntry {
 
 final telemetryServiceProvider = Provider<TelemetryService>((ref) {
   // Use provided base URL; default to ws://13.201.0.34:8001
-  final svc = TelemetryService(baseUrl: 'ws://13.201.0.34:8001');
+  final svc = TelemetryService(baseUrl: 'ws://13.201.5.17:8001');
   ref.onDispose(() => svc.dispose());
   return svc;
 });

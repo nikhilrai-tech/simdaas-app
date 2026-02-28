@@ -8,199 +8,234 @@ class ThreeButtonDashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Determine greeting
+    final hour = DateTime.now().hour;
+    String greeting = 'Good Morning';
+    if (hour >= 12 && hour < 17) {
+      greeting = 'Good Afternoon';
+    } else if (hour >= 17) {
+      greeting = 'Good Evening';
+    }
+
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('SimDaaS'),
         elevation: 0,
         backgroundColor: Colors.transparent,
-        foregroundColor: Theme.of(context).colorScheme.onSurface,
-        surfaceTintColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_none_rounded), // Rounded icon
+            onPressed: () {},
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Container(
-              color: Theme.of(context).colorScheme.surface,
-            ),
-            Column(
-              children: [
-                Container(
-                  height: 160,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Theme.of(context).colorScheme.primary.withAlpha(40),
-                        Theme.of(context).colorScheme.primary.withAlpha(12),
-                      ],
-                    ),
-                    borderRadius: const BorderRadius.vertical(
-                      bottom: Radius.circular(20),
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 84,
-                          height: 84,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                Theme.of(context).colorScheme.primary,
-                                Theme.of(context).colorScheme.secondary,
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .primary
-                                    .withAlpha(40),
-                                blurRadius: 12,
-                                offset: const Offset(0, 6),
-                              )
-                            ],
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).primaryColor,
+              Theme.of(context).primaryColor.withValues(alpha: 0.8),
+              Theme.of(context).scaffoldBackgroundColor,
+              Theme.of(context).scaffoldBackgroundColor,
+            ],
+            stops: const [0.0, 0.3, 0.3, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header Section
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$greeting,',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            fontSize: 18,
                           ),
-                          child: Center(
-                            child: Icon(
-                              Icons.dashboard_customize,
-                              color: Colors.white,
-                              size: 36,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Welcome',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Select the area you want to access',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
                     ),
-                  ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Welcome Back',
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ],
                 ),
-                Expanded(
+              ),
+
+              // Main Content - Overlapping the colored background
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(32),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        offset: const Offset(0, -5),
+                      ),
+                    ],
+                  ),
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+                    padding: const EdgeInsets.all(24),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const SizedBox(height: 8),
-                        _DashboardCard(
-                          icon: Icons.analytics_outlined,
-                          title: 'Dashboard',
-                          subtitle: 'View reports and analytics',
-                          color: const Color(0xFF015685), // Planned Blue
-                          onTap: () => Navigator.of(context)
-                              .pushNamed('/admin_dashboard'),
+                        const Text(
+                          'Quick Actions',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        // Quick actions
+                        const SizedBox(height: 16),
+                        // Quick Action Buttons
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                elevation: 2,
-                                backgroundColor:
-                                    Theme.of(context).colorScheme.surface,
-                                foregroundColor:
-                                    Theme.of(context).colorScheme.onSurface,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                side: BorderSide(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurface
-                                        .withAlpha(30)),
+                            Expanded(
+                              child: _QuickActionButton(
+                                icon: Icons.qr_code_scanner,
+                                label: 'Scan',
+                                onTap: () => Navigator.of(context)
+                                    .pushNamed('/scan_control_unit'),
                               ),
-                              icon: const Icon(Icons.qr_code_scanner),
-                              label: const Text('Scan Device'),
-                              onPressed: () => Navigator.of(context)
-                                  .pushNamed('/scan_control_unit'),
                             ),
-                            const SizedBox(width: 12),
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor:
-                                    Theme.of(context).colorScheme.primary,
-                                side: BorderSide(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary
-                                        .withAlpha(40)),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: _QuickActionButton(
+                                icon: Icons.add_location_alt_outlined,
+                                label: 'New Plot',
+                                onTap: () =>
+                                    Navigator.of(context).pushNamed('/map'),
                               ),
-                              icon: const Icon(Icons.add_location_alt_outlined),
-                              label: const Text('Add Plot'),
-                              onPressed: () =>
-                                  Navigator.of(context).pushNamed('/map'),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 32),
+                        const Text(
+                          'Modules',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         const SizedBox(height: 16),
-                        _DashboardCard(
-                          icon: Icons.work_outline,
-                          title: 'Jobs',
-                          subtitle: 'Manage and schedule jobs',
-                          color: const Color(0xFF2E7D32), // Primary Green
-                          onTap: () => Navigator.of(context)
-                              .pushNamed('/job_supervisor_dashboard'),
+                        
+                        // Grid of Modules
+                        GridView.count(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.1,
+                          children: [
+                            _DashboardCard(
+                              title: 'Jobs',
+                              subtitle: 'Manage tasks',
+                              icon: Icons.work_outline,
+                              color: Theme.of(context).primaryColor,
+                              onTap: () => Navigator.of(context)
+                                  .pushNamed('/job_supervisor_dashboard'),
+                            ),
+                            _DashboardCard(
+                              title: 'Analytics',
+                              subtitle: 'Reports & Data',
+                              icon: Icons.analytics_outlined,
+                              color: const Color(0xFF015685),
+                              onTap: () => Navigator.of(context)
+                                  .pushNamed('/admin_dashboard'),
+                            ),
+                            _DashboardCard(
+                              title: 'Eqpmnt', // Shortened for design balance
+                              subtitle: 'Tractors/Sprayers',
+                              icon: Icons.settings_outlined,
+                              color: const Color(0xFFE65100), // Rich orange
+                              onTap: () => Navigator.of(context)
+                                  .pushNamed('/technician_dashboard'),
+                            ),
+                            _DashboardCard(
+                              title: 'Settings',
+                              subtitle: 'App Preferences',
+                              icon: Icons.tune, // More modern icon
+                              color: const Color(0xFF5E35B1), // Deep purple
+                              onTap: () => Navigator.of(context)
+                                  .pushNamed('/app_settings'),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
-                        _DashboardCard(
-                          icon: Icons.settings_outlined,
-                          title: 'Technical Settings',
-                          subtitle: 'Configure equipment and system',
-                          color: const Color(0xFF8E4600), // Scheduled Amber
-                          onTap: () => Navigator.of(context)
-                              .pushNamed('/technician_dashboard'),
-                        ),
-                        const SizedBox(height: 12),
-                        _DashboardCard(
-                          icon: Icons.app_settings_alt_outlined,
-                          title: 'App Settings',
-                          subtitle: 'Manage application preferences',
-                          color: const Color(0xFF00796B), // Secondary Teal
-                          onTap: () =>
-                              Navigator.of(context).pushNamed('/app_settings'),
-                        ),
+                        const SizedBox(height: 32), // Bottom padding
                       ],
                     ),
                   ),
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _QuickActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Theme.of(context).primaryColor, size: 28),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
             ),
           ],
         ),
@@ -215,7 +250,6 @@ class _DashboardCard extends StatelessWidget {
   final String subtitle;
   final Color color;
   final VoidCallback onTap;
-  final String? info;
 
   const _DashboardCard({
     required this.icon,
@@ -223,113 +257,67 @@ class _DashboardCard extends StatelessWidget {
     required this.subtitle,
     required this.color,
     required this.onTap,
-    this.info,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 4,
-      shadowColor: color.withAlpha(60),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                color.withAlpha(24),
-                color.withAlpha(10),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: color.withValues(alpha: 0.2),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.2),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  )
+                ],
+              ),
+              child: Icon(
+                icon,
+                color: color,
+                size: 24,
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.black54,
+                  ),
+                ),
               ],
             ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withAlpha(36),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    )
-                  ],
-                ),
-                child: Icon(
-                  icon,
-                  size: 32,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                    ),
-                    if (info != null) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.primary,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              info!,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                size: 20,
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );

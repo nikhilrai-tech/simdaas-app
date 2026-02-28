@@ -1,41 +1,37 @@
+import '../../plot_mapping/domain/entities/plot.dart';
+
 class Report {
+  final String? plotId;
+  final PlotEntity? plot;
+  final String? plotSnapshot; // Base64-encoded PNG from backend
+  final String? plotMapsUrl;
   final String id;
-  final String plotName;
-  final double area;
-  final String operatorName;
-  final String boundaryName;
-  final double materialApplied;
+  final double sprayUsedLitres;
   final double avgFlowRate;
-  final double percentCovered;
-  final Duration timeTaken;
-  final DateTime startTime;
-  final DateTime endTime;
-  final Duration ptoActiveTime;
-  final double distanceTravelled;
-  final double distanceWithPtoOn;
-  final double distanceSprayed;
-  final String mixDetails;
-  final double avgSpeed;
-  final Duration timeSaved;
+  final double distanceTravelledKm;
+  final double distanceWithPtoKm;
+  final double distanceWithLeftSprayKm;
+  final double distanceWithRightSprayKm;
+  final double areaCoveredSqm;
+  final double plotAreaSqm;
+  final double completionPercentage;
+  final DateTime createdAt;
 
   const Report({
+    this.plotId,
+    this.plot,
+    this.plotSnapshot,
+    this.plotMapsUrl,
     required this.id,
-    required this.plotName,
-    required this.area,
-    required this.operatorName,
-    required this.boundaryName,
-    required this.materialApplied,
+    required this.sprayUsedLitres,
     required this.avgFlowRate,
-    required this.percentCovered,
-    required this.timeTaken,
-    required this.startTime,
-    required this.endTime,
-    required this.ptoActiveTime,
-    required this.distanceTravelled,
-    required this.distanceWithPtoOn,
-    required this.distanceSprayed,
-    required this.mixDetails,
-    required this.avgSpeed,
-    required this.timeSaved,
+    required this.distanceTravelledKm,
+    required this.distanceWithPtoKm,
+    required this.distanceWithLeftSprayKm,
+    required this.distanceWithRightSprayKm,
+    required this.areaCoveredSqm,
+    required this.plotAreaSqm,
+    required this.completionPercentage,
+    required this.createdAt,
   });
 }
