@@ -209,7 +209,6 @@ class _EquipmentDetailsScreenState
                       'name': displayedEquipment.name,
                       'userId': displayedEquipment.userId,
                       'status': displayedEquipment.status,
-                      'controlUnitId': displayedEquipment.controlUnitId,
                       'mountingHeight': displayedEquipment.mountingHeight,
                       'lidarNozzleDistance':
                           displayedEquipment.lidarNozzleDistance,
@@ -366,7 +365,72 @@ class _EquipmentDetailsScreenState
                     Text(displayedEquipment.category, softWrap: true),
                   ]),
             ),
+            if (displayedEquipment.activeSessionId != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.green.withAlpha(26),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.green.withAlpha(100)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.circle, color: Colors.green, size: 10),
+                    const SizedBox(width: 8),
+                    const Text('ACTIVE', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
+                  ],
+                ),
+              ),
           ]),
+          if (displayedEquipment.activeSessionId != null) ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('End Session?'),
+                      content: const Text('Are you sure you want to end the active session for this device?'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('End')),
+                      ],
+                    )
+                  );
+                  if (confirmed == true) {
+                    try {
+                      await ref.read(equipmentControllerProvider).endSession(displayedEquipment.activeSessionId!);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Session ended successfully'))
+                        );
+                        // Refresh the local state
+                        final fresh = await ref.read(equipmentRepoProvider).getEquipments(currentUserId);
+                        final found = fresh.firstWhere((e) => e.id == displayedEquipment.id, orElse: () => displayedEquipment);
+                        setState(() => displayedEquipment = found);
+                      }
+                    } catch (err) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $err'))
+                        );
+                      }
+                    }
+                  }
+                },
+                icon: const Icon(Icons.stop_circle),
+                label: const Text('End Active Session'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           // allow owner and other fields to wrap and flow vertically
           if (displayedEquipment.userId == null)

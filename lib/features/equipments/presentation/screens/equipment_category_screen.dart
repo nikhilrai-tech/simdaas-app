@@ -80,13 +80,13 @@ class EquipmentCategoryScreen extends StatelessWidget {
                     runSpacing: 16,
                     children: [
                       _CategoryCard(
-                        title: 'Control Units',
-                        subtitle: 'Connect and manage control units',
-                        icon: Icons.settings_remote,
-                        color: cs.primary,
+                        title: 'Sprayers',
+                        subtitle: 'Sprayers and nozzle configs',
+                        icon: Icons.invert_colors,
+                        color: cs.tertiary,
                         onTap: () => Navigator.of(context).pushNamed(
                             '/equipments',
-                            arguments: {'category': 'control_unit'}),
+                            arguments: {'category': 'sprayer'}),
                       ),
                       _CategoryCard(
                         title: 'Tractors',
@@ -98,13 +98,13 @@ class EquipmentCategoryScreen extends StatelessWidget {
                             arguments: {'category': 'tractor'}),
                       ),
                       _CategoryCard(
-                        title: 'Sprayers',
-                        subtitle: 'Sprayers and nozzle configs',
-                        icon: Icons.invert_colors,
-                        color: cs.tertiary,
+                        title: 'Control Units',
+                        subtitle: 'Connect and manage control units',
+                        icon: Icons.settings_remote,
+                        color: cs.primary,
                         onTap: () => Navigator.of(context).pushNamed(
                             '/equipments',
-                            arguments: {'category': 'sprayer'}),
+                            arguments: {'category': 'control_unit'}),
                       ),
                       _CategoryCard(
                         title: 'Troubleshooting',

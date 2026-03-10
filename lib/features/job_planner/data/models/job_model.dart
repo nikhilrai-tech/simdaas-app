@@ -13,6 +13,7 @@ class JobModel extends JobEntity {
     super.sprayRate,
     super.productMix,
     required super.status,
+    super.controlUnitMac,
     // ownerId removed in favor of canonical userId; keep ownerId key in JSON for compatibility
   });
 
@@ -117,6 +118,7 @@ class JobModel extends JobEntity {
       })(),
       productMix: normalizedProductMix,
       status: status,
+      controlUnitMac: json['control_unit_mac']?.toString(),
     );
   }
 
@@ -126,6 +128,7 @@ class JobModel extends JobEntity {
         'status': status.toString().split('.').last,
         'plot': plotId,
         'controlUnit': controlUnitId,
+        'control_unit_mac': controlUnitMac,
         'createdAt': createdAt.toIso8601String(),
         'scheduleTime': scheduleTime?.toIso8601String(),
         'operator': operatorId,

@@ -17,7 +17,10 @@ class ReportModel extends Report {
     required super.areaCoveredSqm,
     required super.plotAreaSqm,
     required super.completionPercentage,
+    super.controlUnitId,
+    super.controlUnitName,
     required super.createdAt,
+    super.trajectory = const [],
   });
 
   factory ReportModel.fromJson(Map<String, dynamic> json) {
@@ -58,7 +61,21 @@ class ReportModel extends Report {
       areaCoveredSqm: parseDouble(json['area_covered_sqm']),
       plotAreaSqm: parseDouble(json['plot_area_sqm']),
       completionPercentage: parseDouble(json['completion_percentage']),
+      controlUnitId: json['control_unit_details']?['id']?.toString(),
+      controlUnitName: json['control_unit_details']?['name']?.toString(),
       createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+      trajectory: (json['trajectory'] as List<dynamic>?)
+              ?.map((e) => GPSPointData(
+                    lat: parseDouble(e['lat']),
+                    lon: parseDouble(e['lon']),
+                    speedKmph: parseDouble(e['speed_kmph']),
+                    flowRateLpm: parseDouble(e['flow_rate_lpm']),
+                    sprayMode: (e['spray_mode'] as num?)?.toInt() ?? 0,
+                    timestamp: DateTime.tryParse(e['timestamp'] ?? '') ??
+                        DateTime.now(),
+                  ))
+              .toList() ??
+          [],
     );
   }
 

@@ -7,8 +7,8 @@ class AuthRepositoryImpl implements domain.AuthRepository {
   AuthRepositoryImpl(this.remote);
 
   @override
-  Future<User> signIn(String email, String password) async {
-    final model = await remote.signIn(email, password);
+  Future<User> signIn(String usernameOrEmail, String password) async {
+    final model = await remote.signIn(usernameOrEmail, password);
     return User(id: model.id, email: model.email);
   }
 

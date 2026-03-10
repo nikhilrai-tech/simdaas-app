@@ -69,7 +69,9 @@ class AdminDashboardScreen extends ConsumerWidget {
                                 if (status == 'ongoing') {
                                   Navigator.of(context).push(MaterialPageRoute(
                                       builder: (_) => MonitoringScreen(
-                                          plotId: job.plotId, jobId: job.id)));
+                                          plotId: job.plotId,
+                                          jobId: job.id,
+                                          deviceId: job.controlUnitMac)));
                                 } else {
                                   Navigator.of(context).pushNamed('/jobs');
                                 }

@@ -61,6 +61,65 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
     super.dispose();
   }
 
+  void _prefill(TextEditingController ctrl, dynamic val, String type) {
+    if (val == null) return;
+    double d = double.tryParse(val.toString()) ?? 0;
+    if (d == 0) {
+      ctrl.text = val.toString();
+      return;
+    }
+
+    // Heuristics to restore unit
+    final inches = d / 0.0254;
+    final feet = d / 0.3048;
+    final cm = d / 0.01;
+
+    if ((inches - inches.round()).abs() < 0.0001) {
+      ctrl.text = inches.round().toString();
+      if (type == 'wheel') _wheelDiameterUnit = 'in';
+      if (type == 'axle') _axleLengthUnit = 'in';
+      return;
+    }
+    if ((feet - feet.round()).abs() < 0.0001) {
+      ctrl.text = feet.round().toString();
+      if (type == 'wheel') _wheelDiameterUnit = 'ft';
+      if (type == 'axle') _axleLengthUnit = 'ft';
+      return;
+    }
+    if (type == 'wheel' && (cm - cm.round()).abs() < 0.0001) {
+      ctrl.text = cm.round().toString();
+      _wheelDiameterUnit = 'cm';
+      return;
+    }
+
+    ctrl.text = d.toString().replaceAll(RegExp(r'\.0$'), '');
+  }
+
+  void _onUnitChanged(String? newUnit, String currentUnit,
+      TextEditingController ctrl, Function(String) setter) {
+    if (newUnit == null || newUnit == currentUnit) return;
+    double? val = double.tryParse(ctrl.text);
+    if (val != null) {
+      double inMeters = val;
+      if (currentUnit == 'in')
+        inMeters = val * 0.0254;
+      else if (currentUnit == 'ft')
+        inMeters = val * 0.3048;
+      else if (currentUnit == 'cm') inMeters = val * 0.01;
+
+      double newVal = inMeters;
+      if (newUnit == 'in')
+        newVal = inMeters / 0.0254;
+      else if (newUnit == 'ft')
+        newVal = inMeters / 0.3048;
+      else if (newUnit == 'cm') newVal = inMeters / 0.01;
+
+      ctrl.text =
+          newVal.toStringAsFixed(3).replaceAll(RegExp(r'\.?0+$'), '');
+    }
+    setState(() => setter(newUnit));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -69,11 +128,10 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
       final ex = widget.existingData!;
       // Prefill controllers once (do not set in build to avoid overwriting user input)
       _name.text = ex['name'] as String? ?? '';
-      if (ex['wheelDiameter'] != null)
-        _wheelDiameter.text = '${ex['wheelDiameter']}';
+      _prefill(_wheelDiameter, ex['wheelDiameter'], 'wheel');
       if (ex['screwsInWheel'] != null)
         _screwsInWheel.text = '${ex['screwsInWheel']}';
-      if (ex['axleLength'] != null) _axleLength.text = '${ex['axleLength']}';
+      _prefill(_axleLength, ex['axleLength'], 'axle');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_debugShown && mounted) {
           debugPrint(
@@ -132,13 +190,10 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
-                                  const Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Text('Tractor name'),
-                                  ),
                                   TextFormField(
                                     controller: _name,
                                     decoration: const InputDecoration(
+                                        labelText: 'Tractor name',
                                         hintText: 'Tractor name'),
                                     validator: (v) => (v == null || v.isEmpty)
                                         ? 'Enter name'
@@ -170,45 +225,50 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
-                                  const Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Text('Wheel diameter'),
-                                  ),
-                                  Row(children: [
-                                    Expanded(
-                                      child: TextFormField(
-                                        controller: _wheelDiameter,
-                                        decoration: const InputDecoration(
-                                            hintText: 'Wheel diameter'),
-                                        keyboardType:
-                                            TextInputType.numberWithOptions(
-                                                decimal: true),
-                                        validator: (v) =>
-                                            (v == null || v.isEmpty)
-                                                ? 'Enter wheel diameter'
-                                                : null,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    SizedBox(
-                                      width: 110,
-                                      child: DropdownButtonFormField<String>(
-                                        value: _wheelDiameterUnit,
-                                        items: const [
-                                          DropdownMenuItem(
-                                              value: 'm', child: Text('m')),
-                                          DropdownMenuItem(
-                                              value: 'in', child: Text('in')),
-                                          DropdownMenuItem(
-                                              value: 'ft', child: Text('ft')),
-                                        ],
-                                        onChanged: (v) => setState(() =>
-                                            _wheelDiameterUnit = v ?? 'm'),
-                                        decoration: const InputDecoration(
-                                            labelText: 'Unit'),
-                                      ),
-                                    )
-                                  ]),
+                                  Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: _wheelDiameter,
+                                            decoration: const InputDecoration(
+                                                labelText: 'Wheel diameter',
+                                                hintText: 'Wheel diameter'),
+                                            keyboardType:
+                                                TextInputType.numberWithOptions(
+                                                    decimal: true),
+                                            validator: (v) =>
+                                                (v == null || v.isEmpty)
+                                                    ? 'Enter wheel diameter'
+                                                    : null,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        SizedBox(
+                                          width: 110,
+                                          child: DropdownButtonFormField<String>(
+                                            value: _wheelDiameterUnit,
+                                            items: const [
+                                              DropdownMenuItem(
+                                                  value: 'm', child: Text('m')),
+                                              DropdownMenuItem(
+                                                  value: 'cm', child: Text('cm')),
+                                              DropdownMenuItem(
+                                                  value: 'in', child: Text('in')),
+                                              DropdownMenuItem(
+                                                  value: 'ft', child: Text('ft')),
+                                            ],
+                                            onChanged: (v) => _onUnitChanged(
+                                              v,
+                                              _wheelDiameterUnit,
+                                              _wheelDiameter,
+                                              (u) => _wheelDiameterUnit = u),
+                                            decoration: const InputDecoration(
+                                                labelText: 'Unit'),
+                                          ),
+                                        )
+                                      ]),
                                 ],
                               ),
                             ),
@@ -235,14 +295,11 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
-                                  const Align(
-                                    alignment: Alignment.centerLeft,
-                                    child:
-                                        Text('Number of screws/nuts in wheel'),
-                                  ),
                                   TextFormField(
                                     controller: _screwsInWheel,
                                     decoration: const InputDecoration(
+                                        labelText:
+                                            'Number of screws/nuts in wheel',
                                         hintText:
                                             'Number of screws/nuts in wheel'),
                                     keyboardType: TextInputType.number,
@@ -276,45 +333,48 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
-                                  const Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: Text('Axle length'),
-                                  ),
-                                  Row(children: [
-                                    Expanded(
-                                      child: TextFormField(
-                                        controller: _axleLength,
-                                        decoration: const InputDecoration(
-                                            hintText: 'Axle length'),
-                                        keyboardType:
-                                            TextInputType.numberWithOptions(
-                                                decimal: true),
-                                        validator: (v) =>
-                                            (v == null || v.isEmpty)
-                                                ? 'Enter axle length'
-                                                : null,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    SizedBox(
-                                      width: 110,
-                                      child: DropdownButtonFormField<String>(
-                                        value: _axleLengthUnit,
-                                        items: const [
-                                          DropdownMenuItem(
-                                              value: 'm', child: Text('m')),
-                                          DropdownMenuItem(
-                                              value: 'in', child: Text('in')),
-                                          DropdownMenuItem(
-                                              value: 'ft', child: Text('ft')),
-                                        ],
-                                        onChanged: (v) => setState(
-                                            () => _axleLengthUnit = v ?? 'm'),
-                                        decoration: const InputDecoration(
-                                            labelText: 'Unit'),
-                                      ),
-                                    )
-                                  ]),
+                                  Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: TextFormField(
+                                            controller: _axleLength,
+                                            decoration: const InputDecoration(
+                                                labelText: 'Axle length',
+                                                hintText: 'Axle length'),
+                                            keyboardType:
+                                                TextInputType.numberWithOptions(
+                                                    decimal: true),
+                                            validator: (v) =>
+                                                (v == null || v.isEmpty)
+                                                    ? 'Enter axle length'
+                                                    : null,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        SizedBox(
+                                          width: 110,
+                                          child: DropdownButtonFormField<String>(
+                                            value: _axleLengthUnit,
+                                            items: const [
+                                              DropdownMenuItem(
+                                                  value: 'm', child: Text('m')),
+                                              DropdownMenuItem(
+                                                  value: 'in', child: Text('in')),
+                                              DropdownMenuItem(
+                                                  value: 'ft', child: Text('ft')),
+                                            ],
+                                            onChanged: (v) => _onUnitChanged(
+                                                v,
+                                                _axleLengthUnit,
+                                                _axleLength,
+                                                (u) => _axleLengthUnit = u),
+                                            decoration: const InputDecoration(
+                                                labelText: 'Unit'),
+                                          ),
+                                        )
+                                      ]),
                                 ],
                               ),
                             ),
@@ -407,6 +467,9 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                         } else if (_wheelDiameterUnit == 'ft') {
                                           wheelDiameter =
                                               wheelDiameter * 0.3048;
+                                        } else if (_wheelDiameterUnit == 'cm') {
+                                          wheelDiameter =
+                                              wheelDiameter * 0.01;
                                         }
                                       }
                                     } catch (e, st) {
@@ -432,6 +495,8 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                           axleLength = axleLength * 0.0254;
                                         } else if (_axleLengthUnit == 'ft') {
                                           axleLength = axleLength * 0.3048;
+                                        } else if (_axleLengthUnit == 'cm') {
+                                          axleLength = axleLength * 0.01;
                                         }
                                       }
                                     } catch (e, st) {

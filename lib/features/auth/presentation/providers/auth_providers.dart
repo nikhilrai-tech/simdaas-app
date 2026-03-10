@@ -23,16 +23,16 @@ class AuthNotifier extends StateNotifier<AsyncValue<AuthState>> {
       : _ref = ref,
         super(AsyncValue.data(AuthState(loading: false)));
 
-  Future<void> signIn(String email, String password) async {
+  Future<void> signIn(String usernameOrEmail, String password) async {
     state = const AsyncValue.loading();
     try {
       // Use central AuthService to perform sign in so tokens are persisted and ApiService gets the token
       final authService = _ref.read(authServiceProvider);
-      final ok = await authService.signIn(email, password);
+      final ok = await authService.signIn(usernameOrEmail, password);
       if (!ok) throw Exception('Login failed');
       // Build a User entity from AuthService decoded user id (if available)
       final userId = authService.currentUserId ?? '';
-      final user = User(id: userId, email: email);
+      final user = User(id: userId, email: usernameOrEmail);
       state = AsyncValue.data(AuthState(loading: false, user: user));
     } catch (e, st) {
       state = AsyncValue.error(e, st);

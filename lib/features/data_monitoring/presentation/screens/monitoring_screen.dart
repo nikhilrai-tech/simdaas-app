@@ -8,14 +8,18 @@ import 'package:latlong2/latlong.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
+import '../../../plot_mapping/domain/entities/plot.dart';
 import '../providers/monitoring_providers.dart';
 import '../../../equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/telemetry_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
+import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:simdaas/core/services/connectivity_service.dart';
+import '../../../reports/presentation/providers/session_providers.dart';
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   final String? plotId;
@@ -28,18 +32,35 @@ class MonitoringScreen extends ConsumerStatefulWidget {
 }
 
 class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
+  // Static map to persist ignore timestamps across widget rebuilds/navigation 
+  // if needed, or just keep it instance-level if the user stays on the screen.
+  // Using instance-level for now as the user "Ends" while on this screen.
+  final Map<String, DateTime> _ignoredUntil = {};
+
+  bool _isDemoMode = false;
+  Timer? _demoTimer;
+  HeatmapType _selectedHeatmap = HeatmapType.spraying;
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
   StreamSubscription<TelemetryData>? _deviceSub;
-  OverlayEntry? _tankOverlayEntry;
-  OverlayEntry? _solenoidOverlayEntry;
-  OverlayEntry? _sensorOverlayEntry;
+  bool _showTankOverlay = false;
+  bool _showSolenoidOverlay = false;
+  bool _showSensorOverlay = false;
   final MapController _mapController = MapController();
   bool _outOfPlotSnackVisible = false;
 
   @override
   void initState() {
     super.initState();
+    debugPrint('MonitoringScreen: Initializing. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
+    
+    // Refresh providers to ensure we have the latest session state
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+      ref.invalidate(eq_provs.controlUnitsProvider(userId));
+      ref.invalidate(activeSessionsListProvider);
+    });
+
     if (widget.deviceId != null && widget.deviceId!.isNotEmpty) {
       final svc = ref.read(telemetryServiceProvider);
       final normId = canonicalizeMac(widget.deviceId!);
@@ -78,6 +99,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
       try {
         _deviceSub = svc.deviceTelemetryStream(normId).listen((t) {
+          // Mandatory ignore check: if we manually ended the session recently,
+          // ignore any incoming telemetry for 2 minutes.
+          final ignoreTime = _ignoredUntil[normId];
+          if (ignoreTime != null && DateTime.now().isBefore(ignoreTime)) {
+            // debugPrint('MonitoringScreen: Ignoring telemetry for $normId (manual end cooldown)');
+            return;
+          }
+
           setState(() {
             latestTelemetry = t;
             if (t.lat != null && t.lon != null) {
@@ -87,17 +116,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                 'lon': t.lon,
                 'pto': t.ptoState,
                 'device_in_plot': t.deviceInPlot,
+                'speed': t.speed,
+                'flow_rate': t.flowRate,
+                'spray_mode': t.sprayMode,
               });
             }
           });
-          // Refresh tank overlay if visible so it shows realtime updates
-          try {
-            if (_tankOverlayEntry != null) _tankOverlayEntry!.markNeedsBuild();
-            if (_solenoidOverlayEntry != null)
-              _solenoidOverlayEntry!.markNeedsBuild();
-            if (_sensorOverlayEntry != null)
-              _sensorOverlayEntry!.markNeedsBuild();
-          } catch (_) {}
+          // Auto-update UI when telemetry arrives (handled by setState above)
           // Show or hide persistent out-of-plot snackbar based on payload.
           _updateOutOfPlotSnack(t);
         });
@@ -110,17 +135,76 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
   @override
   void dispose() {
-    // Hide any visible snack before leaving the screen.
-    try {
-      if (_outOfPlotSnackVisible) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      }
-    } catch (e, st) {
-      debugPrint('MonitoringScreen.dispose: hideCurrentSnackBar error: $e');
-      debugPrint('stack: $st');
-    }
+    _demoTimer?.cancel();
     _deviceSub?.cancel();
     super.dispose();
+  }
+
+
+  void _startDemo() {
+    _demoTimer?.cancel();
+    // Simulate a starting point if we have none
+    double lat = 18.5204;
+    double lon = 73.8567;
+    if (positions.isNotEmpty) {
+      lat = (positions.last['lat'] as num).toDouble();
+      lon = (positions.last['lon'] as num).toDouble();
+    }
+    double angle = 0.0;
+
+    _demoTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      angle += 0.1;
+      // Move in a small circle-ish path
+      lat += 0.00002 * math.cos(angle);
+      lon += 0.00003 * math.sin(angle);
+
+      final plot = ref.read(fm_providers.plotByIdProvider(widget.plotId ?? '')).valueOrNull;
+      final locallyInPlot = _isPointInPolygon(LatLng(lat, lon), plot?.polygon ?? []);
+
+      final t = TelemetryData(
+        deviceId: widget.deviceId ?? 'demo_device',
+        timestamp: DateTime.now(),
+        lat: lat,
+        lon: lon,
+        speed: 4.5 + math.sin(angle) * 2,
+        flowRate: 15.0 + math.cos(angle) * 5,
+        ptoState: (angle % 6.28) > 3.14 ? 1 : 0,
+        sprayMode: (angle % 12.56) > 6.28 ? 1 : 0,
+        deviceInPlot: locallyInPlot,
+        plot: widget.plotId,
+        leftDistance: 1.2 + math.sin(angle * 2) * 0.5,
+        rightDistance: 1.1 + math.cos(angle * 2) * 0.5,
+        leftDensity: 0.8 + math.sin(angle) * 0.2,
+        rightDensity: 0.85 + math.cos(angle) * 0.15,
+        tankLevel: (80.0 - (timer.tick / 10)).clamp(0.0, 100.0),
+        gpsSignalQuality: 3,
+        simSignalQuality: -75,
+        leftSolenoidState: (angle % 3.14) > 1.57 ? 1 : 0,
+        rightSolenoidState: (angle % 3.14) < 1.57 ? 1 : 0,
+      );
+
+      if (mounted) {
+        setState(() {
+          latestTelemetry = t;
+          positions.add({
+            'timestamp': t.timestamp.toIso8601String(),
+            'lat': t.lat,
+            'lon': t.lon,
+            'pto': t.ptoState,
+            'device_in_plot': t.deviceInPlot,
+            'speed': t.speed,
+            'flow_rate': t.flowRate,
+            'spray_mode': t.sprayMode,
+          });
+        });
+        // Update state - overlays will rebuild automatically via setState
+      }
+    });
+  }
+
+  void _stopDemo() {
+    _demoTimer?.cancel();
+    _demoTimer = null;
   }
 
   int getSignalBars(int signalQuality) {
@@ -149,39 +233,47 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     final sprayersAsync = ref.watch(eq_provs.sprayersProvider(userId));
     final plotsAsync = ref.watch(fm_providers.plotsListProvider(userId));
     final metricsAsync = ref.watch(monitoringStreamProvider(userId));
+    final sessionsAsync = ref.watch(activeSessionsListProvider);
+    final sessionsLoaded = sessionsAsync is AsyncData;
 
-    Widget signalChip(IconData icon, String label, Color color) => Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-              color: color.withAlpha(31),
-              borderRadius: BorderRadius.circular(16)),
-          child: Row(children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 6),
-            Text(label, style: TextStyle(color: color, fontSize: 12))
-          ]),
-        );
 
     // Determine a suitable AppBar title. If a deviceId was provided and we
     // can resolve a matching control unit, show its name; otherwise fall
     // back to the generic label.
     String? resolvedControlUnitName;
+    int? resolvedActiveSessionId;
     try {
       final cuList = controlUnitsAsync.asData?.value;
-      if (widget.deviceId != null && cuList != null) {
+      final sessions = sessionsAsync.asData?.value;
+      final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
+
+      if (normId != null && cuList != null) {
         for (final cu in cuList) {
-          try {
-            final candidate =
-                (cu.macAddress ?? cu.controlUnitId ?? cu.id).toString();
-            if (candidate.isNotEmpty &&
-                widget.deviceId != null &&
-                canonicalizeMac(candidate) ==
-                    canonicalizeMac(widget.deviceId!)) {
-              resolvedControlUnitName = cu.name;
-              break;
-            }
-          } catch (_) {}
+          final candidate = (cu.macAddress ?? cu.id).toString();
+          if (candidate.isNotEmpty && canonicalizeMac(candidate) == normId) {
+            resolvedControlUnitName = cu.name;
+            resolvedActiveSessionId = cu.activeSessionId;
+            break;
+          }
         }
+      }
+
+      // If still null, try to find by jobId if provided
+      if (resolvedActiveSessionId == null && widget.jobId != null && sessions != null) {
+        for (final s in sessions) {
+          if (s['job']?.toString() == widget.jobId) {
+            resolvedActiveSessionId = s['id'] as int?;
+            resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
+            break;
+          }
+        }
+      }
+
+      // If still null and there's only one active session, use it
+      if (resolvedActiveSessionId == null && sessions != null && sessions.length == 1) {
+        final s = sessions.first;
+        resolvedActiveSessionId = s['id'] as int?;
+        resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
       }
     } catch (_) {}
 
@@ -217,29 +309,70 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
             Text(resolvedControlUnitName ?? 'Data Monitoring'),
             const Spacer(),
             if (latestTelemetry != null) ...[
-              // GPS quality
-              Builder(builder: (ctx) {
-                final g = latestTelemetry!.gpsSignalQuality;
-                Color col = Colors.grey;
-                String lbl = '-';
-                if (g != null) {
-                  lbl = g.toString();
-                  col = g >= 3
-                      ? Colors.white
-                      : (g >= 1 ? Colors.orange : Colors.red);
-                }
-                return signalChip(Icons.gps_fixed, lbl, col);
-              }),
-              const SizedBox(width: 15),
-              SignalStrengthIndicator.bars(
-                value: latestTelemetry!.simSignalQuality != null
-                    ? getSignalBars(latestTelemetry!.simSignalQuality!) / 5
-                    : 0,
-                size: 20,
-                barCount: 5,
-                spacing: 0.5,
-                activeColor: Colors.white,
-                inactiveColor: Colors.blueGrey,
+              // Signal/GPS status chip
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(220), // Darker, more solid for contrast
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withAlpha(30), width: 0.5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // GPS
+                    Builder(builder: (ctx) {
+                      final g = latestTelemetry!.gpsSignalQuality;
+                      Color valCol = Colors.grey; 
+                      if (g != null) {
+                        valCol = g >= 3
+                            ? Colors.green
+                            : (g >= 1 ? Colors.orange : Colors.red);
+                      }
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('GPS: ', 
+                            style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                          Container(
+                            width: 14,
+                            height: 14,
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            decoration: BoxDecoration(
+                              color: valCol,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: valCol.withOpacity(0.5),
+                                  blurRadius: 4,
+                                  spreadRadius: 1,
+                                )
+                              ],
+                            ),
+                          ),
+                          Text(g?.toString() ?? '-', 
+                            style: TextStyle(
+                              color: valCol, 
+                              fontSize: 18, 
+                              fontWeight: FontWeight.w900,
+                            )),
+                        ],
+                      );
+                    }),
+                    const SizedBox(width: 16),
+                    // Signal
+                    SignalStrengthIndicator.bars(
+                      value: latestTelemetry!.simSignalQuality != null
+                          ? getSignalBars(latestTelemetry!.simSignalQuality!) / 5
+                          : 0,
+                      size: 22,
+                      barCount: 5,
+                      spacing: 1.0,
+                      activeColor: Colors.white,
+                      inactiveColor: Colors.white.withAlpha(80),
+                    ),
+                  ],
+                ),
               )
             ]
           ])),
@@ -264,7 +397,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           return Stack(children: [
             FlutterMap(
               mapController: _mapController,
-              options: MapOptions(initialCenter: center, initialZoom: 18.0),
+              options: MapOptions(
+                initialCenter: center,
+                initialZoom: 18.0,
+                onTap: (tapPosition, point) {
+                  setState(() {
+                    _showTankOverlay = false;
+                    _showSolenoidOverlay = false;
+                    _showSensorOverlay = false;
+                  });
+                },
+              ),
               children: [
                 TileLayer(
                     urlTemplate:
@@ -274,9 +417,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   PolygonLayer(polygons: [
                     Polygon(
                         points: plot.polygon,
-                        color: Colors.green.withAlpha(38),
-                        borderColor: Colors.green,
-                        borderStrokeWidth: 2.0)
+                        color: (latestTelemetry?.deviceInPlot ?? true)
+                            ? Colors.green.withAlpha(38)
+                            : Colors.red.withAlpha(45),
+                        borderColor: (latestTelemetry?.deviceInPlot ?? true)
+                            ? Colors.green
+                            : Colors.red,
+                        borderStrokeWidth: 2.5)
                   ]),
                 // If a device id was provided, render historical positions and live marker
                 if (widget.deviceId != null && positions.isNotEmpty) ...[
@@ -285,7 +432,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   // device_in_plot and pto state.
                   PolylineLayer(
                       polylines:
-                          _buildColoredPolylinesFromPositions(positions)),
+                          _buildColoredPolylinesFromPositions(positions, 
+                            ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull)),
                 ],
                 if (widget.deviceId != null && latestTelemetry != null)
                   MarkerLayer(markers: [
@@ -295,8 +443,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                         width: 40,
                         height: 40,
                         child: Icon(Icons.location_on,
-                            color: _markerColorForTelemetry(latestTelemetry!))),
-                  ])
+                            color: _markerColorForTelemetry(latestTelemetry!, 
+                              ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull))),
+                  ]),
+                _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
+                    sprayersAsync.asData?.value, userId),
+                _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
+                    sprayersAsync.asData?.value, userId),
+                _buildSensorOverlay(controlUnitsAsync.asData?.value,
+                    sprayersAsync.asData?.value, userId),
               ],
             ),
             // Top-right map overlay for PTO and Auto/Manual indicators.
@@ -327,7 +482,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                            color: autoOnTop ? Colors.green : Colors.grey,
+                            color: autoOnTop ? Colors.green : Colors.red,
                             borderRadius: BorderRadius.circular(12)),
                         child: Text(autoOnTop ? 'A' : 'M',
                             style: const TextStyle(
@@ -358,7 +513,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                           elevation: 4,
                           child: PopupMenuButton<String>(
                             icon: const Icon(Icons.menu, size: 18),
-                            onSelected: (v) {
+                            onSelected: (v) async {
                               if (v == 'tank_level') {
                                 try {
                                   _toggleTankLevelOverlay(
@@ -389,6 +544,135 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                   debugPrint('Popup onSelected error: $e');
                                   debugPrint('stack: $st');
                                 }
+                              } else if (v == 'spraying_heatmap') {
+                                setState(() {
+                                  _selectedHeatmap = HeatmapType.spraying;
+                                });
+                              } else if (v == 'speed_heatmap') {
+                                setState(() {
+                                  _selectedHeatmap = HeatmapType.speed;
+                                });
+                              } else if (v == 'gps_heatmap') {
+                                setState(() {
+                                  _selectedHeatmap = HeatmapType.gps;
+                                });
+                              } else if (v == 'toggle_demo') {
+                                setState(() {
+                                  _isDemoMode = !_isDemoMode;
+                                  if (_isDemoMode) {
+                                    _startDemo();
+                                  } else {
+                                    _stopDemo();
+                                  }
+                                });
+                              } else if (v == 'end_session') {
+                                debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
+                                int? sessionIdToEnd = resolvedActiveSessionId;
+                                
+                                if (sessionIdToEnd == null) {
+                                  debugPrint('MonitoringScreen: resolvedActiveSessionId is null, attempting fallback lookup...');
+                                  try {
+                                    // FORCE REFRESH to ensure we have the latest active sessions
+                                    final sessions = await ref.refresh(activeSessionsListProvider.future);
+                                    debugPrint('MonitoringScreen: Fetched ${sessions.length} active sessions');
+
+                                    if (sessions.isNotEmpty) {
+                                      final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
+                                      debugPrint('MonitoringScreen: Searching for MAC=$normId or jobId=${widget.jobId}');
+
+                                      for (final s in sessions) {
+                                        final sId = s['id'];
+                                        final sJob = s['job']?.toString();
+                                        final sMac = (s['control_unit_mac'] ?? s['mac_addr'] ?? s['mac_address'])?.toString();
+                                        final normSMac = sMac != null ? canonicalizeMac(sMac) : null;
+                                        
+                                        debugPrint('MonitoringScreen: Checking session ID=$sId, Job=$sJob, MAC=$sMac (Norm=$normSMac)');
+
+                                        if (normId != null && normSMac == normId) {
+                                          debugPrint('MonitoringScreen: Match found by MAC!');
+                                          sessionIdToEnd = sId as int?;
+                                          break;
+                                        }
+
+                                        if (widget.jobId != null && sJob == widget.jobId) {
+                                          debugPrint('MonitoringScreen: Match found by JobID!');
+                                          sessionIdToEnd = sId as int?;
+                                          break;
+                                        }
+                                      }
+
+                                      // Absolute fallback: if only 1 active session in the whole system for this user, assume it's the one
+                                      if (sessionIdToEnd == null && sessions.length == 1) {
+                                        debugPrint('MonitoringScreen: Single session fallback used.');
+                                        sessionIdToEnd = sessions.first['id'] as int?;
+                                      }
+                                    } else {
+                                      debugPrint('MonitoringScreen: activeSessionsList returned empty.');
+                                    }
+                                  } catch (e) {
+                                    debugPrint('MonitoringScreen: Error during session fallback: $e');
+                                  }
+                                } else {
+                                  debugPrint('MonitoringScreen: Using already resolvedActiveSessionId=$sessionIdToEnd');
+                                }
+
+                                if (sessionIdToEnd == null) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No active session ID found.')));
+                                  }
+                                  return;
+                                }
+                                final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                          title: const Text('End Session?'),
+                                          content: Text(
+                                              'Are you sure you want to end the active session for ${resolvedControlUnitName ?? "this device"}?'),
+                                          actions: [
+                                            TextButton(
+                                                onPressed: () => Navigator.pop(ctx, false),
+                                                child: const Text('Cancel')),
+                                            TextButton(
+                                                onPressed: () => Navigator.pop(ctx, true),
+                                                child: const Text('End')),
+                                          ],
+                                        ));
+                                if (confirmed == true) {
+                                  try {
+                                    await ref
+                                        .read(eq_provs.equipmentControllerProvider)
+                                        .endSession(sessionIdToEnd);
+                                    
+                                    // 1. Mandatory Ignore: Set 2-minute ignore period for this device
+                                    final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
+                                    if (deviceMac != null) {
+                                      final normMac = canonicalizeMac(deviceMac);
+                                      _ignoredUntil[normMac] = DateTime.now().add(const Duration(minutes: 2));
+                                    }
+
+                                    // 2. Immediate UI Feedback: Clear local telemetry state
+                                    setState(() {
+                                      latestTelemetry = null;
+                                      positions.clear();
+                                    });
+
+                                    // 3. Stop Demo if active
+                                    if (_isDemoMode) {
+                                      _stopDemo();
+                                    }
+
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(content: Text('Session ended. Device will stay offline for 2 mins.')));
+                                      // Navigator.of(context).pop(); // Don't pop, let them see it's offline
+                                    }
+                                  } catch (err) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(SnackBar(content: Text('Error: $err')));
+                                    }
+                                  }
+                                }
                               }
                             },
                             itemBuilder: (ctx) => [
@@ -397,12 +681,30 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                   child: Text('Heatmap',
                                       style: TextStyle(
                                           fontWeight: FontWeight.bold))),
-                              const PopupMenuItem(
+                               PopupMenuItem(
                                   value: 'spraying_heatmap',
-                                  child: Text('Spraying heat map')),
-                              const PopupMenuItem(
+                                  child: Text('Spraying heat map',
+                                      style: TextStyle(
+                                          color: _selectedHeatmap ==
+                                                  HeatmapType.spraying
+                                              ? Theme.of(context).primaryColor
+                                              : Colors.black))),
+                              PopupMenuItem(
                                   value: 'speed_heatmap',
-                                  child: Text('Speed heat map')),
+                                  child: Text('Speed heat map',
+                                      style: TextStyle(
+                                          color: _selectedHeatmap ==
+                                                  HeatmapType.speed
+                                              ? Theme.of(context).primaryColor
+                                              : Colors.black))),
+                              PopupMenuItem(
+                                  value: 'gps_heatmap',
+                                  child: Text('GPS heat map',
+                                      style: TextStyle(
+                                          color: _selectedHeatmap ==
+                                                  HeatmapType.gps
+                                              ? Theme.of(context).primaryColor
+                                              : Colors.black))),
                               const PopupMenuDivider(),
                               const PopupMenuItem<String>(
                                   enabled: false,
@@ -415,9 +717,38 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                               const PopupMenuItem(
                                   value: 'spray_on_off',
                                   child: Text('Spray on/off view')),
-                              const PopupMenuItem(
-                                  value: 'tank_level',
-                                  child: Text('Tank level view')),
+                              const PopupMenuDivider(),
+                              const PopupMenuItem<String>(
+                                  enabled: false,
+                                  child: Text('Demo mode',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold))),
+                              PopupMenuItem(
+                                value: 'toggle_demo',
+                                child: Row(
+                                  children: [
+                                    Text(_isDemoMode ? 'Demo Mode: ON' : 'Demo Mode: OFF'),
+                                    const Spacer(),
+                                    Switch(
+                                      value: _isDemoMode,
+                                      onChanged: (v) {
+                                        // The PopupMenuButton closes on selection, so we handle it 
+                                        // by forcing a pop with the value that matches onSelected.
+                                        Navigator.pop(context, 'toggle_demo');
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (resolvedActiveSessionId != null || latestTelemetry != null) ...[
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'end_session',
+                                  enabled: sessionsLoaded && (resolvedActiveSessionId != null || (sessionsAsync.asData?.value != null)),
+                                  child: Text(
+                                      !sessionsLoaded ? 'End active device (loading...)' : 'End active device',
+                                      style: TextStyle(color: sessionsLoaded ? Colors.red : Colors.grey))),
+                              ],
                             ],
                           ),
                         ),
@@ -572,12 +903,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                       const SizedBox(height: 12),
 
                                       // summary single-line row
+                                      // summary single-line row
                                       Row(
                                           mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
+                                              MainAxisAlignment.spaceAround,
                                           children: [
-                                            _smallStat('Flow', flowRate),
-                                            _smallStat('Speed', speed),
+                                            _smallStat('Flow LPM', flowRate),
+                                            _smallStat('Flow L', '-'),
+                                            _smallStat('Speed', '$speed kmph'),
                                             _ptoSmallStat(ptoOn),
                                           ]),
                                       const SizedBox(height: 12),
@@ -635,378 +968,374 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     );
   }
 
-  void _showTankLevelOverlay(
+  Widget _buildTankLevelOverlay(
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
-    // insert overlay entry that reads latestTelemetry from state each build
+    if (!_showTankOverlay) return const SizedBox.shrink();
+    
+    // Find matching sprayer for this control unit
+    String? sprayerIdStr;
     try {
-      _tankOverlayEntry = OverlayEntry(builder: (ctx) {
-        // Determine matching control unit and capacity
-        dynamic matchedCu;
-        try {
-          if (widget.deviceId != null && controlUnits != null) {
-            for (final cu in controlUnits) {
-              try {
-                final candidate =
-                    (cu.macAddress ?? cu.controlUnitId ?? cu.id).toString();
-                if (candidate.isNotEmpty &&
-                    canonicalizeMac(candidate) ==
-                        canonicalizeMac(widget.deviceId!)) {
-                  matchedCu = cu;
-                  break;
-                }
-              } catch (_) {}
-            }
-          }
-        } catch (_) {}
-
-        double? tankCapacity;
-        if (matchedCu != null) {
-          try {
-            final linked = matchedCu.linkedSprayerId as String?;
-            if (linked != null && sprayers != null) {
-              for (final s in sprayers) {
-                try {
-                  if ((s.id ?? s['id']).toString() == linked.toString()) {
-                    tankCapacity = s.tankCapacity ?? s['tankCapacity'];
-                    break;
-                  }
-                } catch (_) {}
-              }
-            }
-          } catch (_) {}
-        }
-
-        double percent = 0.0;
-        String pctLabel = '-';
-        double? liters;
-        final t = latestTelemetry;
-        if (t != null && t.tankLevel != null) {
-          percent = t.tankLevel!.toDouble().clamp(0.0, 100.0);
-          pctLabel = '${percent.toStringAsFixed(0)}%';
-          if (tankCapacity != null) {
-            try {
-              final cap = double.tryParse(tankCapacity.toString());
-              if (cap != null && cap > 0) {
-                liters = (percent / 100.0) * cap;
-              }
-            } catch (_) {}
+      if (controlUnits != null) {
+        for (final cu in controlUnits) {
+          final cuMac = (cu.macAddress ?? cu.controlUnitId ?? cu.id).toString();
+          if (canonicalizeMac(cuMac) == canonicalizeMac(widget.deviceId ?? '')) {
+            sprayerIdStr = cu.sprayer?.toString();
+            break;
           }
         }
+      }
+    } catch (_) {}
 
-        const imgWidth = 160.0;
-        const imgHeight = 220.0;
-        final fillHeight = imgHeight * (percent / 100.0);
+    double percent = latestTelemetry?.tankLevel ?? 0.0;
+    String pctLabel = '${percent.toStringAsFixed(1)}%';
+    double? tankCapacity;
+    double? liters;
 
-        return Positioned(
-          top: 120,
-          right: 12,
-          child: SafeArea(
-            child: Card(
-              color: Colors.white.withAlpha(230),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: imgWidth,
-                      height: imgHeight,
-                      child: Stack(alignment: Alignment.center, children: [
-                        Image.asset('assets/monitoring/tank_level.png',
-                            width: imgWidth,
-                            height: imgHeight,
-                            fit: BoxFit.contain),
-                        Positioned(
-                          bottom: 0,
-                          child: Container(
-                            width: imgWidth,
-                            height: fillHeight,
-                            color: Colors.blue.withOpacity(0.45),
-                          ),
-                        ),
-                        Text(pctLabel,
-                            style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color:
-                                    percent < 30 ? Colors.red : Colors.black)),
-                      ]),
+    if (sprayerIdStr != null && sprayers != null) {
+      final sprayer = sprayers.firstWhere(
+          (s) => s.id.toString() == sprayerIdStr,
+          orElse: () => null);
+      if (sprayer != null) {
+        tankCapacity = (sprayer.tankCapacity as num?)?.toDouble();
+        if (tankCapacity != null) {
+          liters = tankCapacity * (percent / 100.0);
+        }
+      }
+    }
+
+    const imgWidth = 160.0;
+    const imgHeight = 220.0;
+    final fillHeight = imgHeight * (percent / 100.0);
+
+    return Positioned(
+      top: 120,
+      right: 12,
+      child: SafeArea(
+        child: Card(
+          color: Colors.white.withAlpha(230),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8)),
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: imgWidth,
+                  height: imgHeight,
+                  child: Stack(alignment: Alignment.center, children: [
+                    Image.asset('assets/monitoring/tank_level.png',
+                        width: imgWidth,
+                        height: imgHeight,
+                        fit: BoxFit.contain),
+                    Positioned(
+                      bottom: 0,
+                      child: Container(
+                        width: imgWidth,
+                        height: fillHeight,
+                        color: Colors.blue.withValues(alpha: 0.45),
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                        'Cap: ${tankCapacity != null ? '${tankCapacity.toString()} L' : '-'}'),
-                    const SizedBox(height: 6),
-                    Text(
-                        'Now: ${liters != null ? '${liters.toStringAsFixed(2)} L' : pctLabel}'),
-                    const SizedBox(height: 8),
-                    TextButton(
-                        onPressed: _hideTankLevelOverlay,
-                        child: const Text('Close'))
-                  ],
+                    Text(pctLabel,
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color:
+                                percent < 30 ? Colors.red : Colors.black)),
+                  ]),
                 ),
-              ),
+                const SizedBox(height: 8),
+                Text(
+                    'Cap: ${tankCapacity != null ? '${tankCapacity.toString()} L' : '-'}'),
+                const SizedBox(height: 6),
+                Text(
+                    'Now: ${liters != null ? '${liters.toStringAsFixed(2)} L' : pctLabel}'),
+                const SizedBox(height: 8),
+                TextButton(
+                    onPressed: _hideTankLevelOverlay,
+                    child: const Text('Close'))
+              ],
             ),
           ),
-        );
-      });
-      Overlay.of(context)?.insert(_tankOverlayEntry!);
-    } catch (e, st) {
-      debugPrint('Error showing tank overlay: $e');
-      debugPrint('stack: $st');
-      _tankOverlayEntry = null;
-    }
+        ),
+      ),
+    );
   }
 
   void _hideTankLevelOverlay() {
-    try {
-      if (_tankOverlayEntry != null) _tankOverlayEntry!.remove();
-    } catch (_) {}
-    _tankOverlayEntry = null;
+    setState(() {
+      _showTankOverlay = false;
+    });
   }
 
   void _toggleTankLevelOverlay(
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
-      if (_tankOverlayEntry == null) {
-        _showTankLevelOverlay(controlUnits, sprayers, userId);
-      } else {
-        _hideTankLevelOverlay();
-      }
+    setState(() {
+      _showTankOverlay = !_showTankOverlay;
+    });
     } catch (e, st) {
       debugPrint('Error toggling tank overlay: $e');
       debugPrint('stack: $st');
     }
   }
 
-  void _showSolenoidOverlay(
+  Widget _buildSolenoidOverlay(
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
-    try {
-      _solenoidOverlayEntry = OverlayEntry(builder: (ctx) {
-        final t = latestTelemetry;
-        final leftOn = t != null && t.leftSolenoidState == 1;
-        final rightOn = t != null && t.rightSolenoidState == 1;
+    if (!_showSolenoidOverlay) return const SizedBox.shrink();
 
-        const imgWidth = 260.0;
-        const imgHeight = 140.0;
+    final t = latestTelemetry;
+    final leftOn = t != null && t.leftSolenoidState == 1;
+    final rightOn = t != null && t.rightSolenoidState == 1;
 
-        return Positioned(
-          top: 120,
-          right: 12,
-          child: SafeArea(
-            child: Card(
-              color: Colors.white.withAlpha(230),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: imgWidth,
-                      height: imgHeight,
-                      child: Stack(alignment: Alignment.center, children: [
-                        Image.asset('assets/monitoring/solenoid.png',
-                            width: imgWidth,
-                            height: imgHeight,
-                            fit: BoxFit.contain),
-                        // Left indicator
-                        Positioned(
-                          left: 90,
-                          top: imgHeight * 0.40,
-                          child: Container(
-                            width: 18,
-                            height: 18,
-                            decoration: BoxDecoration(
-                                color: leftOn ? Colors.green : Colors.red,
-                                shape: BoxShape.circle,
-                                border:
-                                    Border.all(color: Colors.white, width: 2)),
-                          ),
-                        ),
-                        // Right indicator
-                        Positioned(
-                          right: 90,
-                          top: imgHeight * 0.40,
-                          child: Container(
-                            width: 18,
-                            height: 18,
-                            decoration: BoxDecoration(
-                                color: rightOn ? Colors.green : Colors.red,
-                                shape: BoxShape.circle,
-                                border:
-                                    Border.all(color: Colors.white, width: 2)),
-                          ),
-                        ),
-                      ]),
+    const imgWidth = 260.0;
+    const imgHeight = 140.0;
+
+    return Positioned(
+      top: 120,
+      right: 12,
+      child: SafeArea(
+        child: Card(
+          color: Colors.white.withAlpha(230),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: imgWidth,
+                  height: imgHeight,
+                  child: Stack(alignment: Alignment.center, children: [
+                    Image.asset('assets/monitoring/solenoid.png',
+                        width: imgWidth,
+                        height: imgHeight,
+                        fit: BoxFit.contain),
+                    // Left indicator
+                    Positioned(
+                      left: 90,
+                      top: imgHeight * 0.40,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                            color: leftOn ? Colors.green : Colors.grey,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2)),
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text('L: ${leftOn ? 'ON' : 'OFF'}'),
-                      const SizedBox(width: 12),
-                      Text('R: ${rightOn ? 'ON' : 'OFF'}'),
-                    ]),
-                    const SizedBox(height: 8),
-                    TextButton(
-                        onPressed: _hideSolenoidOverlay,
-                        child: const Text('Close'))
+                    // Right indicator
+                    Positioned(
+                      right: 90,
+                      top: imgHeight * 0.40,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                            color: rightOn ? Colors.green : Colors.grey,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2)),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 8),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Text('LEFT',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text('RIGHT',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 12)),
                   ],
                 ),
-              ),
+                const SizedBox(height: 8),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('L: ${leftOn ? 'ON' : 'OFF'}'),
+                  const SizedBox(width: 12),
+                  Text('R: ${rightOn ? 'ON' : 'OFF'}'),
+                ]),
+                const SizedBox(height: 8),
+                TextButton(
+                    onPressed: _hideSolenoidOverlay,
+                    child: const Text('Close'))
+              ],
             ),
           ),
-        );
-      });
-      Overlay.of(context)?.insert(_solenoidOverlayEntry!);
-    } catch (e, st) {
-      debugPrint('Error showing solenoid overlay: $e');
-      debugPrint('stack: $st');
-      _solenoidOverlayEntry = null;
-    }
+        ),
+      ),
+    );
   }
 
   void _hideSolenoidOverlay() {
-    try {
-      if (_solenoidOverlayEntry != null) _solenoidOverlayEntry!.remove();
-    } catch (_) {}
-    _solenoidOverlayEntry = null;
+    setState(() {
+      _showSolenoidOverlay = false;
+    });
   }
 
   void _toggleSolenoidOverlay(
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
-      if (_solenoidOverlayEntry == null) {
-        _showSolenoidOverlay(controlUnits, sprayers, userId);
-      } else {
-        _hideSolenoidOverlay();
-      }
+    setState(() {
+      _showSolenoidOverlay = !_showSolenoidOverlay;
+    });
     } catch (e, st) {
       debugPrint('Error toggling solenoid overlay: $e');
       debugPrint('stack: $st');
     }
   }
 
-  void _showSensorOverlay(
+  Widget _buildSensorOverlay(
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
-    try {
-      _sensorOverlayEntry = OverlayEntry(builder: (ctx) {
-        final t = latestTelemetry;
-        final leftDist = t != null && t.leftDistance != null
-            ? t.leftDistance!.toStringAsFixed(2)
-            : '-';
-        final rightDist = t != null && t.rightDistance != null
-            ? t.rightDistance!.toStringAsFixed(2)
-            : '-';
-        final leftStr = t != null && t.leftDensity != null
-            ? t.leftDensity!.toStringAsFixed(2)
-            : '-';
-        final rightStr = t != null && t.rightDensity != null
-            ? t.rightDensity!.toStringAsFixed(2)
-            : '-';
+    if (!_showSensorOverlay) return const SizedBox.shrink();
 
-        return Positioned(
-          top: 100,
-          right: 12,
-          child: SafeArea(
-            child: Card(
-              color: Colors.white.withAlpha(240),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16.0, vertical: 14.0),
-                child: SizedBox(
-                  width: 340,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    final t = latestTelemetry;
+    final leftDist = t != null && t.leftDistance != null
+        ? t.leftDistance!.toStringAsFixed(2)
+        : '-';
+    final rightDist = t != null && t.rightDistance != null
+        ? t.rightDistance!.toStringAsFixed(2)
+        : '-';
+    final leftStr = t != null && t.leftDensity != null
+        ? t.leftDensity!.toStringAsFixed(2)
+        : '-';
+    final rightStr = t != null && t.rightDensity != null
+        ? t.rightDensity!.toStringAsFixed(2)
+        : '-';
+
+    return Positioned(
+      top: 100,
+      right: 12,
+      child: SafeArea(
+        child: Card(
+          color: Colors.white.withAlpha(240),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+            child: SizedBox(
+              width: 340,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Sensor Data',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).primaryColor)),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Sensor Data',
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).primaryColor)),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Distance',
-                              style: TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text('$leftDist   $rightDist',
-                                textAlign: TextAlign.right,
-                                style: const TextStyle(fontSize: 14)),
-                          ),
-                        ],
+                      const Expanded(
+                          flex: 2,
+                          child: Text('Distance',
+                              style: TextStyle(fontWeight: FontWeight.w600))),
+                      Expanded(
+                        flex: 3,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            SizedBox(
+                                width: 60,
+                                child:
+                                    Text(leftDist, textAlign: TextAlign.right)),
+                            const SizedBox(width: 20),
+                            SizedBox(
+                                width: 60,
+                                child: Text(rightDist,
+                                    textAlign: TextAlign.right)),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Strength',
-                              style: TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text('$leftStr   $rightStr',
-                                textAlign: TextAlign.right,
-                                style: const TextStyle(fontSize: 14)),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                            onPressed: _hideSensorOverlay,
-                            child: const Text('Close')),
-                      )
                     ],
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Expanded(
+                          flex: 2,
+                          child: Text('Strength',
+                              style: TextStyle(fontWeight: FontWeight.w600))),
+                      Expanded(
+                        flex: 3,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            SizedBox(
+                                width: 60,
+                                child:
+                                    Text(leftStr, textAlign: TextAlign.right)),
+                            const SizedBox(width: 20),
+                            SizedBox(
+                                width: 60,
+                                child:
+                                    Text(rightStr, textAlign: TextAlign.right)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                        onPressed: _hideSensorOverlay,
+                        child: const Text('Close')),
+                  )
+                ],
               ),
             ),
           ),
-        );
-      });
-      Overlay.of(context)?.insert(_sensorOverlayEntry!);
-    } catch (e, st) {
-      debugPrint('Error showing sensor overlay: $e');
-      debugPrint('stack: $st');
-      _sensorOverlayEntry = null;
-    }
+        ),
+      ),
+    );
   }
 
   void _hideSensorOverlay() {
-    try {
-      if (_sensorOverlayEntry != null) _sensorOverlayEntry!.remove();
-    } catch (_) {}
-    _sensorOverlayEntry = null;
+    setState(() {
+      _showSensorOverlay = false;
+    });
   }
 
   void _toggleSensorOverlay(
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
-      if (_sensorOverlayEntry == null) {
-        _showSensorOverlay(controlUnits, sprayers, userId);
-      } else {
-        _hideSensorOverlay();
-      }
+    setState(() {
+      _showSensorOverlay = !_showSensorOverlay;
+    });
     } catch (e, st) {
       debugPrint('Error toggling sensor overlay: $e');
       debugPrint('stack: $st');
     }
   }
 
-  Color _markerColorForTelemetry(TelemetryData t) {
+  Color _markerColorForTelemetry(TelemetryData t, PlotEntity? plot) {
     try {
-      final inPlot = t.deviceInPlot == true ||
-          (t.deviceInPlot?.toString().toLowerCase() == 'true');
+      bool inPlot = t.deviceInPlot == true ||
+          (t.deviceInPlot?.toString().toLowerCase() == 'true') ||
+          (t.deviceInPlot?.toString() == '1');
+      
+      // Local reinforcement: calculate in-plot status if we have the polygon
+      if (plot?.polygon != null && plot!.polygon.length >= 3 && t.lat != null && t.lon != null) {
+        final locallyInPlot = _isPointInPolygon(LatLng(t.lat!, t.lon!), plot.polygon);
+        inPlot = locallyInPlot;
+      }
+
       final ptoOn = (t.ptoState != null && t.ptoState == 1);
-      if (inPlot && ptoOn) return Colors.blue;
-      if (inPlot && !ptoOn) return Colors.orange;
+      final isAuto = (t.sprayMode != null && t.sprayMode == 1);
+
+      return HeatmapColorUtils.getColorForGPS(
+        isInPlot: inPlot,
+        ptoOn: ptoOn,
+        isAuto: isAuto,
+      );
     } catch (e, st) {
       debugPrint('MonitoringScreen._markerColorForTelemetry error: $e');
       debugPrint('stack: $st');
@@ -1058,7 +1387,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       if (!isInPlot) {
         if (!_outOfPlotSnackVisible) {
           _outOfPlotSnackVisible = true;
-          showInfoSnackBar(context, 'Device is outside the assigned plot');
+          showGenericErrorSnackBar(context, 'Device is outside the assigned plot');
         }
       } else {
         if (_outOfPlotSnackVisible) {
@@ -1077,30 +1406,59 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     }
   }
 
-  // Compute the color for a single stored position entry.
-  Color _colorForPositionEntry(Map<String, dynamic> p) {
-    try {
-      final pto = p['pto'];
-      final deviceInPlot = p['device_in_plot'];
-      final ptoOn =
-          (pto != null && (pto is int ? pto == 1 : pto.toString() == '1'));
-      final inPlotBool = (deviceInPlot == true ||
-          (deviceInPlot != null &&
-              deviceInPlot.toString().toLowerCase() == 'true'));
-      if (inPlotBool && ptoOn) return Colors.blue;
-      if (inPlotBool && !ptoOn) return Colors.orange;
-    } catch (e, st) {
-      debugPrint('MonitoringScreen._colorForPositionEntry error: $e');
-      debugPrint('stack: $st');
+  // Compute the color for a single stored position entry based on selected heatmap type.
+  Color _colorForPositionEntry(Map<String, dynamic> p, PlotEntity? plot) {
+    switch (_selectedHeatmap) {
+      case HeatmapType.speed:
+        return HeatmapColorUtils.getColorForSpeed((p['speed'] as num?)?.toDouble());
+      case HeatmapType.spraying:
+        return HeatmapColorUtils.getColorForSpray((p['flow_rate'] as num?)?.toDouble());
+      case HeatmapType.gps:
+        final devInPlot = p['device_in_plot'];
+        final lat = (p['lat'] as num?)?.toDouble();
+        final lon = (p['lon'] as num?)?.toDouble();
+        
+        bool isInPlot = (devInPlot == true ||
+            (devInPlot != null && devInPlot.toString().toLowerCase() == 'true') ||
+            (devInPlot != null && devInPlot.toString() == '1'));
+        
+        // Local reinforcement for historical points using the passed plot
+        if (plot?.polygon != null && plot!.polygon.length >= 3 && lat != null && lon != null) {
+          isInPlot = _isPointInPolygon(LatLng(lat, lon), plot.polygon);
+        }
+
+        final pto = p['pto'];
+        final ptoOn = (pto != null && (pto is int ? pto == 1 : pto.toString() == '1'));
+        final spray = p['spray_mode'];
+        final isAuto = (spray != null && (spray is int ? spray == 1 : spray.toString() == '1'));
+        return HeatmapColorUtils.getColorForGPS(
+          isInPlot: isInPlot,
+          ptoOn: ptoOn,
+          isAuto: isAuto,
+        );
     }
-    return Colors.red;
+  }
+
+  // Ray-casting algorithm to determine if a point is within a polygon
+  bool _isPointInPolygon(LatLng point, List<LatLng> polygon) {
+    if (polygon.length < 3) return false;
+    var intersections = 0;
+    for (var i = 0; i < polygon.length; i++) {
+      var p1 = polygon[i];
+      var p2 = polygon[(i + 1) % polygon.length];
+      if (p1.longitude > point.longitude != p2.longitude > point.longitude &&
+          point.latitude < (p2.latitude - p1.latitude) * (point.longitude - p1.longitude) / (p2.longitude - p1.longitude) + p1.latitude) {
+        intersections++;
+      }
+    }
+    return intersections % 2 != 0;
   }
 
   // Build a list of Polylines by grouping consecutive position points that
   // share the same color. Each resulting Polyline will be drawn with the
   // color for that segment.
   List<Polyline> _buildColoredPolylinesFromPositions(
-      List<Map<String, dynamic>> pos) {
+      List<Map<String, dynamic>> pos, PlotEntity? plot) {
     final List<Polyline> result = [];
     if (pos.length < 2) return result;
 
@@ -1111,7 +1469,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       final p = pos[i];
       final lat = (p['lat'] as num).toDouble();
       final lon = (p['lon'] as num).toDouble();
-      final color = _colorForPositionEntry(p);
+      final color = _colorForPositionEntry(p, plot);
 
       if (currentColor == null) {
         // start new segment
@@ -1143,47 +1501,47 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
     return result;
   }
-}
 
-Widget _smallStat(String label, String value) {
-  return Expanded(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Text(label,
-            style: const TextStyle(fontSize: 12, color: Colors.black54)),
-        const SizedBox(height: 6),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
-      ],
-    ),
-  );
-}
+  Widget _smallStat(String label, String value) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(label,
+              style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 6),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
 
-Widget _ptoSmallStat(bool ptoOn) {
-  return Expanded(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const Text('PTO',
-            style: TextStyle(fontSize: 12, color: Colors.black54)),
-        const SizedBox(height: 6),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: ptoOn ? Colors.green : Colors.red,
-                shape: BoxShape.circle,
+  Widget _ptoSmallStat(bool ptoOn) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Text('PTO',
+              style: TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: ptoOn ? Colors.green : Colors.red,
+                  shape: BoxShape.circle,
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Text(ptoOn ? 'ON' : 'OFF',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-          ],
-        )
-      ],
-    ),
-  );
+              const SizedBox(width: 8),
+              Text(ptoOn ? 'ON' : 'OFF',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          )
+        ],
+      ),
+    );
+  }
 }

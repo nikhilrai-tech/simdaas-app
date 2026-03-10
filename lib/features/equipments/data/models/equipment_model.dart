@@ -7,7 +7,6 @@ class EquipmentModel extends EquipmentEntity {
     required super.name,
     super.userId,
     super.status,
-    super.controlUnitId,
     super.mountingHeight,
     super.lidarNozzleDistance,
     super.ultrasonicDistance,
@@ -23,6 +22,7 @@ class EquipmentModel extends EquipmentEntity {
     super.linkedSprayerId,
     super.linkedTractorId,
     super.linkedPlotId,
+    super.activeSessionId,
     super.createdAt,
     super.updatedAt,
   });
@@ -59,7 +59,6 @@ class EquipmentModel extends EquipmentEntity {
         name: json['name'] as String? ?? '',
         userId: json['user'].toString() as String? ?? userId,
         status: json['status'] as String?,
-        controlUnitId: json['controlUnitId'] as String?,
         mountingHeight: readNum('mountingHeight', 'mounting_height'),
         lidarNozzleDistance:
             readNum('lidarNozzleDistance', 'lidar_nozzle_distance'),
@@ -68,6 +67,7 @@ class EquipmentModel extends EquipmentEntity {
         wheelDiameter: readNum('wheelDiameter', 'wheel_diameter'),
         screwsInWheel: readInt('screwsInWheel', 'screws_per_wheel'),
         axleLength: readNum('axleLength', 'axle_length'),
+        activeSessionId: json['active_session'] as int?,
         createdAt: parseTime('createdAt', 'created_at'),
         updatedAt: parseTime('updatedAt', 'updated_at'),
       );
@@ -78,7 +78,6 @@ class EquipmentModel extends EquipmentEntity {
         name: json['name'] as String? ?? '',
         userId: json['user'].toString() as String? ?? userId,
         status: json['status'] as String?,
-        controlUnitId: json['controlUnitId'] as String?,
         mountingHeight: readNum('mount_height_of_lidar', 'mounting_height'),
         lidarNozzleDistance: readNum(
             'distance_b_w_sensor_and_nozzle_center', 'lidar_nozzle_distance'),
@@ -90,12 +89,16 @@ class EquipmentModel extends EquipmentEntity {
             readNum('hingeToControlUnit', 'distance_hinge_control_unit'),
         macAddress:
             json['mac_addr'] as String? ?? json['mac_address'] as String?,
-        linkedSprayerId: json['sprayer']['id'].toString() as String? ??
-            json['linked_sprayer_id'].toString() as String?,
-        linkedTractorId: json['tractor']['id'].toString() as String? ??
-            json['linked_tractor_id'].toString() as String?,
-        linkedPlotId: json['plot']['id'].toString() as String? ??
-            json['linked_plot_id'].toString() as String?,
+        linkedSprayerId: json['sprayer'] != null && json['sprayer']['id'] != null
+            ? json['sprayer']['id'].toString()
+            : json['linked_sprayer_id']?.toString(),
+        linkedTractorId: json['tractor'] != null && json['tractor']['id'] != null
+            ? json['tractor']['id'].toString()
+            : json['linked_tractor_id']?.toString(),
+        linkedPlotId: json['plot'] != null && json['plot']['id'] != null
+            ? json['plot']['id'].toString()
+            : json['linked_plot_id']?.toString(),
+        activeSessionId: json['active_session'] as int?,
         createdAt: parseTime('createdAt', 'created_at'),
         updatedAt: parseTime('updatedAt', 'updated_at'),
       );
@@ -107,8 +110,7 @@ class EquipmentModel extends EquipmentEntity {
         name: json['name'] as String? ?? '',
         userId: userId,
         status: json['status'] as String?,
-        controlUnitId: json['controlUnitId'] as String? ??
-            json['control_unit_id'] as String?,
+        activeSessionId: json['active_session'] as int?,
         mountingHeight: readNum('mountingHeight', 'mounting_height'),
         lidarNozzleDistance:
             readNum('lidarNozzleDistance', 'lidar_nozzle_distance'),
@@ -137,7 +139,7 @@ class EquipmentModel extends EquipmentEntity {
         // keep legacy key for compatibility
         'ownerId': userId,
         'status': status,
-        'controlUnitId': controlUnitId,
+        'activeSessionId': activeSessionId,
         'mountingHeight': mountingHeight,
         'lidarNozzleDistance': lidarNozzleDistance,
         'ultrasonicDistance': ultrasonicDistance,
@@ -166,13 +168,13 @@ class TractorModel extends EquipmentModel {
     required super.name,
     super.userId,
     super.status,
-    super.controlUnitId,
     super.mountingHeight,
     super.lidarNozzleDistance,
     super.ultrasonicDistance,
     super.wheelDiameter,
     super.screwsInWheel,
     super.axleLength,
+    super.activeSessionId,
     super.createdAt,
     super.updatedAt,
   });
@@ -185,7 +187,6 @@ class SprayerModel extends EquipmentModel {
     required super.name,
     super.userId,
     super.status,
-    super.controlUnitId,
     super.mountingHeight,
     super.lidarNozzleDistance,
     super.ultrasonicDistance,
@@ -197,6 +198,7 @@ class SprayerModel extends EquipmentModel {
     super.axleLength,
     super.nozzleCount,
     super.tankCapacity,
+    super.activeSessionId,
     super.createdAt,
     super.updatedAt,
   });
@@ -209,17 +211,17 @@ class ControlUnitModel extends EquipmentModel {
     required super.name,
     super.userId,
     super.status,
-    super.controlUnitId,
+    super.macAddress,
+    super.linkedSprayerId,
+    super.linkedTractorId,
+    super.linkedPlotId,
+    super.activeSessionId,
     super.mountingHeight,
     super.lidarNozzleDistance,
     super.ultrasonicDistance,
     super.wheelDiameter,
     super.screwsInWheel,
     super.hingeToControlUnit,
-    super.macAddress,
-    super.linkedSprayerId,
-    super.linkedTractorId,
-    super.linkedPlotId,
     super.createdAt,
     super.updatedAt,
   });

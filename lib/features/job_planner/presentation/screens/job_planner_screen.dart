@@ -205,7 +205,7 @@ class JobPlannerScreen extends ConsumerWidget {
                                       Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: statusColor.withValues(alpha: 0.1),
+                                          color: statusColor.withOpacity(0.1),
                                           borderRadius: BorderRadius.circular(12),
                                         ),
                                         child: Icon(
@@ -244,10 +244,10 @@ class JobPlannerScreen extends ConsumerWidget {
                                           vertical: 6,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: statusColor.withValues(alpha: 0.1),
+                                          color: statusColor.withOpacity(0.1),
                                           borderRadius:
                                               BorderRadius.circular(100),
-                                          border: Border.all(color: statusColor.withValues(alpha: 0.5)),
+                                          border: Border.all(color: statusColor.withOpacity(0.5)),
                                         ),
                                         child: Text(
                                           jobStatus

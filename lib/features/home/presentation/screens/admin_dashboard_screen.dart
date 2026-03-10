@@ -19,6 +19,8 @@ import '../../../data_monitoring/presentation/screens/monitoring_screen.dart';
 import 'reports_screen.dart';
 import '../../../auth/presentation/screens/operator_list_screen.dart'
     show OperatorListScreen;
+import 'dart:async';
+import '../../../equipments/presentation/providers/equipment_providers.dart';
 
 enum _SortBy { time, status, supervisor }
 
@@ -32,6 +34,30 @@ class AdminDashboardScreen extends ConsumerStatefulWidget {
 
 class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   _SortBy _sortBy = _SortBy.time;
+  late final javaTimer = _setupAutoRefresh();
+
+  dynamic _setupAutoRefresh() {
+    return Stream.periodic(const Duration(seconds: 30)).listen((_) {
+      if (mounted) _refreshData();
+    });
+  }
+
+  Future<void> _refreshData() async {
+    final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+    ref.invalidate(jobsListProvider(userId));
+    ref.invalidate(fm_providers.plotsListProvider(userId));
+    ref.invalidate(users_providers.usersListProvider);
+    // Also invalidate equipment if we show active counts or something
+    ref.invalidate(equipmentsListProvider(userId));
+  }
+
+  @override
+  void dispose() {
+    if (javaTimer is StreamSubscription) {
+      (javaTimer as StreamSubscription).cancel();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +73,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
           backgroundColor: Colors.transparent,
           foregroundColor: Theme.of(context).colorScheme.onSurface,
           surfaceTintColor: Colors.transparent,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _refreshData,
+              tooltip: 'Refresh',
+            ),
+          ],
         ),
         body: Container(
           decoration: BoxDecoration(
@@ -59,11 +92,13 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
               ],
             ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+          child: RefreshIndicator(
+            onRefresh: _refreshData,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -468,6 +503,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                     );
                   }),
                 ]),
+            ),
           ),
         ));
   }

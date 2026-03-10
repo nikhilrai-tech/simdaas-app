@@ -1,0 +1,35 @@
+Analyzing 2 items...                                            
+
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:66:44 • deprecated_member_use
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:145:9 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:147:9 • curly_braces_in_flow_control_structures
+   info • The local variable '_formKeyLocal' starts with an underscore • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:213:25 • no_leading_underscores_for_local_identifiers
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:276:47 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:280:47 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:282:47 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:297:51 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:301:51 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:303:51 • curly_braces_in_flow_control_structures
+   info • 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:312:45 • deprecated_member_use
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:342:51 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:346:51 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:348:51 • curly_braces_in_flow_control_structures
+   info • 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:357:45 • deprecated_member_use
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:383:47 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:387:47 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:389:47 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:397:54 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:404:49 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:407:49 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:416:49 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:419:49 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block • lib/features/plot_mapping/presentation/screens/plot_details_screen.dart:467:21 • curly_braces_in_flow_control_structures
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/reports/presentation/widgets/plot_snapshot.dart:33:51 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/reports/presentation/widgets/plot_snapshot.dart:86:51 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/reports/presentation/widgets/plot_snapshot.dart:108:54 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/reports/presentation/widgets/plot_snapshot.dart:124:35 • deprecated_member_use
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/reports/presentation/widgets/plot_snapshot.dart:128:39 • deprecated_member_use
+warning • The declaration '_PlotPreviewPainter' isn't referenced • lib/features/reports/presentation/widgets/plot_snapshot.dart:164:7 • unused_element
+   info • 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss • lib/features/reports/presentation/widgets/plot_snapshot.dart:210:50 • deprecated_member_use
+
+31 issues found. (ran in 1.0s)

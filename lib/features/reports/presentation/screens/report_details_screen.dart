@@ -1,22 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import '../../domain/report.dart';
+import '../../../plot_mapping/domain/entities/plot.dart';
 import '../widgets/plot_snapshot.dart';
-import '../widgets/report_donut_chart.dart';
+import '../widgets/saved_donut_chart.dart';
 
-class ReportDetailsScreen extends ConsumerWidget {
+class ReportDetailsScreen extends ConsumerStatefulWidget {
   final Report report;
 
   const ReportDetailsScreen({required this.report, super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final dateFormat = DateFormat('h a dd/MM/yyyy');
+  ConsumerState<ReportDetailsScreen> createState() => _ReportDetailsScreenState();
+}
+
+class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
+  HeatmapType _heatmapType = HeatmapType.gps;
+
+  @override
+  Widget build(BuildContext context) {
+    final report = widget.report;
+    final dateFormat = DateFormat('h:mm a, dd MMM yyyy');
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
+        title: const Text('Report Details'),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
@@ -25,177 +38,365 @@ class ReportDetailsScreen extends ConsumerWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.edit, color: Colors.black), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.share, color: Colors.black), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.share_outlined, color: Colors.black), onPressed: () {}),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            PlotSnapshot(
-              plot: report.plot,
-              base64Image: report.plotSnapshot,
-              height: 180,
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              clipBehavior: Clip.antiAlias,
+              child: _buildMapHeader(report),
             ),
+            const SizedBox(height: 12),
+            _buildHeatmapToggles(),
+            const SizedBox(height: 20),
+
+            // Performance Overview
+            _sectionHeader('Performance Overview'),
+            Row(
+              children: [
+                _metricCard('Area Covered', '${(report.areaCoveredSqm / 10000).toStringAsFixed(2)} ha', Icons.area_chart, color: Colors.green),
+                const SizedBox(width: 12),
+                _metricCard('Material Used', '${report.sprayUsedLitres} L', Icons.water_drop, color: Colors.blue),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _metricCard('Avg. Flow Rate', '${report.avgFlowRate} L/m', Icons.speed, color: Colors.orange),
+                const SizedBox(width: 12),
+                _metricCard('Completion', '${report.completionPercentage.toStringAsFixed(1)}%', Icons.pie_chart, color: Colors.purple),
+              ],
+            ),
+
             const SizedBox(height: 24),
-            Row(
-              children: [
-                _metricBox('Area', '${(report.areaCoveredSqm / 10000).toStringAsFixed(2)} ha', flex: 2),
-                const SizedBox(width: 8),
-                _metricBox('Amount of\nMaterialApplied', '${report.sprayUsedLitres} L', fontSize: 10),
-                const SizedBox(width: 8),
-                _metricBox('Avg. Flow Rate', '${report.avgFlowRate} L/m', fontSize: 10),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _metricBox('Percentage\nCovered', '${report.completionPercentage.toStringAsFixed(1)}%', fontSize: 10),
-                const Spacer(flex: 2),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Divider(color: Colors.black12, thickness: 1.5),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF262626),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
+
+            // Time and Distance Details
+            _sectionHeader('Session Details'),
+            Builder(builder: (context) {
+              final duration = report.trajectory.isNotEmpty
+                  ? report.trajectory.last.timestamp.difference(report.trajectory.first.timestamp)
+                  : Duration.zero;
+              
+              final hours = duration.inHours;
+              final minutes = duration.inMinutes % 60;
+              final timeStr = hours > 0 ? '${hours}h ${minutes}m' : '${minutes}m';
+              
+              // Avg Speed = Total Distance / Total Time (in hours)
+              final hoursDecimal = duration.inSeconds / 3600;
+              final avgSpeed = hoursDecimal > 0 ? (report.distanceTravelledKm / hoursDecimal) : 0.0;
+
+              return Column(
                 children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        const Text(
-                          '2Hrs',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          'Time taken',
-                          style: TextStyle(
-                            color: Colors.grey[400],
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                  Card(
+                    elevation: 1,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          _detailRow('Start Time', dateFormat.format(report.trajectory.isNotEmpty ? report.trajectory.first.timestamp : report.createdAt), Icons.access_time),
+                          const Divider(height: 24),
+                          _detailRow('End Time', dateFormat.format(report.trajectory.isNotEmpty ? report.trajectory.last.timestamp : report.createdAt), Icons.timer_off_outlined),
+                          const Divider(height: 24),
+                          _detailRow('Total Time', timeStr, Icons.hourglass_bottom),
+                        ],
+                      ),
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                  const SizedBox(height: 16),
+                  Row(
                     children: [
-                      Text(
-                        dateFormat.format(report.createdAt.subtract(const Duration(hours: 2))),
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        dateFormat.format(report.createdAt),
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
-                      ),
+                      _metricCard('Distance Traveled', '${report.distanceTravelledKm.toStringAsFixed(2)} km', Icons.directions_run, color: Colors.blueGrey),
+                      const SizedBox(width: 12),
+                      _metricCard('PTO Distance', '${report.distanceWithPtoKm.toStringAsFixed(2)} km', Icons.settings_input_component, color: Colors.teal),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _metricCard('Distance Sprayed', '${(report.distanceWithLeftSprayKm + report.distanceWithRightSprayKm).toStringAsFixed(2)} km', Icons.opacity, color: Colors.indigo),
                     ],
                   ),
                 ],
+              );
+            }),
+
+            const SizedBox(height: 24),
+
+            // Saved Section
+            _sectionHeader('Saved '),
+            Builder(builder: (context) {
+              final duration = report.trajectory.isNotEmpty
+                  ? report.trajectory.last.timestamp.difference(report.trajectory.first.timestamp)
+                  : Duration.zero;
+              final hoursDecimal = duration.inSeconds / 3600;
+              final avgSpeed = hoursDecimal > 0 ? (report.distanceTravelledKm / hoursDecimal) : 0.0;
+
+              return Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          Expanded(
+                            child: SavedDonutChart(
+                              percentage: report.completionPercentage,
+                              label: 'Job\nCompletion',
+                            ),
+                          ),
+                          const Expanded(
+                            child: SavedDonutChart(
+                              percentage: 85,
+                              label: 'Efficiency',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      const Divider(),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          _metricCard('Avg. Speed', '${avgSpeed.toStringAsFixed(1)} km/h', Icons.shutter_speed, color: Colors.deepOrange),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12, left: 4),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Colors.black87,
+        ),
+      ),
+    );
+  }
+
+  Widget _metricCard(String label, String value, IconData icon, {Color color = Colors.blue}) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey[200]!),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 12),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
               ),
             ),
-            const SizedBox(height: 24),
-            _infoBox('Pto Active Time', padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), fontSize: 20),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF262626),
-                borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  Expanded(
-                    child: ReportDonutChart(
-                      percentage: (report.distanceTravelledKm / (report.distanceTravelledKm + 1) * 100),
-                      label: 'Distance\nTraveled',
-                    ),
-                  ),
-                  Expanded(
-                    child: ReportDonutChart(
-                      percentage: (report.distanceWithPtoKm / (report.distanceTravelledKm + 0.1) * 100),
-                      label: 'total distance\ntraversed with pto on',
-                    ),
-                  ),
-                  Expanded(
-                    child: ReportDonutChart(
-                      percentage: (report.distanceWithLeftSprayKm + report.distanceWithRightSprayKm) / (report.distanceTravelledKm + 0.1) * 100,
-                      label: 'Distance sprayed',
-                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: Colors.grey[600]),
+        const SizedBox(width: 12),
+        Text(
+          label,
+          style: TextStyle(color: Colors.grey[700], fontSize: 14),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            color: Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMapHeader(Report report) {
+    if (report.trajectory.isEmpty) {
+      return PlotSnapshot(
+        plot: report.plot,
+        base64Image: report.plotSnapshot,
+        height: 180,
+      );
+    }
+
+    final points = report.trajectory.map((p) => LatLng(p.lat, p.lon)).toList();
+    final centroid = _getCentroid(points);
+
+    return Container(
+      height: 250,
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: FlutterMap(
+          options: MapOptions(
+            initialCenter: centroid,
+            initialZoom: 18.0,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+              subdomains: const ['a', 'b', 'c'],
+            ),
+            if (report.plot != null)
+              PolygonLayer(
+                polygons: [
+                  Polygon(
+                    points: report.plot!.polygon,
+                    color: const Color(0xFF00A36C).withOpacity(0.1),
+                    borderStrokeWidth: 2.0,
+                    borderColor: const Color(0xFF00A36C).withOpacity(0.5),
                   ),
                 ],
               ),
+            PolylineLayer(
+              polylines: _buildHeatmapPolylines(report.trajectory),
             ),
-            // const SizedBox(height: 24),
-            // _infoBox('Avg Speed', padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), fontSize: 20),
-            // const SizedBox(height: 40),
           ],
         ),
       ),
     );
   }
 
-  Widget _infoBox(String text, {EdgeInsets padding = const EdgeInsets.symmetric(horizontal: 12, vertical: 8), double fontSize = 16}) {
-    return Container(
-      padding: padding,
-      color: const Color(0xFF262626),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: fontSize,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
+  Widget _buildHeatmapToggles() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _heatmapButton(HeatmapType.gps, 'GPS'),
+        const SizedBox(width: 8),
+        _heatmapButton(HeatmapType.speed, 'Speed'),
+        const SizedBox(width: 8),
+        _heatmapButton(HeatmapType.spraying, 'Spray'),
+      ],
     );
   }
 
-  Widget _metricBox(String label, String value, {int flex = 1, double fontSize = 12}) {
-    return Expanded(
-      flex: flex,
+  Widget _heatmapButton(HeatmapType type, String label) {
+    final isSelected = _heatmapType == type;
+    return InkWell(
+      onTap: () => setState(() => _heatmapType = type),
       child: Container(
-        padding: const EdgeInsets.all(8),
-        color: const Color(0xFF262626),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (value.isNotEmpty)
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  value,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: fontSize,
-              ),
-            ),
-          ],
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF262626) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF262626)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.black87,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            fontSize: 12,
+          ),
         ),
       ),
     );
+  }
+
+  List<Polyline> _buildHeatmapPolylines(List<GPSPointData> trajectory) {
+    if (trajectory.length < 2) return [];
+
+    final polylines = <Polyline>[];
+
+    for (int i = 0; i < trajectory.length - 1; i++) {
+      final p1 = trajectory[i];
+      final p2 = trajectory[i + 1];
+
+      // Don't connect points with large time gap (e.g. > 30s)
+      if (p2.timestamp.difference(p1.timestamp).inSeconds > 30) continue;
+
+      Color color;
+      switch (_heatmapType) {
+        case HeatmapType.speed:
+          color = HeatmapColorUtils.getColorForSpeed(p1.speedKmph);
+          break;
+        case HeatmapType.spraying:
+          color = HeatmapColorUtils.getColorForSpray(p1.flowRateLpm);
+          break;
+        case HeatmapType.gps:
+          // For GPS heatmap in reports, we might not have 'device_in_plot' per point easily 
+          // but we can assume in plot for now or check distance to plot.
+          // For simplicity, we use pto and mode.
+          color = HeatmapColorUtils.getColorForGPS(
+            isInPlot: true, 
+            ptoOn: true, // Assuming data points only sent when PTO on or similar
+            isAuto: p1.sprayMode == 1,
+          );
+          break;
+      }
+
+      polylines.add(Polyline(
+        points: [LatLng(p1.lat, p1.lon), LatLng(p2.lat, p2.lon)],
+        color: color,
+        strokeWidth: 4.0,
+      ));
+    }
+
+    return polylines;
+  }
+
+  LatLng _getCentroid(List<LatLng> points) {
+    if (points.isEmpty) return const LatLng(0, 0);
+    double sumLat = 0;
+    double sumLng = 0;
+    for (final p in points) {
+      sumLat += p.latitude;
+      sumLng += p.longitude;
+    }
+    return LatLng(sumLat / points.length, sumLng / points.length);
   }
 }

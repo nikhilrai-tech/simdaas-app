@@ -13,7 +13,6 @@ class EquipmentEntity {
   final double? wheelDiameter; // meters
   final int? screwsInWheel;
   // control unit specific
-  final String? controlUnitId;
   // tractor-specific
   final double? axleLength;
   // sprayer nozzle / tank
@@ -28,6 +27,7 @@ class EquipmentEntity {
   final String? linkedSprayerId;
   final String? linkedTractorId;
   final String? linkedPlotId;
+  final int? activeSessionId;
   // timestamps
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -44,7 +44,6 @@ class EquipmentEntity {
     this.ultrasonicDistance,
     this.wheelDiameter,
     this.screwsInWheel,
-    this.controlUnitId,
     this.axleLength,
     this.nozzleCount,
     this.tankCapacity,
@@ -55,6 +54,7 @@ class EquipmentEntity {
     this.linkedSprayerId,
     this.linkedTractorId,
     this.linkedPlotId,
+    this.activeSessionId,
     this.createdAt,
     this.updatedAt,
   });
@@ -99,11 +99,11 @@ class ControlUnitEntity extends EquipmentEntity {
     required super.name,
     super.userId,
     super.status,
-    super.controlUnitId,
     super.macAddress,
     super.linkedSprayerId,
     super.linkedTractorId,
     super.linkedPlotId,
+    super.activeSessionId,
     super.lidarNozzleDistance,
     super.mountingHeight,
     super.ultrasonicDistance,

@@ -11,6 +11,8 @@ import '../providers/plot_providers.dart';
 import 'map_screen.dart';
 import 'plot_details_screen.dart';
 
+enum PlotSortOption { name, area, date }
+
 class PlotListScreen extends ConsumerStatefulWidget {
   final bool showFab;
   const PlotListScreen({super.key, this.showFab = true});
@@ -21,15 +23,26 @@ class PlotListScreen extends ConsumerStatefulWidget {
 
 class _PlotListScreenState extends ConsumerState<PlotListScreen>
     with WidgetsBindingObserver {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  PlotSortOption _sortOption = PlotSortOption.date;
+  bool _isSearchExpanded = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -73,8 +86,72 @@ class _PlotListScreenState extends ConsumerState<PlotListScreen>
     final online = conn.asData?.value ?? true;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Plots'),
         elevation: 0,
+        leading: _isSearchExpanded
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () {
+                  setState(() {
+                    _isSearchExpanded = false;
+                    _searchController.clear();
+                  });
+                },
+              )
+            : null,
+        title: _isSearchExpanded
+            ? Container(
+                height: 45,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5F5F5),
+                  borderRadius: BorderRadius.circular(25),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  style: const TextStyle(color: Colors.black, fontSize: 14),
+                  cursorColor: Colors.black,
+                  decoration: InputDecoration(
+                    hintText: 'Search field name...',
+                    hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.black54, size: 20),
+                      onPressed: () => _searchController.clear(),
+                    ),
+                  ),
+                ),
+              )
+            : const Text('Plots'),
+        actions: _isSearchExpanded
+            ? []
+            : [
+                IconButton(
+                  icon: const Icon(Icons.search),
+                  onPressed: () {
+                    setState(() {
+                      _isSearchExpanded = true;
+                    });
+                  },
+                ),
+                PopupMenuButton<PlotSortOption>(
+                  icon: const Icon(Icons.sort),
+                  onSelected: (opt) {
+                    setState(() {
+                      _sortOption = opt;
+                    });
+                  },
+                  itemBuilder: (ctx) => [
+                    const PopupMenuItem(
+                        value: PlotSortOption.name, child: Text('Sort by Name')),
+                    const PopupMenuItem(
+                        value: PlotSortOption.area, child: Text('Sort by Area')),
+                    const PopupMenuItem(
+                        value: PlotSortOption.date, child: Text('Sort by Date')),
+                  ],
+                ),
+              ],
         bottom: online
             ? null
             : PreferredSize(
@@ -91,7 +168,23 @@ class _PlotListScreenState extends ConsumerState<PlotListScreen>
               ),
       ),
       body: plotsAsync.when(
-        data: (plots) {
+        data: (originalPlots) {
+          final filtered = originalPlots.where((p) {
+            if (_searchQuery.isEmpty) return true;
+            return p.name.toLowerCase().contains(_searchQuery.toLowerCase());
+          }).toList();
+
+          final plots = List.from(filtered);
+          if (_sortOption == PlotSortOption.name) {
+            plots.sort((a, b) =>
+                a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+          } else if (_sortOption == PlotSortOption.area) {
+            plots.sort((a, b) => (b.area ?? 0).compareTo(a.area ?? 0));
+          } else if (_sortOption == PlotSortOption.date) {
+            plots.sort((a, b) =>
+                (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+          }
+
           if (plots.isEmpty) {
             return RefreshIndicator(
               onRefresh: () async {
@@ -104,30 +197,40 @@ class _PlotListScreenState extends ConsumerState<PlotListScreen>
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: [
                   Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.map_outlined,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.secondary,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No plots yet',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap the + button to add your first plot',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.secondary,
-                              ),
-                        ),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 100),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _searchQuery.isEmpty
+                                ? Icons.map_outlined
+                                : Icons.search_off,
+                            size: 64,
+                            color: Theme.of(context).colorScheme.secondary,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            _searchQuery.isEmpty
+                                ? 'No plots yet'
+                                : 'No matching plots',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          if (_searchQuery.isEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tap the + button to add your first plot',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color:
+                                        Theme.of(context).colorScheme.secondary,
+                                  ),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
                 ],

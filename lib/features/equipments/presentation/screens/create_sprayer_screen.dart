@@ -74,6 +74,76 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
     super.dispose();
   }
 
+  void _prefill(TextEditingController ctrl, dynamic val, String type) {
+    if (val == null) return;
+    double d = double.tryParse(val.toString()) ?? 0;
+    if (d == 0) {
+      ctrl.text = val.toString();
+      return;
+    }
+
+    // Heuristics to restore unit
+    final inches = d / 0.0254;
+    final feet = d / 0.3048;
+    final cm = d / 0.01;
+
+    if ((inches - inches.round()).abs() < 0.0001) {
+      ctrl.text = inches.round().toString();
+      if (type == 'wheel') _wheelDiameterUnit = 'in';
+      if (type == 'axle') _axleLengthUnit = 'in';
+      if (type == 'hAxle') _hingeToAxleUnit = 'in';
+      if (type == 'hNozzle') _hingeToNozzleUnit = 'in';
+      if (type == 'hCU') _hingeToControlUnitUnit = 'in';
+      return;
+    }
+    if ((feet - feet.round()).abs() < 0.0001) {
+      ctrl.text = feet.round().toString();
+      if (type == 'wheel') _wheelDiameterUnit = 'ft';
+      if (type == 'axle') _axleLengthUnit = 'ft';
+      if (type == 'hAxle') _hingeToAxleUnit = 'ft';
+      if (type == 'hNozzle') _hingeToNozzleUnit = 'ft';
+      if (type == 'hCU') _hingeToControlUnitUnit = 'ft';
+      return;
+    }
+    if (type == 'wheel' && (cm - cm.round()).abs() < 0.0001) {
+      ctrl.text = cm.round().toString();
+      _wheelDiameterUnit = 'cm';
+      return;
+    }
+    if (type == 'hCU' && (cm - cm.round()).abs() < 0.0001) {
+      ctrl.text = cm.round().toString();
+      _hingeToControlUnitUnit = 'cm';
+      return;
+    }
+
+    ctrl.text = d.toString().replaceAll(RegExp(r'\.0$'), '');
+  }
+
+  void _onUnitChanged(String? newUnit, String currentUnit,
+      TextEditingController ctrl, Function(String) setter) {
+    if (newUnit == null || newUnit == currentUnit) return;
+    double? val = double.tryParse(ctrl.text);
+    if (val != null) {
+      double inMeters = val;
+      if (currentUnit == 'in')
+        inMeters = val * 0.0254;
+      else if (currentUnit == 'ft')
+        inMeters = val * 0.3048;
+      else if (currentUnit == 'cm') inMeters = val * 0.01;
+
+      double newVal = inMeters;
+      if (newUnit == 'in')
+        newVal = inMeters / 0.0254;
+      else if (newUnit == 'ft')
+        newVal = inMeters / 0.3048;
+      else if (newUnit == 'cm') newVal = inMeters / 0.01;
+
+      ctrl.text =
+          newVal.toStringAsFixed(3).replaceAll(RegExp(r'\.?0+$'), '');
+    }
+    setState(() => setter(newUnit));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -82,16 +152,13 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
       final ex = widget.existingData!;
       // Prefill controllers once in initState so user edits aren't overwritten on rebuild
       _name.text = ex['name'] as String? ?? '';
-      if (ex['wheelDiameter'] != null)
-        _wheelDiameter.text = '${ex['wheelDiameter']}';
+      _prefill(_wheelDiameter, ex['wheelDiameter'], 'wheel');
       if (ex['screwsInWheel'] != null)
         _screwsInWheel.text = '${ex['screwsInWheel']}';
-      if (ex['hingeToAxle'] != null) _hingeToAxle.text = '${ex['hingeToAxle']}';
-      if (ex['hingeToNozzle'] != null)
-        _hingeToNozzle.text = '${ex['hingeToNozzle']}';
-      if (ex['hingeToControlUnit'] != null)
-        _hingeToControlUnit.text = '${ex['hingeToControlUnit']}';
-      if (ex['axleLength'] != null) _axleLength.text = '${ex['axleLength']}';
+      _prefill(_hingeToAxle, ex['hingeToAxle'], 'hAxle');
+      _prefill(_hingeToNozzle, ex['hingeToNozzle'], 'hNozzle');
+      _prefill(_hingeToControlUnit, ex['hingeToControlUnit'], 'hCU');
+      _prefill(_axleLength, ex['axleLength'], 'axle');
       if (ex['nozzleCount'] != null) _nozzleCount.text = '${ex['nozzleCount']}';
       if (ex['tankCapacity'] != null)
         _tankCapacity.text = '${ex['tankCapacity']}';
@@ -149,11 +216,10 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                const Text('Sprayer name'),
-                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _name,
                                   decoration: const InputDecoration(
+                                      labelText: 'Sprayer name',
                                       hintText: 'Sprayer name'),
                                   validator: (v) => (v == null || v.isEmpty)
                                       ? 'Enter name'
@@ -185,17 +251,15 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text('Wheel diameter'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
+                                Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: TextFormField(
                                           controller: _wheelDiameter,
                                           decoration: const InputDecoration(
+                                              labelText: 'Wheel diameter',
                                               hintText: 'Wheel diameter'),
                                           keyboardType:
                                               TextInputType.numberWithOptions(
@@ -205,29 +269,32 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                                   ? 'Enter wheel diameter'
                                                   : null,
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: _wheelDiameterUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'm', child: Text('m')),
-                                        DropdownMenuItem(
-                                            value: 'in', child: Text('in')),
-                                        DropdownMenuItem(
-                                            value: 'ft', child: Text('ft')),
-                                      ],
-                                      onChanged: (v) => setState(
-                                          () => _wheelDiameterUnit = v ?? 'm'),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 110,
+                                        child: DropdownButtonFormField<String>(
+                                          value: _wheelDiameterUnit,
+                                          items: const [
+                                            DropdownMenuItem(
+                                                value: 'm', child: Text('m')),
+                                            DropdownMenuItem(
+                                                value: 'cm', child: Text('cm')),
+                                            DropdownMenuItem(
+                                                value: 'in', child: Text('in')),
+                                            DropdownMenuItem(
+                                                value: 'ft', child: Text('ft')),
+                                          ],
+                                          onChanged: (v) => _onUnitChanged(
+                                              v,
+                                              _wheelDiameterUnit,
+                                              _wheelDiameter,
+                                              (u) => _wheelDiameterUnit = u),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Unit'),
+                                        ),
+                                      )
+                                    ]),
                               ],
                             ),
                           ),
@@ -254,11 +321,11 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                const Text('Number of screws/nuts in wheel'),
-                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _screwsInWheel,
                                   decoration: const InputDecoration(
+                                      labelText:
+                                          'Number of screws/nuts in wheel',
                                       hintText:
                                           'Number of screws/nuts in wheel'),
                                   keyboardType: TextInputType.number,
@@ -292,17 +359,15 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text('Axle length'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
+                                Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: TextFormField(
                                           controller: _axleLength,
                                           decoration: const InputDecoration(
+                                              labelText: 'Axle length',
                                               hintText: 'Axle length'),
                                           keyboardType:
                                               TextInputType.numberWithOptions(
@@ -312,29 +377,30 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                                   ? 'Enter axle length'
                                                   : null,
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: _axleLengthUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'm', child: Text('m')),
-                                        DropdownMenuItem(
-                                            value: 'in', child: Text('in')),
-                                        DropdownMenuItem(
-                                            value: 'ft', child: Text('ft')),
-                                      ],
-                                      onChanged: (v) => setState(
-                                          () => _axleLengthUnit = v ?? 'm'),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 110,
+                                        child: DropdownButtonFormField<String>(
+                                          value: _axleLengthUnit,
+                                          items: const [
+                                            DropdownMenuItem(
+                                                value: 'm', child: Text('m')),
+                                            DropdownMenuItem(
+                                                value: 'in', child: Text('in')),
+                                            DropdownMenuItem(
+                                                value: 'ft', child: Text('ft')),
+                                          ],
+                                          onChanged: (v) => _onUnitChanged(
+                                              v,
+                                              _axleLengthUnit,
+                                              _axleLength,
+                                              (u) => _axleLengthUnit = u),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Unit'),
+                                        ),
+                                      )
+                                    ]),
                               ],
                             ),
                           ),
@@ -361,11 +427,10 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                const Text('Number of nozzles'),
-                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _nozzleCount,
                                   decoration: const InputDecoration(
+                                      labelText: 'Number of nozzles',
                                       hintText: 'Number of nozzles'),
                                   keyboardType: TextInputType.number,
                                   validator: (v) => (v == null || v.isEmpty)
@@ -398,11 +463,10 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                const Text('Tank capacity (L)'),
-                                const SizedBox(height: 6),
                                 TextFormField(
                                   controller: _tankCapacity,
                                   decoration: const InputDecoration(
+                                      labelText: 'Tank capacity (L)',
                                       hintText: 'Tank capacity (L)'),
                                   keyboardType: TextInputType.numberWithOptions(
                                       decimal: true),
@@ -436,18 +500,16 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text(
-                                            'Distance between hinge point and axle'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
+                                Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: TextFormField(
                                           controller: _hingeToAxle,
                                           decoration: const InputDecoration(
+                                              labelText:
+                                                  'Distance between hinge point and axle',
                                               hintText:
                                                   'Distance between hinge point and axle'),
                                           keyboardType:
@@ -458,29 +520,30 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                                   ? 'Enter hinge->axle distance'
                                                   : null,
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: _hingeToAxleUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'm', child: Text('m')),
-                                        DropdownMenuItem(
-                                            value: 'in', child: Text('in')),
-                                        DropdownMenuItem(
-                                            value: 'ft', child: Text('ft')),
-                                      ],
-                                      onChanged: (v) => setState(
-                                          () => _hingeToAxleUnit = v ?? 'm'),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 110,
+                                        child: DropdownButtonFormField<String>(
+                                          value: _hingeToAxleUnit,
+                                          items: const [
+                                            DropdownMenuItem(
+                                                value: 'm', child: Text('m')),
+                                            DropdownMenuItem(
+                                                value: 'in', child: Text('in')),
+                                            DropdownMenuItem(
+                                                value: 'ft', child: Text('ft')),
+                                          ],
+                                          onChanged: (v) => _onUnitChanged(
+                                              v,
+                                              _hingeToAxleUnit,
+                                              _hingeToAxle,
+                                              (u) => _hingeToAxleUnit = u),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Unit'),
+                                        ),
+                                      )
+                                    ]),
                               ],
                             ),
                           ),
@@ -507,51 +570,50 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text(
-                                            'Distance between hinge point and nozzle'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
+                                Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: TextFormField(
                                           controller: _hingeToNozzle,
                                           decoration: const InputDecoration(
+                                              labelText:
+                                                  'Distance between hinge point and nozzle',
                                               hintText:
                                                   'Distance between hinge point and nozzle'),
                                           keyboardType:
                                               TextInputType.numberWithOptions(
                                                   decimal: true),
-                                          validator: (v) => (v == null ||
-                                                  v.isEmpty)
-                                              ? 'Enter hinge->nozzle distance'
-                                              : null,
+                                          validator: (v) =>
+                                              (v == null || v.isEmpty)
+                                                  ? 'Enter hinge->nozzle distance'
+                                                  : null,
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: _hingeToNozzleUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'm', child: Text('m')),
-                                        DropdownMenuItem(
-                                            value: 'in', child: Text('in')),
-                                        DropdownMenuItem(
-                                            value: 'ft', child: Text('ft')),
-                                      ],
-                                      onChanged: (v) => setState(
-                                          () => _hingeToNozzleUnit = v ?? 'm'),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 110,
+                                        child: DropdownButtonFormField<String>(
+                                          value: _hingeToNozzleUnit,
+                                          items: const [
+                                            DropdownMenuItem(
+                                                value: 'm', child: Text('m')),
+                                            DropdownMenuItem(
+                                                value: 'in', child: Text('in')),
+                                            DropdownMenuItem(
+                                                value: 'ft', child: Text('ft')),
+                                          ],
+                                          onChanged: (v) => _onUnitChanged(
+                                              v,
+                                              _hingeToNozzleUnit,
+                                              _hingeToNozzle,
+                                              (u) => _hingeToNozzleUnit = u),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Unit'),
+                                        ),
+                                      )
+                                    ]),
                               ],
                             ),
                           ),
@@ -578,49 +640,51 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text(
-                                            'Distance between hinge point and control unit mounting'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
+                                Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: TextFormField(
                                           controller: _hingeToControlUnit,
                                           decoration: const InputDecoration(
+                                              labelText:
+                                                  'Distance between hinge point and control unit mounting',
                                               hintText:
                                                   'Distance between hinge point and control unit mounting'),
                                           keyboardType:
                                               TextInputType.numberWithOptions(
                                                   decimal: true),
-                                          validator: (v) => (v == null ||
-                                                  v.isEmpty)
-                                              ? 'Enter hinge->control unit distance'
-                                              : null,
+                                          validator: (v) =>
+                                              (v == null || v.isEmpty)
+                                                  ? 'Enter hinge->control unit distance'
+                                                  : null,
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: _hingeToControlUnitUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'm', child: Text('m')),
-                                        DropdownMenuItem(
-                                            value: 'in', child: Text('in')),
-                                      ],
-                                      onChanged: (v) => setState(() =>
-                                          _hingeToControlUnitUnit = v ?? 'm'),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      SizedBox(
+                                        width: 110,
+                                        child: DropdownButtonFormField<String>(
+                                          value: _hingeToControlUnitUnit,
+                                          items: const [
+                                            DropdownMenuItem(
+                                                value: 'm', child: Text('m')),
+                                            DropdownMenuItem(
+                                                value: 'cm', child: Text('cm')),
+                                            DropdownMenuItem(
+                                                value: 'in', child: Text('in')),
+                                          ],
+                                          onChanged: (v) => _onUnitChanged(
+                                              v,
+                                              _hingeToControlUnitUnit,
+                                              _hingeToControlUnit,
+                                              (u) =>
+                                                  _hingeToControlUnitUnit = u),
+                                          decoration: const InputDecoration(
+                                              labelText: 'Unit'),
+                                        ),
+                                      )
+                                    ]),
                               ],
                             ),
                           ),
@@ -719,6 +783,8 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                         wheelDiameter = wheelDiameter * 0.0254;
                                       } else if (_wheelDiameterUnit == 'ft') {
                                         wheelDiameter = wheelDiameter * 0.3048;
+                                      } else if (_wheelDiameterUnit == 'cm') {
+                                        wheelDiameter = wheelDiameter * 0.01;
                                       }
                                     }
                                   } catch (e, st) {
@@ -744,6 +810,8 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                         hingeToAxle = hingeToAxle * 0.0254;
                                       } else if (_hingeToAxleUnit == 'ft') {
                                         hingeToAxle = hingeToAxle * 0.3048;
+                                      } else if (_hingeToAxleUnit == 'cm') {
+                                        hingeToAxle = hingeToAxle * 0.01;
                                       }
                                     }
                                   } catch (e, st) {
@@ -760,6 +828,8 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                         hingeToNozzle = hingeToNozzle * 0.0254;
                                       } else if (_hingeToNozzleUnit == 'ft') {
                                         hingeToNozzle = hingeToNozzle * 0.3048;
+                                      } else if (_hingeToNozzleUnit == 'cm') {
+                                        hingeToNozzle = hingeToNozzle * 0.01;
                                       }
                                     }
                                   } catch (e, st) {
@@ -779,6 +849,10 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                           'ft') {
                                         hingeToControlUnit =
                                             hingeToControlUnit * 0.3048;
+                                      } else if (_hingeToControlUnitUnit ==
+                                          'cm') {
+                                        hingeToControlUnit =
+                                            hingeToControlUnit * 0.01;
                                       }
                                     }
                                   } catch (e, st) {
@@ -796,6 +870,8 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                         axleLength = axleLength * 0.0254;
                                       } else if (_axleLengthUnit == 'ft') {
                                         axleLength = axleLength * 0.3048;
+                                      } else if (_axleLengthUnit == 'cm') {
+                                        axleLength = axleLength * 0.01;
                                       }
                                     }
                                   } catch (e, st) {

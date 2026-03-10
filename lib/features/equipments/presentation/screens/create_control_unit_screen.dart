@@ -50,7 +50,6 @@ class _CreateControlUnitScreenState
   String _mountHeightUnit = 'm';
   String _ultrasonicDistanceUnit = 'm';
   final _name = TextEditingController();
-  final _controlUnitId = TextEditingController();
   final _macAddress = TextEditingController();
   String? _linkedSprayerId;
   String? _linkedTractorId;
@@ -63,7 +62,6 @@ class _CreateControlUnitScreenState
   Set<String> _existingMacs = {};
   // flags to lock fields that were provided by QR scan
   bool _prefilledName = false;
-  bool _prefilledControlUnitId = false;
   bool _prefilledMac = false;
   bool _prefilledLinkedSprayer = false;
   bool _prefilledLinkedTractor = false;
@@ -81,7 +79,6 @@ class _CreateControlUnitScreenState
   @override
   void dispose() {
     _name.dispose();
-    _controlUnitId.dispose();
     _macAddress.dispose();
     // controllers removed for dropdowns
     _lidarNozzleDistance.dispose();
@@ -91,10 +88,85 @@ class _CreateControlUnitScreenState
     super.dispose();
   }
 
+  void _prefill(TextEditingController ctrl, dynamic val, String type) {
+    if (val == null) return;
+    double d = double.tryParse(val.toString()) ?? 0;
+    if (d == 0) {
+      ctrl.text = val.toString();
+      return;
+    }
+
+    // Heuristics to restore unit
+    final inches = d / 0.0254;
+    final feet = d / 0.3048;
+
+    if ((inches - inches.round()).abs() < 0.0001) {
+      ctrl.text = inches.round().toString();
+      if (type == 'lidar') _lidarNozzleDistanceUnit = 'in';
+      if (type == 'mount') _mountHeightUnit = 'in';
+      if (type == 'ultra') _ultrasonicDistanceUnit = 'in';
+      return;
+    }
+    if ((feet - feet.round()).abs() < 0.0001) {
+      ctrl.text = feet.round().toString();
+      if (type == 'lidar') _lidarNozzleDistanceUnit = 'ft';
+      if (type == 'mount') _mountHeightUnit = 'ft';
+      if (type == 'ultra') _ultrasonicDistanceUnit = 'ft';
+      return;
+    }
+
+    ctrl.text = d.toString().replaceAll(RegExp(r'\.0$'), '');
+  }
+
+  void _onUnitChanged(String? newUnit, String currentUnit,
+      TextEditingController ctrl, Function(String) setter) {
+    if (newUnit == null || newUnit == currentUnit) return;
+    double? val = double.tryParse(ctrl.text);
+    if (val != null) {
+      double inMeters = val;
+      if (currentUnit == 'in') {
+        inMeters = val * 0.0254;
+      } else if (currentUnit == 'ft') {
+        inMeters = val * 0.3048;
+      }
+
+      double newVal = inMeters;
+      if (newUnit == 'in') {
+        newVal = inMeters / 0.0254;
+      } else if (newUnit == 'ft') {
+        newVal = inMeters / 0.3048;
+      }
+
+      ctrl.text =
+          newVal.toStringAsFixed(3).replaceAll(RegExp(r'\.?0+$'), '');
+    }
+    setState(() => setter(newUnit));
+  }
+
   @override
   void initState() {
     super.initState();
     _pageKeys = List.generate(4, (_) => GlobalKey<FormState>());
+  }
+
+  // Build a multi-page wizard. Visible pages depend on selected sensor type:
+  // - sensor 'lidar' -> pages [0,1,2]
+  // - sensor 'ultrasonic' -> pages [0,3]
+  List<int> get visible {
+    final v = <int>[0];
+    if (_sensorType == 'lidar') {
+      v.addAll([1, 2]);
+    } else {
+      v.addAll([1, 3]);
+    }
+    return v;
+  }
+
+  int get totalPages => visible.length;
+
+  int visiblePositionOf(int pageIndex) {
+    final pos = visible.indexOf(pageIndex);
+    return pos < 0 ? 0 : pos;
   }
 
   @override
@@ -122,7 +194,7 @@ class _CreateControlUnitScreenState
     // Prefill if existingData provided (e.g., from QR scan or editing an
     // existing equipment). Behavior differs for two cases:
     // - Editing existing equipment (_isEditing == true): lock only name and
-    //   controlUnitId (these are primary/identity fields). Other fields will
+    //   name (primary/identity field). Other fields will
     //   be populated but remain editable so the user can change them.
     // - QR scan / new prefill (not editing): preserve the original behavior
     //   where prefilled fields are locked individually.
@@ -142,20 +214,10 @@ class _CreateControlUnitScreenState
         _name.text = m['name'] as String;
       }
 
-      // For display, prefer controlUnitId. If editing and controlUnitId is
-      // missing, fall back to server `id` so the identifier is visible.
-      if (m.containsKey('controlUnitId') &&
-          (m['controlUnitId'] as String?)?.isNotEmpty == true) {
-        _controlUnitId.text = m['controlUnitId'] as String;
-      } else if (_isEditing && m.containsKey('id')) {
-        _controlUnitId.text = m['id']?.toString() ?? '';
-      }
-
-      // When editing, only lock name and controlUnitId. For QR-prefill
+      // When editing, only lock name. For QR-prefill
       // (not editing) retain the previous per-field prefill locking.
       if (_isEditing) {
         if (_name.text.isNotEmpty) _prefilledName = true;
-        if (_controlUnitId.text.isNotEmpty) _prefilledControlUnitId = true;
         // Populate other fields but don't set their _prefilled flags so they
         // remain editable.
         if (m.containsKey('macAddress') &&
@@ -180,14 +242,15 @@ class _CreateControlUnitScreenState
         }
         if (m.containsKey('lidarNozzleDistance') &&
             m['lidarNozzleDistance'] != null) {
-          _lidarNozzleDistance.text = m['lidarNozzleDistance'].toString();
+          _prefill(
+              _lidarNozzleDistance, m['lidarNozzleDistance'], 'lidar');
         }
         if (m.containsKey('mountingHeight') && m['mountingHeight'] != null) {
-          _mountHeightOfLidar.text = m['mountingHeight'].toString();
+          _prefill(_mountHeightOfLidar, m['mountingHeight'], 'mount');
         }
         if (m.containsKey('ultrasonicDistance') &&
             m['ultrasonicDistance'] != null) {
-          _ultrasonicDistance.text = m['ultrasonicDistance'].toString();
+          _prefill(_ultrasonicDistance, m['ultrasonicDistance'], 'ultra');
         }
       } else {
         // Not editing: treat values as QR-prefilled and lock fields that
@@ -196,11 +259,6 @@ class _CreateControlUnitScreenState
             (m['name'] as String?)?.isNotEmpty == true) {
           _name.text = m['name'] as String;
           _prefilledName = true;
-        }
-        if (m.containsKey('controlUnitId') &&
-            (m['controlUnitId'] as String?)?.isNotEmpty == true) {
-          _controlUnitId.text = m['controlUnitId'] as String;
-          _prefilledControlUnitId = true;
         }
         if (m.containsKey('macAddress') &&
             (m['macAddress'] as String?)?.isNotEmpty == true) {
@@ -229,16 +287,17 @@ class _CreateControlUnitScreenState
         }
         if (m.containsKey('lidarNozzleDistance') &&
             m['lidarNozzleDistance'] != null) {
-          _lidarNozzleDistance.text = m['lidarNozzleDistance'].toString();
+          _prefill(
+              _lidarNozzleDistance, m['lidarNozzleDistance'], 'lidar');
           _prefilledLidarNozzle = true;
         }
         if (m.containsKey('mountingHeight') && m['mountingHeight'] != null) {
-          _mountHeightOfLidar.text = m['mountingHeight'].toString();
+          _prefill(_mountHeightOfLidar, m['mountingHeight'], 'mount');
           _prefilledMountHeight = true;
         }
         if (m.containsKey('ultrasonicDistance') &&
             m['ultrasonicDistance'] != null) {
-          _ultrasonicDistance.text = m['ultrasonicDistance'].toString();
+          _prefill(_ultrasonicDistance, m['ultrasonicDistance'], 'ultra');
           _prefilledUltrasonic = true;
         }
       }
@@ -265,27 +324,6 @@ class _CreateControlUnitScreenState
       // access or decoding fails while populating MAC cache.
       debugPrint('CreateControlUnitScreen: error populating existing MACs: $e');
       debugPrint('stack: $st');
-    }
-
-    // Build a multi-page wizard. Visible pages depend on selected sensor type:
-    // - sensor 'lidar' -> pages [0,1,2]
-    // - sensor 'ultrasonic' -> pages [0,3]
-    List<int> visiblePages() {
-      final v = <int>[0];
-      if (_sensorType == 'lidar') {
-        v.addAll([1, 2]);
-      } else {
-        v.addAll([1, 3]);
-      }
-      return v;
-    }
-
-    final visible = visiblePages();
-    final totalPages = visible.length;
-
-    int visiblePositionOf(int pageIndex) {
-      final pos = visible.indexOf(pageIndex);
-      return pos < 0 ? 0 : pos;
     }
 
     return Scaffold(
@@ -321,43 +359,24 @@ class _CreateControlUnitScreenState
                                     MediaQuery.of(context).viewInsets.bottom),
                             child: Column(
                               children: [
-                                const Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text('Control Unit name'),
-                                ),
                                 TextFormField(
                                   controller: _name,
                                   enabled: !_prefilledName,
                                   decoration: const InputDecoration(
+                                      labelText: 'Control Unit name',
                                       hintText: 'Control Unit name'),
                                   validator: (v) => (v == null || v.isEmpty)
                                       ? 'Enter name'
                                       : null,
                                 ),
                                 const SizedBox(height: 12),
-                                const Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text('Control unit ID'),
-                                ),
-                                TextFormField(
-                                  controller: _controlUnitId,
-                                  enabled:
-                                      !_prefilledControlUnitId && !_isEditing,
-                                  decoration: const InputDecoration(
-                                      hintText: 'Control unit ID'),
-                                  validator: (v) => (v == null || v.isEmpty)
-                                      ? 'Enter control unit id'
-                                      : null,
-                                ),
+                                  const SizedBox(height: 8),
                                 const SizedBox(height: 8),
-                                const Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Text('MAC address'),
-                                ),
                                 TextFormField(
                                   controller: _macAddress,
                                   enabled: !_prefilledMac,
                                   decoration: const InputDecoration(
+                                      labelText: 'MAC address',
                                       hintText: 'MAC address'),
                                   validator: (v) {
                                     final val = v?.trim() ?? '';
@@ -420,8 +439,7 @@ class _CreateControlUnitScreenState
                                                 child: Text('None')),
                                             ...sprayers.map((e) => DropdownMenuItem(
                                                 value: e.id,
-                                                child: Text(
-                                                    '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
+                                                child: Text(e.name)))
                                           ],
                                           onChanged: _prefilledLinkedSprayer
                                               ? null
@@ -484,8 +502,7 @@ class _CreateControlUnitScreenState
                                                 child: Text('None')),
                                             ...tractors.map((e) => DropdownMenuItem(
                                                 value: e.id,
-                                                child: Text(
-                                                    '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
+                                                child: Text(e.name)))
                                           ],
                                           onChanged: _prefilledLinkedTractor
                                               ? null
@@ -592,7 +609,7 @@ class _CreateControlUnitScreenState
                                           // the first visible page (main page).
                                           WidgetsBinding.instance
                                               .addPostFrameCallback((_) {
-                                            final v = visiblePages();
+                                            final v = visible;
                                             if (!v.contains(_currentPage)) {
                                               _pageController.animateToPage(
                                                   v.first,
@@ -667,8 +684,11 @@ class _CreateControlUnitScreenState
                                       DropdownMenuItem(
                                           value: 'ft', child: Text('ft')),
                                     ],
-                                    onChanged: (v) => setState(() =>
-                                        _lidarNozzleDistanceUnit = v ?? 'm'),
+                                    onChanged: (v) => _onUnitChanged(
+                                        v,
+                                        _lidarNozzleDistanceUnit,
+                                        _lidarNozzleDistance,
+                                        (u) => _lidarNozzleDistanceUnit = u),
                                     decoration:
                                         const InputDecoration(hintText: 'Unit'),
                                   ),
@@ -727,8 +747,11 @@ class _CreateControlUnitScreenState
                                       DropdownMenuItem(
                                           value: 'ft', child: Text('ft')),
                                     ],
-                                    onChanged: (v) => setState(
-                                        () => _mountHeightUnit = v ?? 'm'),
+                                    onChanged: (v) => _onUnitChanged(
+                                        v,
+                                        _mountHeightUnit,
+                                        _mountHeightOfLidar,
+                                        (u) => _mountHeightUnit = u),
                                     decoration:
                                         const InputDecoration(hintText: 'Unit'),
                                   ),
@@ -788,8 +811,11 @@ class _CreateControlUnitScreenState
                                       DropdownMenuItem(
                                           value: 'ft', child: Text('ft')),
                                     ],
-                                    onChanged: (v) => setState(() =>
-                                        _ultrasonicDistanceUnit = v ?? 'm'),
+                                    onChanged: (v) => _onUnitChanged(
+                                        v,
+                                        _ultrasonicDistanceUnit,
+                                        _ultrasonicDistance,
+                                        (u) => _ultrasonicDistanceUnit = u),
                                     decoration:
                                         const InputDecoration(hintText: 'Unit'),
                                   ),
@@ -923,9 +949,6 @@ class _CreateControlUnitScreenState
                                   'name': _name.text,
                                   'userId': currentUserId,
                                   'status': 'vacant',
-                                  'controlUnitId': _controlUnitId.text.isEmpty
-                                      ? null
-                                      : _controlUnitId.text,
                                   'macAddress': _macAddress.text.isEmpty
                                       ? null
                                       : _macAddress.text,

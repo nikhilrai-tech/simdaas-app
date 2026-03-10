@@ -311,8 +311,7 @@ class _EditJobScreenState extends ConsumerState<EditJobScreen> {
                               items: controlUnits
                                   .map((e) => DropdownMenuItem(
                                       value: e.id,
-                                      child: Text(
-                                          '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
+                                      child: Text(e.name)))
                                   .toList(),
                               onChanged: (v) => ref
                                   .read(editJobFormProvider(widget.jobModel.id)

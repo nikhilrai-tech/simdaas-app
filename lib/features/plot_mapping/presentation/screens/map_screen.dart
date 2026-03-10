@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import '../providers/map_state_providers.dart';
 // Plot model and auth service used in save helper
 import 'package:simdaas/core/services/location_service.dart';
+import '../../data/models/plot_model.dart';
 import '../widgets/plot_save_sheet.dart';
 import '../widgets/map_layers.dart';
 
@@ -21,12 +22,16 @@ class MapScreen extends ConsumerStatefulWidget {
   // close-up editing while preventing excessive zoom-out.
   final double minZoom;
   final double maxZoom;
+  final List<LatLng>? initialPoints;
+  final PlotModel? existingPlot;
 
   const MapScreen({
     super.key,
     this.initialCenter,
     this.minZoom = 2.0,
     this.maxZoom = 22.0,
+    this.initialPoints,
+    this.existingPlot,
   });
 
   @override
@@ -167,22 +172,37 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void initState() {
     super.initState();
-    // Clear any previous polygon state so each new map session starts fresh
+    // Initialize polygon state
     try {
-      ref.read(mapStateProvider.notifier).clearAll();
+      if (widget.initialPoints != null && widget.initialPoints!.isNotEmpty) {
+        ref.read(mapStateProvider.notifier).setPoints(widget.initialPoints!);
+      } else {
+        ref.read(mapStateProvider.notifier).clearAll();
+      }
     } catch (e, st) {
-      debugPrint('map_screen.initState.clearAll error: $e\n$st');
+      debugPrint('map_screen.initState.initPoints error: $e\n$st');
     }
-    // move the map after first frame if an initial center was provided
+    // move the map after first frame if initial data provided
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final c = widget.initialCenter;
-      if (c != null) {
-        _mapController.move(c, 18.0);
+      if (widget.initialPoints != null && widget.initialPoints!.isNotEmpty) {
+        // center on polygon
+        final avgLat = widget.initialPoints!
+                .map((p) => p.latitude)
+                .reduce((a, b) => a + b) /
+            widget.initialPoints!.length;
+        final avgLng = widget.initialPoints!
+                .map((p) => p.longitude)
+                .reduce((a, b) => a + b) /
+            widget.initialPoints!.length;
+        _mapController.move(LatLng(avgLat, avgLng), 18.0);
+      } else if (widget.initialCenter != null) {
+        _mapController.move(widget.initialCenter!, 18.0);
       }
     });
 
-    // If no initial center was passed, try to move to device's current location
-    if (widget.initialCenter == null) {
+    // If no initial data, try to move to device's current location
+    if (widget.initialCenter == null &&
+        (widget.initialPoints == null || widget.initialPoints!.isEmpty)) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         try {
           final loc = await LocationService().getCurrentLocation();
@@ -361,7 +381,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
 
     final saved =
-        await showPlotSaveSheet(context, ref, normalizedPoints, _computeAreaHa);
+        await showPlotSaveSheet(context, ref, normalizedPoints, _computeAreaHa, existingPlot: widget.existingPlot);
     if (saved && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -539,15 +559,23 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               children: [
                 Card(
                   elevation: 2,
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    side: BorderSide(color: Colors.grey.shade300),
+                  ),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: Row(children: [
                       Expanded(
                         child: TextField(
                           controller: _searchCtrl,
                           focusNode: _searchFocus,
+                          style: const TextStyle(color: Colors.black, fontSize: 14),
+                          cursorColor: Colors.black,
                           decoration: const InputDecoration(
                             hintText: 'Search location or lat,lng',
+                            hintStyle: TextStyle(color: Colors.black38, fontSize: 14),
                             border: InputBorder.none,
                           ),
                           onSubmitted: (text) {
@@ -561,7 +589,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           child: SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                           ),
                         )
                       else
@@ -569,7 +597,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                           onPressed: () {
                             _navigateToLocation(_searchCtrl.text.trim());
                           },
-                          icon: const Icon(Icons.search),
+                          icon: const Icon(Icons.search, color: Colors.black54),
                         ),
                     ]),
                   ),

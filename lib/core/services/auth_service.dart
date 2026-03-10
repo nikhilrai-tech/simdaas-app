@@ -57,11 +57,11 @@ class AuthService extends ChangeNotifier {
   Map<String, dynamic>? get currentUserMap => _userData;
   bool get isInitialized => _initialized;
 
-  Future<bool> signIn(String username, String password) async {
+  Future<bool> signIn(String usernameOrEmail, String password) async {
     // Postman collection: POST {{baseUrl}}/api/auth/login/ -> returns { access, refresh }
     // IMPORTANT: requiresAuth = false - you can't be authenticated before logging in!
     final dataRaw = await _api.postJson('/api/auth/login/',
-        jsonBody: {'username': username, 'password': password},
+        jsonBody: {'email': usernameOrEmail, 'password': password},
         requiresAuth: false);
     debugPrint('AuthService.signIn -> data: ${dataRaw ?? '<empty>'}');
     if (dataRaw is Map<String, dynamic>) {

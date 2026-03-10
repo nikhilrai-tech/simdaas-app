@@ -13,6 +13,7 @@ import '../features/data_monitoring/presentation/screens/monitoring_screen.dart'
 import '../features/reports/presentation/screens/reports_list_screen.dart';
 import '../features/equipments/presentation/screens/create_control_unit_screen.dart';
 import '../features/equipments/presentation/screens/scan_control_unit_screen.dart';
+import '../features/reports/presentation/providers/session_providers.dart';
 
 /// Temporary dashboard that resembles the main three-button dashboard but
 /// includes a quick control-centres status card for development/testing.
@@ -48,89 +49,72 @@ class TempDashboard extends ConsumerWidget {
             // Header gradient and emblem
             Column(
               children: [
+                // Header Section - More informational, less button-like
                 Container(
-                  height: 160,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Theme.of(context).colorScheme.primary.withAlpha(40),
-                        Theme.of(context).colorScheme.primary.withAlpha(15),
-                      ],
-                    ),
-                    borderRadius: const BorderRadius.vertical(
-                      bottom: Radius.circular(20),
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                    child: Row(
-                      children: [
-                        // Emblem
-                        Container(
-                          width: 84,
-                          height: 84,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                Theme.of(context).colorScheme.primary,
-                                Theme.of(context).colorScheme.secondary,
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _getGreeting(),
+                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurface.withAlpha(178),
+                                    fontWeight: FontWeight.w500,
+                                  ),
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .primary
-                                    .withAlpha(40),
-                                blurRadius: 12,
-                                offset: const Offset(0, 6),
-                              )
-                            ],
-                          ),
-                          child: Center(
-                            child: Icon(
-                              Icons.dashboard_customize,
-                              color: Colors.white,
-                              size: 36,
+                            const SizedBox(height: 4),
+                            Text(
+                              'Welcome',
+                              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: Theme.of(context).colorScheme.onSurface,
+                                    fontSize: 32,
+                                  ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        // Title
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Welcome',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w700),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primary.withAlpha(25),
+                                borderRadius: BorderRadius.circular(20),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Quick access to control centres',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.info_outline,
+                                    size: 14,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Quick access to control centres',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.primary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      // Decorative Element instead of a button-like emblem
+                      Opacity(
+                        opacity: 0.15,
+                        child: Icon(
+                          Icons.dashboard_customize,
+                          size: 80,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 // Content area
@@ -215,6 +199,13 @@ class TempDashboard extends ConsumerWidget {
     return parts.join(' • ');
   }
 
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  }
+
   String _capitalize(String s) =>
       s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 }
@@ -279,6 +270,7 @@ class _ControlUnitsListScreen extends ConsumerStatefulWidget {
 class _ControlUnitsListScreenState
     extends ConsumerState<_ControlUnitsListScreen> {
   TelemetryService? _telemetrySvc;
+  String _deviceFilter = 'all'; // 'all', 'active', 'inactive'
   @override
   void initState() {
     super.initState();
@@ -335,154 +327,255 @@ class _ControlUnitsListScreenState
 
     return Scaffold(
       appBar: AppBar(title: const Text('Active Devices')),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(12),
-        itemCount: widget.items.length,
-        separatorBuilder: (_, __) => const Divider(),
-        itemBuilder: (context, i) {
-          final cu = widget.items[i];
-          final linkedPlotId = (cu.linkedPlotId ?? '').toString();
-          final linkedPlotName =
-              _extractPlotNameFromLinked(linkedPlotId, plotMap);
-          return activeAsync.when(
-            data: (activeList) {
-              final deviceId = extractDeviceId(cu);
-              final deviceIdNorm = deviceId;
-              if (deviceId.isEmpty) {
-                try {
-                  // Log helpful properties instead of the instance to inspect why
-                  // an id couldn't be extracted.
-                  final dyn = cu as dynamic;
-                  final mac = (() {
-                    try {
-                      return dyn.macAddress ?? dyn.mac ?? dyn['mac'];
-                    } catch (_) {
-                      return null;
-                    }
-                  })();
-                  final controlUnitId = (() {
-                    try {
-                      return dyn.controlUnitId ??
-                          dyn['controlUnitId'] ??
-                          dyn['control_unit_id'];
-                    } catch (_) {
-                      return null;
-                    }
-                  })();
-                  final idField = (() {
-                    try {
-                      return dyn.id ?? dyn['id'];
-                    } catch (_) {
-                      return null;
-                    }
-                  })();
-                  debugPrint(
-                      'ActiveDevices.missingId at index $i: mac=${safeStringify(mac)} controlUnitId=${safeStringify(controlUnitId)} id=${safeStringify(idField)} raw=${safeStringify(cu)}');
-                } catch (_) {}
-              }
-              // Debug: show what the UI compares
-              try {
-                final activeKeys =
-                    activeList.map((t) => canonicalizeMac(t.deviceId)).toSet();
-                debugPrint(
-                    'ActiveDevices.compare: displayId=${safeStringify(deviceId)} canonical=${safeStringify(deviceIdNorm)} activeKeys=${safeStringify(activeKeys)}');
-              } catch (_) {}
-              final activeKeys =
-                  activeList.map((t) => canonicalizeMac(t.deviceId)).toSet();
-              final isActive = deviceIdNorm.isNotEmpty
-                  ? activeKeys.contains(deviceIdNorm)
-                  : false;
-              final statusText = isActive ? 'online' : 'offline';
-              final displayId = deviceId.isNotEmpty
-                  ? deviceId
-                  : (() {
-                      try {
-                        if (cu is Map) {
-                          return (cu['controlUnitId'] ??
-                                  cu['control_unit_id'] ??
-                                  cu['id'] ??
-                                  '')
-                              .toString();
-                        }
-                        try {
-                          return (cu.controlUnitId ?? '').toString();
-                        } catch (_) {
-                          return '';
-                        }
-                      } catch (_) {
-                        return '';
-                      }
-                    })();
-
-              return ListTile(
-                title: Text((cu.name ?? 'Unnamed').toString()),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      body: Column(
+        children: [
+          // Device Status Filter Chips
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Filter by Status:',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Row(
                   children: [
-                    if (displayId.isNotEmpty) Text('ID: $displayId'),
-                    if (linkedPlotId.isNotEmpty)
-                      Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
-                    Text('Status: $statusText'),
+                    FilterChip(
+                      label: const Text('All'),
+                      selected: _deviceFilter == 'all',
+                      selectedColor:
+                          Theme.of(context).colorScheme.primary.withAlpha(50),
+                      onSelected: (s) => setState(() => _deviceFilter = 'all'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: const Text('Active'),
+                      avatar: _deviceFilter == 'active'
+                          ? const Icon(Icons.check_circle, size: 16)
+                          : null,
+                      selected: _deviceFilter == 'active',
+                      selectedColor: Colors.green.withAlpha(50),
+                      onSelected: (s) =>
+                          setState(() => _deviceFilter = 'active'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: const Text('Non-active'),
+                      selected: _deviceFilter == 'inactive',
+                      selectedColor: Colors.orange.withAlpha(50),
+                      onSelected: (s) =>
+                          setState(() => _deviceFilter = 'inactive'),
+                    ),
                   ],
                 ),
-                trailing: Icon(
-                  isActive ? Icons.wifi : Icons.wifi_off,
-                  color: isActive ? Colors.green : Colors.grey,
-                ),
-                onTap: deviceIdNorm.isNotEmpty
-                    ? () {
-                        // Try to extract a usable plot id from the linkedPlotId
-                        String? plotIdForNav;
-                        try {
-                          if (linkedPlotId.isNotEmpty) {
-                            final idMatch =
-                                RegExp(r'id\s*[:=]\s*([0-9A-Za-z-]+)')
-                                    .firstMatch(linkedPlotId);
-                            if (idMatch != null) {
-                              plotIdForNav = idMatch.group(1);
-                            } else {
-                              plotIdForNav = linkedPlotId;
-                            }
-                          }
-                        } catch (_) {}
+              ],
+            ),
+          ),
+          Expanded(
+            child: activeAsync.when(
+              data: (activeList) {
+                final activeKeys = activeList
+                    .map((t) => canonicalizeMac(t.deviceId))
+                    .toSet();
 
-                        Navigator.of(context).push(MaterialPageRoute(
-                            builder: (_) => MonitoringScreen(
-                                deviceId: deviceIdNorm, plotId: plotIdForNav)));
-                      }
-                    : null,
-              );
-            },
-            loading: () => ListTile(
-              title: Text((cu.name ?? 'Unnamed').toString()),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if ((cu.controlUnitId ?? '').toString().isNotEmpty)
-                    Text('ID: ${cu.controlUnitId}'),
-                  if (linkedPlotId.isNotEmpty)
-                    Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
-                  Text('Status: offline'),
-                ],
-              ),
-              trailing: Icon(Icons.wifi_off, color: Colors.grey),
+                final filteredItems = widget.items.where((cu) {
+                  final deviceId = extractDeviceId(cu);
+                  final isActive = deviceId.isNotEmpty &&
+                      activeKeys.contains(canonicalizeMac(deviceId));
+                  
+                  if (_deviceFilter == 'active' && !isActive) return false;
+                  if (_deviceFilter == 'inactive' && isActive) return false;
+                  return true;
+                }).toList();
+
+                if (filteredItems.isEmpty) {
+                  return const Center(child: Text('No devices match filter'));
+                }
+
+                return ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: filteredItems.length,
+                  separatorBuilder: (_, __) => const Divider(),
+                  itemBuilder: (context, i) {
+                    final cu = filteredItems[i];
+                    final linkedPlotId = (cu.linkedPlotId ?? '').toString();
+                    final linkedPlotName =
+                        _extractPlotNameFromLinked(linkedPlotId, plotMap);
+
+                    final deviceId = extractDeviceId(cu);
+                    final deviceIdNorm = deviceId;
+                    final isActive = deviceIdNorm.isNotEmpty &&
+                        activeKeys.contains(canonicalizeMac(deviceIdNorm));
+                    final statusText = isActive ? 'online' : 'offline';
+                    final displayId = deviceId.isNotEmpty
+                        ? deviceId
+                        : (cu.controlUnitId ?? cu.id).toString();
+
+                    return ListTile(
+                      title: Text(cu.name.toString()),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (displayId.isNotEmpty) Text('ID: $displayId'),
+                          if (linkedPlotId.isNotEmpty)
+                            Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
+                          Text('Status: $statusText'),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isActive) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withAlpha(40),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.green, width: 1),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.circle,
+                                      color: Colors.green, size: 8),
+                                  const SizedBox(width: 4),
+                                  const Text('LIVE',
+                                      style: TextStyle(
+                                          color: Colors.green,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton(
+                              onPressed: () async {
+                                int? sessionIdToEnd = cu.activeSessionId;
+
+                                // Try to resolve session ID if null
+                                if (sessionIdToEnd == null && isActive) {
+                                  try {
+                                    final sessions = ref.read(activeSessionsListProvider).asData?.value;
+                                    if (sessions != null && deviceIdNorm.isNotEmpty) {
+                                      final normId = canonicalizeMac(deviceIdNorm);
+                                      for (final s in sessions) {
+                                        final scu = s['control_unit'];
+                                        if (scu != null) {
+                                          final mac = (scu['mac_addr'] ?? scu['mac_address'])?.toString();
+                                          if (mac != null && canonicalizeMac(mac) == normId) {
+                                            sessionIdToEnd = s['id'] as int?;
+                                            break;
+                                          }
+                                        }
+                                      }
+                                    }
+                                  } catch (_) {}
+                                }
+
+                                if (sessionIdToEnd == null) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('No active session ID found.')));
+                                  }
+                                  return;
+                                }
+
+                                final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                          title: const Text('End Session?'),
+                                          content: Text(
+                                              'Are you sure you want to end the active session for ${cu.name}?'),
+                                          actions: [
+                                            TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(ctx, false),
+                                                child: const Text('Cancel')),
+                                            TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(ctx, true),
+                                                child: const Text('End')),
+                                          ],
+                                        ));
+                                if (confirmed == true) {
+                                  try {
+                                    await ref
+                                        .read(eq_provs.equipmentControllerProvider)
+                                        .endSession(sessionIdToEnd);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                              content: Text(
+                                                  'Session ended successfully')));
+                                    }
+                                  } catch (err) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(SnackBar(
+                                              content: Text('Error: $err')));
+                                    }
+                                  }
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 0),
+                                minimumSize: const Size(60, 32),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8)),
+                                elevation: 2,
+                              ),
+                              child: const Text('End',
+                                  style: TextStyle(
+                                      fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                          ]
+ else
+                            Icon(
+                              isActive ? Icons.wifi : Icons.wifi_off,
+                              color: isActive ? Colors.green : Colors.grey,
+                            ),
+                        ],
+                      ),
+                      onTap: deviceIdNorm.isNotEmpty
+                          ? () {
+                              // Try to extract a usable plot id from the linkedPlotId
+                              String? plotIdForNav;
+                              try {
+                                if (linkedPlotId.isNotEmpty) {
+                                  final idMatch =
+                                      RegExp(r'id\s*[:=]\s*([0-9A-Za-z-]+)')
+                                          .firstMatch(linkedPlotId);
+                                  if (idMatch != null) {
+                                    plotIdForNav = idMatch.group(1);
+                                  } else {
+                                    plotIdForNav = linkedPlotId;
+                                  }
+                                }
+                              } catch (_) {}
+
+                              Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => MonitoringScreen(
+                                      deviceId: deviceIdNorm,
+                                      plotId: plotIdForNav)));
+                            }
+                          : null,
+                    );
+                  },
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (err, stack) => Center(child: Text('Error: $err')),
             ),
-            error: (e, st) => ListTile(
-              title: Text((cu.name ?? 'Unnamed').toString()),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if ((cu.controlUnitId ?? '').toString().isNotEmpty)
-                    Text('ID: ${cu.controlUnitId}'),
-                  if (linkedPlotId.isNotEmpty)
-                    Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
-                  Text('Status: offline'),
-                ],
-              ),
-              trailing: Icon(Icons.wifi_off, color: Colors.grey),
-            ),
-          );
-        },
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _startDeviceSetupFlow(context),

@@ -5,7 +5,7 @@ import 'package:simdaas/core/services/api_exception.dart';
 import '../models/user_model.dart';
 
 abstract class AuthRemoteDataSource {
-  Future<UserModel> signIn(String email, String password);
+  Future<UserModel> signIn(String usernameOrEmail, String password);
   Future<void> logout(String? token);
 }
 
@@ -14,10 +14,10 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   AuthRemoteDataSourceImpl(this.api);
 
   @override
-  Future<UserModel> signIn(String email, String password) async {
+  Future<UserModel> signIn(String usernameOrEmail, String password) async {
     // Postman: POST /api/auth/login/ with { username, password } -> returns { access, refresh }
     final dataRaw = await api.postJson('/api/auth/login/',
-        jsonBody: {'username': email, 'password': password},
+        jsonBody: {'username': usernameOrEmail, 'password': password},
         requiresAuth: false);
     final data =
         (dataRaw is Map<String, dynamic>) ? dataRaw : <String, dynamic>{};
@@ -42,7 +42,9 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
           debugPrint(st.toString());
         }
       }
-      return UserModel(id: id, email: email);
+      // If logging in with username, email field might be username string initially
+      // The profile fetch later will get the actual email
+      return UserModel(id: id, email: usernameOrEmail);
     }
     throw ApiException(null, 'Authentication failed', path: '/api/auth/login/');
   }

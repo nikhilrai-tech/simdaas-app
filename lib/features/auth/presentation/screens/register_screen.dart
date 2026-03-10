@@ -38,146 +38,205 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Register')),
-      body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              TextFormField(
-                controller: _username,
-                decoration: const InputDecoration(labelText: 'Username'),
-                maxLength: 100,
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Username required';
-                  if (v.trim().length > 100) return 'Username too long';
-                  if (!_usernameRegex.hasMatch(v.trim())) {
-                    return 'Invalid characters in username';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _email,
-                decoration: const InputDecoration(labelText: 'Email'),
-                keyboardType: TextInputType.emailAddress,
-                maxLength: 254,
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Email required';
-                  final t = v.trim();
-                  if (t.length > 254) return 'Email too long';
-                  if (!_emailRegex.hasMatch(t)) return 'Invalid email format';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _password,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  helperText: 'Minimum 8 chars, include letters and numbers',
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscurePassword
-                        ? Icons.visibility
-                        : Icons.visibility_off),
-                    onPressed: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                ),
-                obscureText: _obscurePassword,
-                maxLength: 128,
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Password required';
-                  final t = v;
-                  if (t.length < 8) {
-                    return 'Password must be at least 8 characters';
-                  }
-                  if (t.length > 128) return 'Password too long';
-                  if (!_passwordStrongRegex.hasMatch(t)) {
-                    return 'Password must include letters and numbers';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _confirm,
-                decoration: InputDecoration(
-                    labelText: 'Confirm password',
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscureConfirm
-                          ? Icons.visibility
-                          : Icons.visibility_off),
-                      onPressed: () =>
-                          setState(() => _obscureConfirm = !_obscureConfirm),
-                    )),
-                obscureText: _obscureConfirm,
-                maxLength: 128,
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Confirm password';
-                  if (v.length < 8) {
-                    return 'Password must be at least 8 characters';
-                  }
-                  if (v.length > 128) return 'Password too long';
-                  if (v != _password.text) return 'Passwords do not match';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              _loading
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
-                      onPressed: () async {
-                        if (!_formKey.currentState!.validate()) return;
-                        if (_password.text != _confirm.text) {
-                          showInfoSnackBar(context, 'Passwords do not match');
-                          return;
-                        }
-                        setState(() => _loading = true);
-                        final svc = ref.read(authServiceProvider);
-                        try {
-                          await svc.register(
-                              _username.text.trim(),
-                              _email.text.trim(),
-                              _password.text.trim(),
-                              _confirm.text.trim());
-                          setState(() => _loading = false);
-                          if (mounted) {
-                            Navigator.of(context).pushReplacementNamed(
-                                '/verify-email',
-                                arguments: _email.text.trim());
-                          }
-                        } catch (e) {
-                          setState(() => _loading = false);
-                          // Diagnostic logging: print exception shape so we can
-                          // determine whether the ApiException carries a body.
-                          if (e is ApiException) {
-                            debugPrint(
-                                'register: caught ApiException type=${e.runtimeType} status=${e.statusCode} body=${e.body}');
-                            final err =
-                                ApiError.fromResponse(e.statusCode, e.body);
-                            final combined = err.combinedMessages();
+    final colorScheme = Theme.of(context).colorScheme;
 
-                            // Show the combined API message in a SnackBar so the
-                            // same content is visible in non-modal UI. Use the
-                            // existing helper for consistent styling.
-                            showGenericErrorSnackBar(context, combined);
-                          } else {
-                            debugPrint('register: caught non-ApiException: $e');
-                            showGenericErrorSnackBar(context, e.toString());
-                          }
-                        }
-                      },
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: 24.0, vertical: 12.0),
-                        child: Text('Register'),
-                      ),
-                    )
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              colorScheme.primary,
+              colorScheme.primary.withOpacity(0.8),
+              colorScheme.surface,
+              colorScheme.surface,
             ],
+            stops: const [0.0, 0.4, 0.4, 1.0],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Back Button / App Title
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Create Account',
+                        style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 24,
+                            ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+
+                  // Register form card
+                  Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 30,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'Register',
+                              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 32),
+                            TextFormField(
+                              controller: _username,
+                              decoration: const InputDecoration(
+                                labelText: 'Username',
+                                prefixIcon: Icon(Icons.person),
+                              ),
+                              maxLength: 30,
+                              validator: (v) {
+                                if (v == null || v.isEmpty) return 'Username required';
+                                final t = v.trim();
+                                if (t.length > 30) return 'Username too long';
+                                if (!_usernameRegex.hasMatch(t)) {
+                                  return 'Invalid characters in username';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _email,
+                              decoration: const InputDecoration(
+                                labelText: 'Email',
+                                prefixIcon: Icon(Icons.email),
+                              ),
+                              keyboardType: TextInputType.emailAddress,
+                              maxLength: 254,
+                              validator: (v) {
+                                if (v == null || v.isEmpty) return 'Email required';
+                                final t = v.trim();
+                                if (t.length > 254) return 'Email too long';
+                                if (!_emailRegex.hasMatch(t)) return 'Invalid email format';
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _password,
+                              decoration: InputDecoration(
+                                labelText: 'Password',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                helperText: 'Min 8 chars, letters & numbers',
+                                helperMaxLines: 1,
+                                suffixIcon: IconButton(
+                                  icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
+                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                ),
+                              ),
+                              obscureText: _obscurePassword,
+                              maxLength: 128,
+                              validator: (v) {
+                                if (v == null || v.isEmpty) return 'Password required';
+                                final t = v;
+                                if (t.length < 8) return 'Min 8 characters';
+                                if (t.length > 128) return 'Password too long';
+                                if (!_passwordStrongRegex.hasMatch(t)) {
+                                  return 'Letters and numbers required';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _confirm,
+                              decoration: InputDecoration(
+                                labelText: 'Confirm password',
+                                prefixIcon: const Icon(Icons.lock_clock),
+                                suffixIcon: IconButton(
+                                  icon: Icon(_obscureConfirm ? Icons.visibility : Icons.visibility_off),
+                                  onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                                ),
+                              ),
+                              obscureText: _obscureConfirm,
+                              maxLength: 128,
+                              validator: (v) {
+                                if (v == null || v.isEmpty) return 'Confirm password';
+                                if (v != _password.text) return 'Passwords do not match';
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 24),
+                            _loading
+                                ? const Center(child: CircularProgressIndicator())
+                                : ElevatedButton(
+                                    onPressed: () async {
+                                      if (!_formKey.currentState!.validate()) return;
+                                      setState(() => _loading = true);
+                                      final svc = ref.read(authServiceProvider);
+                                      try {
+                                        await svc.register(
+                                            _username.text.trim(),
+                                            _email.text.trim(),
+                                            _password.text.trim(),
+                                            _confirm.text.trim());
+                                        setState(() => _loading = false);
+                                        if (mounted) {
+                                          Navigator.of(context).pushReplacementNamed(
+                                              '/verify-email',
+                                              arguments: _email.text.trim());
+                                        }
+                                      } catch (e) {
+                                        setState(() => _loading = false);
+                                        if (e is ApiException) {
+                                          final err = ApiError.fromResponse(e.statusCode, e.body);
+                                          showGenericErrorSnackBar(context, err.combinedMessages());
+                                        } else {
+                                          showGenericErrorSnackBar(context, e.toString());
+                                        }
+                                      }
+                                    },
+                                    child: const Text('Register'),
+                                  ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    child: const Text("Already have an account? Sign In"),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

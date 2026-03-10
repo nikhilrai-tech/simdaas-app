@@ -31,8 +31,9 @@ class PlotRemoteDataSourceImpl implements PlotRemoteDataSource {
       'row_spacing': plot.rowSpacing,
       'tree_count': plot.treeCount,
       'user_area_acre': plot.area,
+      'approxArea': plot.area,
       // backend sample used a string for bed_height; convert to string if present
-      'bed_height': plot.bedHeight?.toString(),
+      'bed_height': plot.bedHeight,
     };
     await api.postJson('/plot/api/', jsonBody: payload);
   }
@@ -67,6 +68,11 @@ class PlotRemoteDataSourceImpl implements PlotRemoteDataSource {
   @override
   Future<void> updatePlot(PlotModel plot) async {
     final payload = plot.toJson();
+    // backend expects snake_case for some fields if not handled by toJson
+    // Let's ensure bed_height is a string if the backend expects it so
+    if (payload['bedHeight'] != null) {
+      payload['bed_height'] = payload['bedHeight'].toString();
+    }
     // PATCH to the specific plot endpoint; backend expected trailing slash
     await api.patchJson('/plot/api/${plot.id}/', jsonBody: payload);
   }

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'dart:ui' as ui;
 import '../../../plot_mapping/domain/entities/plot.dart';
 
@@ -29,7 +30,7 @@ class PlotSnapshot extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.grey[50],
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+            border: Border.all(color: Colors.grey.withOpacity(0.1)),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
@@ -82,13 +83,35 @@ class PlotSnapshot extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.grey[50],
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+            border: Border.all(color: Colors.grey.withOpacity(0.1)),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            child: CustomPaint(
-              painter: _PlotPreviewPainter(plot!.polygon),
-              size: Size.infinite,
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: _getCentroid(plot!.polygon),
+                initialZoom: 18.0,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.none,
+                ),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate:
+                      'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                  subdomains: const ['a', 'b', 'c'],
+                ),
+                PolygonLayer(
+                  polygons: [
+                    Polygon(
+                      points: plot!.polygon,
+                      color: const Color(0xFF00A36C).withOpacity(0.2),
+                      borderStrokeWidth: 2.0,
+                      borderColor: const Color(0xFF00A36C),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
@@ -98,11 +121,11 @@ class PlotSnapshot extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.9),
+              color: Colors.white.withOpacity(0.9),
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
+                  color: Colors.black.withOpacity(0.05),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 )
@@ -126,66 +149,15 @@ class PlotSnapshot extends StatelessWidget {
       ],
     );
   }
-}
 
-class _PlotPreviewPainter extends CustomPainter {
-  final List<LatLng> points;
-  _PlotPreviewPainter(this.points);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.isEmpty) return;
-
-    // Normalize lat/lng into box
-    final lats = points.map((p) => p.latitude).toList();
-    final lngs = points.map((p) => p.longitude).toList();
-    final minLat = lats.reduce((a, b) => a < b ? a : b);
-    final maxLat = lats.reduce((a, b) => a > b ? a : b);
-    final minLng = lngs.reduce((a, b) => a < b ? a : b);
-    final maxLng = lngs.reduce((a, b) => a > b ? a : b);
-
-    // Add 10% padding
-    final latSpan = (maxLat - minLat) == 0 ? 1e-6 : (maxLat - minLat);
-    final lngSpan = (maxLng - minLng) == 0 ? 1e-6 : (maxLng - minLng);
-    final paddingLat = latSpan * 0.1;
-    final paddingLng = lngSpan * 0.1;
-
-    final visibleMinLat = minLat - paddingLat;
-    final visibleMaxLat = maxLat + paddingLat;
-    final visibleMinLng = minLng - paddingLng;
-    final visibleMaxLng = maxLng + paddingLng;
-
-    final visibleLatRange = visibleMaxLat - visibleMinLat;
-    final visibleLngRange = visibleMaxLng - visibleMinLng;
-
-    final uiPath = ui.Path();
-    for (var i = 0; i < points.length; i++) {
-      final p = points[i];
-      final x = ((p.longitude - visibleMinLng) / visibleLngRange) * size.width;
-      // Latitude increases upwards, screen Y increases downwards
-      final y = size.height -
-          ((p.latitude - visibleMinLat) / visibleLatRange) * size.height;
-      if (i == 0) {
-        uiPath.moveTo(x, y);
-      } else {
-        uiPath.lineTo(x, y);
-      }
+  LatLng _getCentroid(List<LatLng> points) {
+    double sumLat = 0;
+    double sumLng = 0;
+    for (final p in points) {
+      sumLat += p.latitude;
+      sumLng += p.longitude;
     }
-    uiPath.close();
-
-    final paintFill =
-        Paint()..color = const Color(0xFF00A36C).withValues(alpha: 0.2);
-    final paintBorder = Paint()
-      ..color = const Color(0xFF00A36C)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    canvas.drawPath(uiPath, paintFill);
-    canvas.drawPath(uiPath, paintBorder);
+    return LatLng(sumLat / points.length, sumLng / points.length);
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+

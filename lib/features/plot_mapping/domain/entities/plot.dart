@@ -17,6 +17,8 @@ class PlotEntity {
   final LatLng? centroid;
   // bed height in meters
   final double? bedHeight;
+  // creation timestamp
+  final DateTime? createdAt;
 
   PlotEntity({
     required this.id,
@@ -28,5 +30,6 @@ class PlotEntity {
     required this.polygon,
     this.centroid,
     this.bedHeight,
+    this.createdAt,
   });
 }

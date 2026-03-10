@@ -107,4 +107,13 @@ class EquipmentController {
         break;
     }
   }
+
+  Future<void> endSession(int sessionId) async {
+    final repo = ref.read(equipmentRepoProvider);
+    await repo.endSession(sessionId);
+    final currentUserId =
+        ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+    ref.invalidate(equipmentsListProvider(currentUserId));
+    ref.invalidate(controlUnitsProvider(currentUserId));
+  }
 }

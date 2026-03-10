@@ -1,7 +1,39 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:simdaas/core/services/auth_service.dart';
+import '../../../equipments/presentation/providers/equipment_providers.dart';
+import '../../../equipments/presentation/screens/equipment_details_screen.dart';
+import 'dart:async';
 
-class TechnicianDashboardScreen extends StatelessWidget {
+class TechnicianDashboardScreen extends ConsumerStatefulWidget {
   const TechnicianDashboardScreen({super.key});
+
+  @override
+  ConsumerState<TechnicianDashboardScreen> createState() => _TechnicianDashboardScreenState();
+}
+
+class _TechnicianDashboardScreenState extends ConsumerState<TechnicianDashboardScreen> {
+  late final javaTimer = _setupAutoRefresh();
+
+  dynamic _setupAutoRefresh() {
+    return Stream.periodic(const Duration(seconds: 30)).listen((_) {
+      if (mounted) _refreshData();
+    });
+  }
+
+  Future<void> _refreshData() async {
+    final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+    ref.invalidate(equipmentsListProvider(userId));
+    ref.invalidate(controlUnitsProvider(userId));
+  }
+
+  @override
+  void dispose() {
+    if (javaTimer is StreamSubscription) {
+      (javaTimer as StreamSubscription).cancel();
+    }
+    super.dispose();
+  }
 
   void _showHelp(BuildContext context) {
     showDialog(
@@ -50,7 +82,7 @@ class TechnicianDashboardScreen extends StatelessWidget {
               bottom: false,
               child: Row(
                 children: [
-                  // Emblem
+                   // Emblem
                   Container(
                     height: 72,
                     width: 72,
@@ -86,6 +118,11 @@ class TechnicianDashboardScreen extends StatelessWidget {
                     ),
                   ),
                   IconButton(
+                    onPressed: _refreshData,
+                    icon: Icon(Icons.refresh,
+                        color: Colors.white.withAlpha(220)),
+                  ),
+                  IconButton(
                     onPressed: () => _showHelp(context),
                     icon: Icon(Icons.help_outline,
                         color: Colors.white.withAlpha(220)),
@@ -97,94 +134,162 @@ class TechnicianDashboardScreen extends StatelessWidget {
 
           // Content
           Expanded(
-            child: LayoutBuilder(builder: (context, constraints) {
-              final isWide = constraints.maxWidth > 700;
-              final cardWidth = isWide
-                  ? (constraints.maxWidth - 48) / 2
-                  : constraints.maxWidth - 32;
+            child: RefreshIndicator(
+              onRefresh: _refreshData,
+              child: LayoutBuilder(builder: (context, constraints) {
+                final isWide = constraints.maxWidth > 700;
+                final cardWidth = isWide
+                    ? (constraints.maxWidth - 48) / 2
+                    : constraints.maxWidth - 32;
 
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: 1000),
-                    child: Wrap(
-                      spacing: 16,
-                      runSpacing: 16,
-                      children: [
-                        SizedBox(
-                          width: cardWidth,
-                          child: _DashboardCard(
-                            icon: Icons.map_outlined,
-                            title: 'Plots',
-                            subtitle: 'View and manage your plots',
-                            color: colorScheme.primary,
-                            onTap: () =>
-                                Navigator.of(context).pushNamed('/plots'),
+                final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+                final itemsAsync = ref.watch(equipmentsListProvider(userId));
+
+                return SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: 1000),
+                      child: Column(
+                        children: [
+                          itemsAsync.when(
+                            data: (items) {
+                              final active = items.where((e) => e.activeSessionId != null).toList();
+                              if (active.isEmpty) return const SizedBox.shrink();
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 4, bottom: 8),
+                                    child: Text('ACTIVE SESSION', 
+                                      style: TextStyle(
+                                        fontSize: 12, 
+                                        fontWeight: FontWeight.bold, 
+                                        color: colorScheme.primary,
+                                        letterSpacing: 1.2,
+                                      )
+                                    ),
+                                  ),
+                                  ...active.map((e) => Card(
+                                    color: colorScheme.primary.withAlpha(10),
+                                    margin: const EdgeInsets.only(bottom: 16),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      side: BorderSide(color: colorScheme.primary.withAlpha(50)),
+                                    ),
+                                    child: ListTile(
+                                      onTap: () => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => EquipmentDetailsScreen(equipment: e),
+                                        ),
+                                      ),
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                      leading: Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: colorScheme.primary.withAlpha(30),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(Icons.sensors, color: colorScheme.primary),
+                                      ),
+                                      title: Text(e.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                      subtitle: Text('${e.category} • In progress'),
+                                      trailing: ElevatedButton(
+                                        onPressed: () async {
+                                          final confirmed = await showDialog<bool>(
+                                            context: context,
+                                            builder: (ctx) => AlertDialog(
+                                              title: const Text('End Session?'),
+                                              content: Text('Are you sure you want to end the active session for ${e.name}?'),
+                                              actions: [
+                                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                                TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('End')),
+                                              ],
+                                            )
+                                          );
+                                          if (confirmed == true) {
+                                            try {
+                                              await ref.read(equipmentControllerProvider).endSession(e.activeSessionId!);
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  const SnackBar(content: Text('Session ended successfully'))
+                                                );
+                                              }
+                                            } catch (err) {
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(content: Text('Error: $err'))
+                                                );
+                                              }
+                                            }
+                                          }
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.red,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                                          minimumSize: const Size(60, 32),
+                                        ),
+                                        child: const Text('End', style: TextStyle(fontSize: 12)),
+                                      ),
+                                    ),
+                                  )).toList(),
+                                  const Divider(height: 24),
+                                ],
+                              );
+                            },
+                            loading: () => const SizedBox.shrink(),
+                            error: (_, __) => const SizedBox.shrink(),
                           ),
-                        ),
+                          Wrap(
+                            spacing: 16,
+                            runSpacing: 16,
+                            children: [
+                              SizedBox(
+                                width: cardWidth,
+                                child: _DashboardCard(
+                                  icon: Icons.map_outlined,
+                                  title: 'Plots',
+                                  subtitle: 'View and manage your plots',
+                                  color: colorScheme.primary,
+                                  onTap: () =>
+                                      Navigator.of(context).pushNamed('/plots'),
+                                ),
+                              ),
 
-                        SizedBox(
-                          width: cardWidth,
-                          child: _DashboardCard(
-                            icon: Icons.build_circle_outlined,
-                            title: 'Equipments',
-                            subtitle: 'Tools, sensors & maintenance',
-                            color: colorScheme.secondary,
-                            onTap: () => Navigator.of(context)
-                                .pushNamed('/equipment_categories'),
+                              SizedBox(
+                                width: cardWidth,
+                                child: _DashboardCard(
+                                  icon: Icons.build_circle_outlined,
+                                  title: 'Equipments',
+                                  subtitle: 'Tools, sensors & maintenance',
+                                  color: colorScheme.secondary,
+                                  onTap: () => Navigator.of(context)
+                                      .pushNamed('/equipment_categories'),
+                                ),
+                              ),
+
+                              SizedBox(
+                                width: cardWidth,
+                                child: _DashboardCard(
+                                  icon: Icons.help_outline,
+                                  title: 'Help & Support',
+                                  subtitle: 'Docs, FAQs and contact',
+                                  color: colorScheme.primary,
+                                  onTap: () => _showHelp(context),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-
-                        // SizedBox(
-                        //   width: cardWidth,
-                        //   child: _DashboardCard(
-                        //     icon: Icons.sensors,
-                        //     title: 'Sensors',
-                        //     subtitle: 'Live telemetry & diagnostics',
-                        //     color: colorScheme.secondary,
-                        //     onTap: () => Navigator.of(context).pushNamed('/monitoring'),
-                        //   ),
-                        // ),
-
-                        // SizedBox(
-                        //   width: cardWidth,
-                        //   child: _DashboardCard(
-                        //     icon: Icons.miscellaneous_services_outlined,
-                        //     title: 'Maintenance',
-                        //     subtitle: 'Create service requests',
-                        //     color: colorScheme.error,
-                        //     onTap: () => Navigator.of(context).pushNamed('/maintenance'),
-                        //   ),
-                        // ),
-
-                        // SizedBox(
-                        //   width: cardWidth,
-                        //   child: _DashboardCard(
-                        //     icon: Icons.qr_code_scanner,
-                        //     title: 'Scan Device',
-                        //     subtitle: 'Quick connect to control units',
-                        //     color: colorScheme.primaryContainer,
-                        //     onTap: () => Navigator.of(context).pushNamed('/scan_control_unit'),
-                        //   ),
-                        // ),
-
-                        SizedBox(
-                          width: cardWidth,
-                          child: _DashboardCard(
-                            icon: Icons.help_outline,
-                            title: 'Help & Support',
-                            subtitle: 'Docs, FAQs and contact',
-                            color: colorScheme.primary,
-                            onTap: () => _showHelp(context),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            }),
+                );
+              }),
+            ),
           ),
         ],
       ),

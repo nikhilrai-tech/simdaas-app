@@ -11,6 +11,7 @@ abstract class EquipmentRemoteDataSource {
   Future<List<EquipmentEntity>> getTractors(String userId);
   Future<List<EquipmentEntity>> getSprayers(String userId);
   Future<List<EquipmentEntity>> getControlUnits(String userId);
+  Future<void> endSession(int sessionId);
 }
 
 class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
@@ -32,15 +33,13 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['user'] = parsed ?? userId;
       }
       if (data['wheelDiameter'] != null) {
-        final wd = data['wheelDiameter'];
-        bodyMap['wheel_diameter'] =
-            wd is String ? (double.tryParse(wd) ?? wd) : wd;
+        bodyMap['wheel_diameter'] = data['wheelDiameter'];
       }
       if (data['screwsInWheel'] != null) {
         bodyMap['screws_per_wheel'] = data['screwsInWheel'];
       }
       if (data['axleLength'] != null) {
-        bodyMap['axle_length'] = data['axleLength'].toString();
+        bodyMap['axle_length'] = data['axleLength'];
       }
       if (data['contactNumber'] != null) {
         bodyMap['contact_number'] = data['contactNumber'];
@@ -58,31 +57,28 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
       }
       // optional fields - only include when provided
       if (data['nozzleCount'] != null) {
-        final nc = data['nozzleCount'];
-        bodyMap['nozzle_count'] =
-            nc is String ? (double.tryParse(nc) ?? nc) : nc;
+        bodyMap['nozzle_count'] = data['nozzleCount'];
       }
       if (data['tankCapacity'] != null) {
         bodyMap['tank_capacity'] = data['tankCapacity'];
       }
       if (data['wheelDiameter'] != null) {
-        bodyMap['wheel_diameter'] = data['wheelDiameter'].toString();
+        bodyMap['wheel_diameter'] = data['wheelDiameter'];
       }
       if (data['screwsInWheel'] != null) {
         bodyMap['screws_per_wheel'] = data['screwsInWheel'];
       }
       if (data['axleLength'] != null) {
-        bodyMap['axle_length'] = data['axleLength'].toString();
+        bodyMap['axle_length'] = data['axleLength'];
       }
       if (data['hingeToAxle'] != null) {
-        bodyMap['distance_hinge_axle'] = data['hingeToAxle'].toString();
+        bodyMap['distance_hinge_axle'] = data['hingeToAxle'];
       }
       if (data['hingeToNozzle'] != null) {
-        bodyMap['distance_hinge_nozzle'] = data['hingeToNozzle'].toString();
+        bodyMap['distance_hinge_nozzle'] = data['hingeToNozzle'];
       }
       if (data['hingeToControlUnit'] != null) {
-        bodyMap['distance_hinge_control_unit'] =
-            data['hingeToControlUnit'].toString();
+        bodyMap['distance_hinge_control_unit'] = data['hingeToControlUnit'];
       }
 
       await api.postJson('/api/sprayers/', jsonBody: bodyMap);
@@ -105,10 +101,6 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
       if (data['linkedSprayerId'] != null) {
         final p = int.tryParse(data['linkedSprayerId'].toString());
         if (p != null) bodyMap['sprayer'] = p;
-      }
-      if (data['linkedPlotId'] != null) {
-        final p = int.tryParse(data['linkedPlotId'].toString());
-        if (p != null) bodyMap['plot'] = p;
       }
       if (data['linkedTractorId'] != null) {
         final p = int.tryParse(data['linkedTractorId'].toString());
@@ -155,7 +147,7 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['screws_per_wheel'] = data['screwsInWheel'];
       }
       if (data['axleLength'] != null) {
-        bodyMap['axle_length'] = data['axleLength'].toString();
+        bodyMap['axle_length'] = data['axleLength'];
       }
       if (data['contactNumber'] != null) {
         bodyMap['contact_number'] = data['contactNumber'];
@@ -179,23 +171,22 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['tank_capacity'] = data['tankCapacity'];
       }
       if (data['wheelDiameter'] != null) {
-        bodyMap['wheel_diameter'] = data['wheelDiameter'].toString();
+        bodyMap['wheel_diameter'] = data['wheelDiameter'];
       }
       if (data['screwsInWheel'] != null) {
         bodyMap['screws_per_wheel'] = data['screwsInWheel'];
       }
       if (data['axleLength'] != null) {
-        bodyMap['axle_length'] = data['axleLength'].toString();
+        bodyMap['axle_length'] = data['axleLength'];
       }
       if (data['hingeToAxle'] != null) {
-        bodyMap['distance_hinge_axle'] = data['hingeToAxle'].toString();
+        bodyMap['distance_hinge_axle'] = data['hingeToAxle'];
       }
       if (data['hingeToNozzle'] != null) {
-        bodyMap['distance_hinge_nozzle'] = data['hingeToNozzle'].toString();
+        bodyMap['distance_hinge_nozzle'] = data['hingeToNozzle'];
       }
       if (data['hingeToControlUnit'] != null) {
-        bodyMap['distance_hinge_control_unit'] =
-            data['hingeToControlUnit'].toString();
+        bodyMap['distance_hinge_control_unit'] = data['hingeToControlUnit'];
       }
 
       // Use PATCH for partial updates
@@ -235,8 +226,6 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
           if (p != null) bodyMap['tractor'] = p;
         }
       }
-      debugPrint("linkedPlotId check-----------------------------");
-      debugPrint(data.toString());
       if (data.containsKey('linkedPlotId')) {
         final raw = data['linkedPlotId'];
         if (raw == null) {
@@ -370,10 +359,14 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         out.add(EquipmentModel.fromJson(id, normalized));
       }
       return out;
-    } catch (e, st) {
-      debugPrint('EquipmentRemoteDataSource.getControlUnits: error: $e');
-      debugPrint('EquipmentRemoteDataSource.getControlUnits: stack: $st');
+    } catch (e) {
+      debugPrint('Error fetching control units: $e');
       rethrow;
     }
+  }
+
+  @override
+  Future<void> endSession(int sessionId) async {
+    await api.postJson('/jobs/api/sessions/$sessionId/end/');
   }
 }

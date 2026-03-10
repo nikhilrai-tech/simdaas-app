@@ -6,18 +6,26 @@ import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 // job providers intentionally not imported here to avoid circular deps
 import '../../domain/entities/plot.dart';
+import 'package:flutter_map/flutter_map.dart';
 // avoid importing plot_list_screen to prevent a circular import; reimplement a small preview widget here
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
+import 'map_screen.dart';
 
 class PlotPreview extends StatelessWidget {
   final List<LatLng> polygon;
   final double width;
   final double height;
-  const PlotPreview(
-      {super.key, required this.polygon, this.width = 300, this.height = 200});
+  final bool useMap;
+  const PlotPreview({
+    super.key,
+    required this.polygon,
+    this.width = 300,
+    this.height = 200,
+    this.useMap = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -32,17 +40,54 @@ class PlotPreview extends StatelessWidget {
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: width,
         height: height,
-        color: Colors.white,
-        child: CustomPaint(
-          painter: PlotPolygonPainter(polygon),
-          child: const SizedBox.expand(),
-        ),
+        color: useMap ? Colors.black12 : Colors.white,
+        child: useMap
+            ? FlutterMap(
+                options: MapOptions(
+                  initialCenter: _getCentroid(polygon),
+                  initialZoom: 18.0,
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.none,
+                  ),
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                    subdomains: const ['a', 'b', 'c'],
+                  ),
+                  PolygonLayer(
+                    polygons: [
+                      Polygon(
+                        points: polygon,
+                        color: Colors.blue.withOpacity(0.3),
+                        borderStrokeWidth: 2.0,
+                        borderColor: Colors.blue,
+                      ),
+                    ],
+                  ),
+                ],
+              )
+            : CustomPaint(
+                painter: PlotPolygonPainter(polygon),
+                child: const SizedBox.expand(),
+              ),
       ),
     );
+  }
+
+  LatLng _getCentroid(List<LatLng> points) {
+    double sumLat = 0;
+    double sumLng = 0;
+    for (final p in points) {
+      sumLat += p.latitude;
+      sumLng += p.longitude;
+    }
+    return LatLng(sumLat / points.length, sumLng / points.length);
   }
 }
 
@@ -121,16 +166,60 @@ class PlotPolygonPainter extends CustomPainter {
       oldDelegate.polygon != polygon;
 }
 
-class PlotDetailsScreen extends ConsumerWidget {
+class PlotDetailsScreen extends StatefulWidget {
   final PlotEntity plot;
   const PlotDetailsScreen({super.key, required this.plot});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
+  State<PlotDetailsScreen> createState() => _PlotDetailsScreenState();
+}
+
+class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
+  bool _useMapView = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // We need a Consumer to access ref, but we are in a StatefulWidget.
+    // Use Consumer widget locally.
+    return Consumer(builder: (context, ref, child) {
+      final plot = widget.plot;
+      return Scaffold(
       appBar: AppBar(
         title: Text(plot.name),
         actions: [
+          IconButton(
+            tooltip: 'Edit map points',
+            icon: const Icon(Icons.map),
+            onPressed: () async {
+              final newPoints = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                  builder: (context) => MapScreen(
+                    initialPoints: plot.polygon,
+                    existingPlot: PlotModel(
+                      id: plot.id,
+                      name: plot.name,
+                      userId: plot.userId,
+                      area: plot.area,
+                      treeCount: plot.treeCount,
+                      rowSpacing: plot.rowSpacing,
+                      polygon: plot.polygon,
+                      centroid: plot.centroid,
+                      bedHeight: plot.bedHeight,
+                      createdAt: plot.createdAt,
+                    ),
+                  ),
+                ),
+              );
+              if (newPoints == true && context.mounted) {
+                // The MapScreen saves the plot via repo, so we just need to refresh
+                final currentUserId = ref.read(authServiceProvider).currentUserId;
+                if (currentUserId != null) {
+                  ref.invalidate(plotsListProvider(currentUserId));
+                }
+                showSuccessSnackBar(context, 'Map updated');
+              }
+            },
+          ),
           IconButton(
             tooltip: 'Edit plot details',
             icon: const Icon(Icons.edit),
@@ -160,15 +249,94 @@ class PlotDetailsScreen extends ConsumerWidget {
                   // dropdowns can update locally.
                   String rowUnit = 'm';
                   String bedUnit = 'm';
+
+                  void convertRow(String newUnit) {
+                    final currentVal = double.tryParse(rowCtrl.text) ?? 0;
+                    if (currentVal == 0) {
+                      rowUnit = newUnit;
+                      return;
+                    }
+                    double inMeters;
+                    if (rowUnit == 'in')
+                      inMeters = currentVal * 0.0254;
+                    else if (rowUnit == 'ft')
+                      inMeters = currentVal * 0.3048;
+                    else
+                      inMeters = currentVal;
+
+                    double newVal;
+                    if (newUnit == 'in')
+                      newVal = inMeters / 0.0254;
+                    else if (newUnit == 'ft')
+                      newVal = inMeters / 0.3048;
+                    else
+                      newVal = inMeters;
+
+                    rowCtrl.text = newVal.toStringAsFixed(2);
+                    rowUnit = newUnit;
+                  }
+
+                  void convertBed(String newUnit) {
+                    final currentVal = double.tryParse(bedCtrl.text) ?? 0;
+                    if (currentVal == 0) {
+                      bedUnit = newUnit;
+                      return;
+                    }
+                    double inMeters;
+                    if (bedUnit == 'in')
+                      inMeters = currentVal * 0.0254;
+                    else if (bedUnit == 'ft')
+                      inMeters = currentVal * 0.3048;
+                    else
+                      inMeters = currentVal;
+
+                    double newVal;
+                    if (newUnit == 'in')
+                      newVal = inMeters / 0.0254;
+                    else if (newUnit == 'ft')
+                      newVal = inMeters / 0.3048;
+                    else
+                      newVal = inMeters;
+
+                    bedCtrl.text = newVal.toStringAsFixed(2);
+                    bedUnit = newUnit;
+                  }
                   return StatefulBuilder(builder: (ctx2, setState2) {
-                    return AnimatedPadding(
-                      duration: const Duration(milliseconds: 250),
-                      padding: EdgeInsets.only(bottom: insets),
-                      child: FractionallySizedBox(
-                        heightFactor: 0.75,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxHeight: maxHeight),
-                          child: Material(
+                    return PopScope(
+                      canPop: false,
+                      onPopInvokedWithResult: (didPop, result) async {
+                        if (didPop) return;
+                        final bool shouldExit = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Discard changes?'),
+                                content: const Text(
+                                    'Are you sure you want to exit? Your progress will be lost.'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(ctx).pop(false),
+                                    child: const Text('Stay'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => Navigator.of(ctx).pop(true),
+                                    child: const Text('Discard', style: TextStyle(color: Colors.red)),
+                                  ),
+                                ],
+                              ),
+                            ) ??
+                            false;
+                        if (shouldExit && context.mounted) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                      child: AnimatedPadding(
+                        duration: const Duration(milliseconds: 250),
+                        padding: EdgeInsets.only(bottom: insets),
+                        child: FractionallySizedBox(
+                          heightFactor: 0.75,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxHeight: maxHeight),
+                            child: Material(
                             color: Theme.of(context).scaffoldBackgroundColor,
                             elevation: 8,
                             shape: const RoundedRectangleBorder(
@@ -203,7 +371,7 @@ class PlotDetailsScreen extends ConsumerWidget {
                                       TextFormField(
                                           controller: nameCtrl,
                                           decoration: const InputDecoration(
-                                              labelText: 'Plot Name'),
+                                              labelText: 'Plot Name *'),
                                           maxLength: 200,
                                           validator: (v) =>
                                               (v == null || v.trim().isEmpty)
@@ -215,10 +383,10 @@ class PlotDetailsScreen extends ConsumerWidget {
                                           keyboardType: const TextInputType
                                               .numberWithOptions(decimal: true),
                                           decoration: const InputDecoration(
-                                              labelText: 'Approx Area (ha)'),
+                                              labelText: 'Approx Area (ha) *'),
                                           validator: (v) {
-                                            if (v == null || v.isEmpty)
-                                              return null;
+                                            if (v == null || v.trim().isEmpty)
+                                              return 'Enter approx area';
                                             final t = v.trim();
                                             final val = double.tryParse(t);
                                             if (val == null)
@@ -236,10 +404,10 @@ class PlotDetailsScreen extends ConsumerWidget {
                                                   .numberWithOptions(
                                                   decimal: true),
                                               decoration: const InputDecoration(
-                                                  labelText: 'Row Spacing'),
+                                                  labelText: 'Row Spacing *'),
                                               validator: (v) {
-                                                if (v == null || v.isEmpty)
-                                                  return null;
+                                                if (v == null || v.trim().isEmpty)
+                                                  return 'Enter row spacing';
                                                 final t = v.trim();
                                                 final val = double.tryParse(t);
                                                 if (val == null)
@@ -266,7 +434,7 @@ class PlotDetailsScreen extends ConsumerWidget {
                                                   child: Text('ft')),
                                             ],
                                             onChanged: (v) => setState2(
-                                                () => rowUnit = v ?? 'm'),
+                                                () => convertRow(v ?? 'm')),
                                             decoration: const InputDecoration(
                                                 labelText: 'Unit'),
                                           ),
@@ -281,10 +449,10 @@ class PlotDetailsScreen extends ConsumerWidget {
                                                   .numberWithOptions(
                                                   decimal: true),
                                               decoration: const InputDecoration(
-                                                  labelText: 'Bed Height'),
+                                                  labelText: 'Bed Height *'),
                                               validator: (v) {
-                                                if (v == null || v.isEmpty)
-                                                  return null;
+                                                if (v == null || v.trim().isEmpty)
+                                                  return 'Enter bed height';
                                                 final t = v.trim();
                                                 final val = double.tryParse(t);
                                                 if (val == null)
@@ -311,7 +479,7 @@ class PlotDetailsScreen extends ConsumerWidget {
                                                   child: Text('ft')),
                                             ],
                                             onChanged: (v) => setState2(
-                                                () => bedUnit = v ?? 'm'),
+                                                () => convertBed(v ?? 'm')),
                                             decoration: const InputDecoration(
                                                 labelText: 'Unit'),
                                           ),
@@ -340,7 +508,7 @@ class PlotDetailsScreen extends ConsumerWidget {
                                           if (!(_formKeyLocal.currentState
                                                   ?.validate() ??
                                               true)) return;
-                                          // Convert row/bed to meters if needed
+                                          // Convert current row/bed values to meters for saving
                                           String rowOut = rowCtrl.text;
                                           if (rowOut.isNotEmpty) {
                                             final v = double.tryParse(rowOut);
@@ -351,6 +519,8 @@ class PlotDetailsScreen extends ConsumerWidget {
                                               else if (rowUnit == 'ft')
                                                 rowOut =
                                                     (v * 0.3048).toString();
+                                              else
+                                                rowOut = v.toString();
                                             }
                                           }
                                           String bedOut = bedCtrl.text;
@@ -363,6 +533,8 @@ class PlotDetailsScreen extends ConsumerWidget {
                                               else if (bedUnit == 'ft')
                                                 bedOut =
                                                     (v * 0.3048).toString();
+                                              else
+                                                bedOut = v.toString();
                                             }
                                           }
                                           Navigator.of(ctx).pop({
@@ -387,7 +559,8 @@ class PlotDetailsScreen extends ConsumerWidget {
                           ),
                         ),
                       ),
-                    );
+                    ),
+                  );
                   });
                 },
               );
@@ -478,13 +651,39 @@ class PlotDetailsScreen extends ConsumerWidget {
                 child: LayoutBuilder(builder: (ctx, bc) {
                   final maxWidth = bc.maxWidth;
                   final previewWidth = maxWidth < 520 ? maxWidth * 0.9 : 520.0;
-                  return SizedBox(
-                    width: previewWidth,
-                    height: previewWidth * 0.56,
-                    child: PlotPreview(
-                        polygon: plot.polygon,
+                  return Stack(
+                    children: [
+                      SizedBox(
                         width: previewWidth,
-                        height: previewWidth * 0.56),
+                        height: previewWidth * 0.56,
+                        child: PlotPreview(
+                          polygon: plot.polygon,
+                          width: previewWidth,
+                          height: previewWidth * 0.56,
+                          useMap: _useMapView,
+                        ),
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Material(
+                          color: Colors.white,
+                          elevation: 2,
+                          shape: const CircleBorder(),
+                          child: IconButton(
+                            tooltip: _useMapView
+                                ? 'Switch to Shape view'
+                                : 'Switch to GPS view',
+                            icon: Icon(
+                                _useMapView ? Icons.image : Icons.map_outlined,
+                                size: 20),
+                            onPressed: () {
+                              setState(() => _useMapView = !_useMapView);
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
                   );
                 }),
               ),
@@ -632,10 +831,10 @@ class PlotDetailsScreen extends ConsumerWidget {
           //   );
 
           //   return SliverList(delegate: SliverChildListDelegate(jobChildren));
-          // }),
         ],
       ),
     );
+  });
   }
 }
 

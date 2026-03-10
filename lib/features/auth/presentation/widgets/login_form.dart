@@ -53,15 +53,19 @@ class _LoginFormState extends ConsumerState<LoginForm> {
           TextFormField(
             controller: _usernameCtrl,
             decoration: const InputDecoration(
-              labelText: 'Username',
-              prefixIcon: Icon(Icons.person_outline),
-              hintText: 'Enter your username',
+              labelText: 'Email',
+              prefixIcon: Icon(Icons.email_outlined),
+              hintText: 'Enter your registered email',
             ),
-            maxLength: 100,
+            keyboardType: TextInputType.emailAddress,
+            maxLength: 254,
             validator: (v) {
-              if (v == null || v.isEmpty) return 'Please enter your username';
+              if (v == null || v.isEmpty) return 'Please enter your email';
               final trimmed = v.trim();
-              if (trimmed.length > 100) return 'Username too long';
+              if (trimmed.length > 254) return 'Input too long';
+              if (!RegExp(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").hasMatch(trimmed)) {
+                return 'Invalid email format';
+              }
               return null;
             },
           ),
@@ -126,6 +130,24 @@ class _LoginFormState extends ConsumerState<LoginForm> {
                     child: Text('Sign In'),
                   ),
                 ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text("Don't have an account? "),
+              GestureDetector(
+                onTap: () => Navigator.of(context).pushNamed('/register'),
+                child: Text(
+                  "Sign Up",
+                  style: TextStyle(
+                    color: Theme.of(context).primaryColor,
+                    fontWeight: FontWeight.bold,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

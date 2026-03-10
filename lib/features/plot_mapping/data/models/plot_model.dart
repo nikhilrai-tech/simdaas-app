@@ -13,6 +13,7 @@ class PlotModel extends PlotEntity {
     required super.polygon,
     super.centroid,
     super.bedHeight,
+    super.createdAt,
   });
 
   factory PlotModel.fromJson(String id, Map<String, dynamic> json) {
@@ -71,6 +72,9 @@ class PlotModel extends PlotEntity {
       rowSpacing: (json['row_spacing'] as num?)?.toDouble(),
       treeCount: (json['tree_count'] as num?)?.toInt(),
       centroid: centroid,
+      createdAt: json['created_at'] != null
+          ? DateTime.parse(json['created_at'].toString())
+          : null,
     );
   }
 
@@ -81,11 +85,10 @@ class PlotModel extends PlotEntity {
         'user_area_acre': area,
         'row_spacing': rowSpacing,
         'tree_count': treeCount,
+        'created_at': createdAt?.toIso8601String(),
         'centroid': centroid == null
             ? null
             : {'lat': centroid!.latitude, 'lng': centroid!.longitude},
-        'polygon': polygon
-            .map((p) => {'lat': p.latitude, 'lng': p.longitude})
-            .toList(),
+        'polygon': polygon.map((p) => [p.latitude, p.longitude]).toList(),
       };
 }

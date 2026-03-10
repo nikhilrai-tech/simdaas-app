@@ -482,8 +482,7 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                                           items: items
                                               .map((e) => DropdownMenuItem(
                                                   value: e.id,
-                                                  child: Text(
-                                                      '${e.name}${e.controlUnitId != null ? ' (${e.controlUnitId})' : ''}')))
+                                                  child: Text(e.name)))
                                               .toList(),
                                           onChanged: (v) => ref
                                               .read(createJobFormProvider

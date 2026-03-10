@@ -20,4 +20,5 @@ class EquipmentRepositoryImpl {
       remote.getSprayers(userId);
   Future<List<EquipmentEntity>> getControlUnits(String userId) =>
       remote.getControlUnits(userId);
+  Future<void> endSession(int sessionId) => remote.endSession(sessionId);
 }

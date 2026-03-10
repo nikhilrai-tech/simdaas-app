@@ -31,6 +31,9 @@ class JobEntity {
   /// Current status of the job
   final JobStatus status;
 
+  /// MAC address of the control unit (optional, for monitoring)
+  final String? controlUnitMac;
+
   JobEntity({
     required this.id,
     required this.name,
@@ -43,5 +46,6 @@ class JobEntity {
     this.sprayRate,
     this.productMix,
     required this.status,
+    this.controlUnitMac,
   });
 }

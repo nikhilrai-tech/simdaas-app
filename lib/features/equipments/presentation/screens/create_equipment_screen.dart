@@ -86,10 +86,10 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
             DropdownButtonFormField<String>(
               value: _category,
               items: const [
-                DropdownMenuItem(value: 'tractor', child: Text('Tractor')),
-                DropdownMenuItem(value: 'sprayer', child: Text('Sprayer')),
                 DropdownMenuItem(
                     value: 'control_unit', child: Text('Control Unit')),
+                DropdownMenuItem(value: 'tractor', child: Text('Tractor')),
+                DropdownMenuItem(value: 'sprayer', child: Text('Sprayer')),
               ],
               onChanged: (v) => setState(() => _category = v ?? 'tractor'),
               decoration: const InputDecoration(labelText: 'Category'),
@@ -139,6 +139,7 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       value: _mountingHeightUnit,
                       items: const [
                         DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'cm', child: Text('cm')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
                         DropdownMenuItem(value: 'ft', child: Text('ft')),
                       ],
@@ -305,6 +306,7 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                       value: _ultrasonicDistanceUnit,
                       items: const [
                         DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'cm', child: Text('cm')),
                         DropdownMenuItem(value: 'in', child: Text('in')),
                       ],
                       onChanged: (v) =>
@@ -445,6 +447,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         mountingHeight = mountingHeight * 0.0254;
                       } else if (_mountingHeightUnit == 'ft') {
                         mountingHeight = mountingHeight * 0.3048;
+                      } else if (_mountingHeightUnit == 'cm') {
+                        mountingHeight = mountingHeight * 0.01;
                       }
                     }
                   } catch (e, st) {
@@ -461,6 +465,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         ultrasonicDistance = ultrasonicDistance * 0.0254;
                       } else if (_ultrasonicDistanceUnit == 'ft') {
                         ultrasonicDistance = ultrasonicDistance * 0.3048;
+                      } else if (_ultrasonicDistanceUnit == 'cm') {
+                        ultrasonicDistance = ultrasonicDistance * 0.01;
                       }
                     }
                   } catch (e, st) {
@@ -477,6 +483,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         lidarNozzleDistance = lidarNozzleDistance * 0.0254;
                       } else if (_lidarNozzleDistanceUnit == 'ft') {
                         lidarNozzleDistance = lidarNozzleDistance * 0.3048;
+                      } else if (_lidarNozzleDistanceUnit == 'cm') {
+                        lidarNozzleDistance = lidarNozzleDistance * 0.01;
                       }
                     }
                   } catch (e, st) {
@@ -492,6 +500,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         wheelDiameter = wheelDiameter * 0.0254;
                       } else if (_wheelDiameterUnit == 'ft') {
                         wheelDiameter = wheelDiameter * 0.3048;
+                      } else if (_wheelDiameterUnit == 'cm') {
+                        wheelDiameter = wheelDiameter * 0.01;
                       }
                     }
                   } catch (e, st) {
@@ -515,6 +525,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         axleLength = axleLength * 0.0254;
                       } else if (_axleLengthUnit == 'ft') {
                         axleLength = axleLength * 0.3048;
+                      } else if (_axleLengthUnit == 'cm') {
+                        axleLength = axleLength * 0.01;
                       }
                     }
                   } catch (e, st) {
@@ -530,6 +542,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         hingeToAxle = hingeToAxle * 0.0254;
                       } else if (_hingeToAxleUnit == 'ft') {
                         hingeToAxle = hingeToAxle * 0.3048;
+                      } else if (_hingeToAxleUnit == 'cm') {
+                        hingeToAxle = hingeToAxle * 0.01;
                       }
                     }
                   } catch (e, st) {
@@ -545,6 +559,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         hingeToNozzle = hingeToNozzle * 0.0254;
                       } else if (_hingeToNozzleUnit == 'ft') {
                         hingeToNozzle = hingeToNozzle * 0.3048;
+                      } else if (_hingeToNozzleUnit == 'cm') {
+                        hingeToNozzle = hingeToNozzle * 0.01;
                       }
                     }
                   } catch (e, st) {
@@ -561,6 +577,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         hingeToControlUnit = hingeToControlUnit * 0.0254;
                       } else if (_hingeToControlUnitUnit == 'ft') {
                         hingeToControlUnit = hingeToControlUnit * 0.3048;
+                      } else if (_hingeToControlUnitUnit == 'cm') {
+                        hingeToControlUnit = hingeToControlUnit * 0.01;
                       }
                     }
                   } catch (e, st) {

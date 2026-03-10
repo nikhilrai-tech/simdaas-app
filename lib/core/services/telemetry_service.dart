@@ -161,9 +161,10 @@ class TelemetryData {
           : null,
       plot: json['plot']?.toString(),
       deviceInPlot: json['device_in_plot'] is bool
-          ? json['device_in_plot']
+          ? json['device_in_plot'] as bool
           : (json['device_in_plot'] != null
-              ? (json['device_in_plot'].toString().toLowerCase() == 'true')
+              ? (json['device_in_plot'].toString().toLowerCase() == 'true' ||
+                  json['device_in_plot'].toString() == '1')
               : null),
     );
   }
@@ -202,9 +203,8 @@ class TelemetryService {
   Timer? _pruneTimer;
 
   // Number of seconds to consider telemetry 'fresh' and therefore "online".
-  // Increased from a small value to 120s so the UI shows online status
-  // more leniently in presence of network/server skews.
-  static const int _activeThresholdSeconds = 120;
+  // Set to 60s to match the session cooldown and user preference.
+  static const int _activeThresholdSeconds = 60;
 
   void _startPruner() {
     _pruneTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -394,6 +394,9 @@ class TelemetryService {
                     timestamp: stored.timestamp.toUtc(),
                     lat: lat,
                     lon: lon,
+                    speed: stored.speed,
+                    flowRate: stored.flowRate,
+                    sprayMode: stored.sprayMode,
                     ptoState: stored.ptoState,
                     deviceInPlot: stored.deviceInPlot));
               } else {
@@ -556,6 +559,9 @@ class TelemetryService {
               'timestamp': e.timestamp.toIso8601String(),
               'lat': e.lat,
               'lon': e.lon,
+              'speed': e.speed,
+              'flow_rate': e.flowRate,
+              'spray_mode': e.sprayMode,
               'pto': e.ptoState,
               'device_in_plot': e.deviceInPlot,
             })
@@ -591,12 +597,18 @@ class _LatLonEntry {
   final DateTime timestamp;
   final double lat;
   final double lon;
+  final double? speed;
+  final double? flowRate;
+  final int? sprayMode;
   final int? ptoState;
   final bool? deviceInPlot;
   _LatLonEntry({
     required this.timestamp,
     required this.lat,
     required this.lon,
+    this.speed,
+    this.flowRate,
+    this.sprayMode,
     this.ptoState,
     this.deviceInPlot,
   });
@@ -604,7 +616,7 @@ class _LatLonEntry {
 
 final telemetryServiceProvider = Provider<TelemetryService>((ref) {
   // Use provided base URL; default to ws://13.201.0.34:8001
-  final svc = TelemetryService(baseUrl: 'ws://13.201.5.17:8001');
+  final svc = TelemetryService(baseUrl: 'ws://65.1.2.227:8001');
   ref.onDispose(() => svc.dispose());
   return svc;
 });

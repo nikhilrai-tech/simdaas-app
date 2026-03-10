@@ -65,7 +65,7 @@ class AppTheme {
         color: cardWhite,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.grey.withValues(alpha: 0.1)),
+          side: BorderSide(color: Colors.grey.withOpacity(0.1)),
         ),
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       ),
@@ -78,11 +78,11 @@ class AppTheme {
             const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none, // Clean look
+          borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -114,7 +114,7 @@ class AppTheme {
             fontWeight: FontWeight.w600,
             letterSpacing: 0.5,
           ),
-          shadowColor: primaryGreen.withValues(alpha: 0.4),
+          shadowColor: primaryGreen.withOpacity(0.4),
         ),
       ),
 
@@ -155,7 +155,7 @@ class AppTheme {
       ),
       
       dividerTheme: DividerThemeData(
-        color: Colors.grey.withValues(alpha: 0.2),
+        color: Colors.grey.withOpacity(0.2),
         thickness: 1,
       ),
 

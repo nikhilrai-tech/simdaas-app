@@ -1,18 +1,14 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
-class ReportDonutChart extends StatelessWidget {
+class SavedDonutChart extends StatelessWidget {
   final double percentage;
   final String label;
-  final double radius;
-  final double strokeWidth;
 
-  const ReportDonutChart({
+  const SavedDonutChart({
     super.key,
     required this.percentage,
     required this.label,
-    this.radius = 40,
-    this.strokeWidth = 12,
   });
 
   @override
@@ -21,31 +17,29 @@ class ReportDonutChart extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          height: radius * 2,
-          width: radius * 2,
+          height: 120,
           child: PieChart(
             PieChartData(
               sectionsSpace: 0,
-              centerSpaceRadius: radius - strokeWidth,
+              centerSpaceRadius: 35,
               startDegreeOffset: -90,
               sections: [
                 PieChartSectionData(
-                  color: const Color(0xFFA855F7).withValues(alpha: 0.8),
+                  color: const Color(0xFFBB86FC),
                   value: percentage,
-                  radius: strokeWidth,
-                  showTitle: false,
-                  gradient: const LinearGradient(
-                    colors: [
-                      Color(0xFFA855F7), // Purple
-                      Color(0xFFD8B4FE), // Light Purple
-                    ],
+                  title: '${percentage.toStringAsFixed(0)}%',
+                  radius: 15,
+                  titleStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
                   ),
                 ),
                 PieChartSectionData(
-                  color: Colors.white,
+                  color: Colors.grey[200]!,
                   value: 100 - percentage,
-                  radius: strokeWidth,
-                  showTitle: false,
+                  title: '',
+                  radius: 12,
                 ),
               ],
             ),
@@ -55,9 +49,9 @@ class ReportDonutChart extends StatelessWidget {
         Text(
           label,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 10,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
             fontWeight: FontWeight.w500,
           ),
         ),
