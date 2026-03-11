@@ -403,10 +403,6 @@ class _CreateControlUnitScreenState
                                         if (e == norm) {
                                           return 'MAC address already exists';
                                         }
-                                        if (e.contains(norm) ||
-                                            norm.contains(e)) {
-                                          return 'MAC address too similar to existing device';
-                                        }
                                       }
                                     }
                                     return null;

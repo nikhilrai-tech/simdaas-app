@@ -4,6 +4,7 @@ import 'package:simdaas/core/services/api_service.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 
 final activeSessionsListProvider = FutureProvider<List<dynamic>>((ref) async {
+  await ref.read(authServiceProvider).initialized;
   final api = ref.read(apiServiceProvider);
   try {
     final response = await api.getJson('/jobs/api/sessions/');

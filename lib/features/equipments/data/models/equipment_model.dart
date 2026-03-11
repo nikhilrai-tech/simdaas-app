@@ -36,6 +36,25 @@ class EquipmentModel extends EquipmentEntity {
         (json[a] as num?)?.toInt() ??
         (b != null ? (json[b] as num?)?.toInt() : null);
 
+    /// Robustly extract ID from a field that could be:
+    /// 1. A single Map with an 'id' key
+    /// 2. A List containing a Map with an 'id' key (backend mismatch fix)
+    /// 3. A primitive value (String/int)
+    String? _extractId(dynamic val) {
+      if (val == null) return null;
+      if (val is List && val.isNotEmpty) {
+        final first = val.first;
+        if (first is Map && first.containsKey('id')) {
+          return first['id'].toString();
+        }
+      } else if (val is Map && val.containsKey('id')) {
+        return val['id'].toString();
+      } else if (val is! Map && val is! List) {
+        return val.toString();
+      }
+      return null;
+    }
+
     // user id may be provided as userId/ownerId or as nested user object
     String? userId = json['userId'] as String? ?? json['ownerId'] as String?;
     if (userId == null && json['user'] is Map) {
@@ -89,15 +108,9 @@ class EquipmentModel extends EquipmentEntity {
             readNum('hingeToControlUnit', 'distance_hinge_control_unit'),
         macAddress:
             json['mac_addr'] as String? ?? json['mac_address'] as String?,
-        linkedSprayerId: json['sprayer'] != null && json['sprayer']['id'] != null
-            ? json['sprayer']['id'].toString()
-            : json['linked_sprayer_id']?.toString(),
-        linkedTractorId: json['tractor'] != null && json['tractor']['id'] != null
-            ? json['tractor']['id'].toString()
-            : json['linked_tractor_id']?.toString(),
-        linkedPlotId: json['plot'] != null && json['plot']['id'] != null
-            ? json['plot']['id'].toString()
-            : json['linked_plot_id']?.toString(),
+        linkedSprayerId: _extractId(json['sprayer']),
+        linkedTractorId: _extractId(json['tractor']),
+        linkedPlotId: _extractId(json['plot']),
         activeSessionId: json['active_session'] as int?,
         createdAt: parseTime('createdAt', 'created_at'),
         updatedAt: parseTime('updatedAt', 'updated_at'),

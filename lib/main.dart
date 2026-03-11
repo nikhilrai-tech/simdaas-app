@@ -161,7 +161,15 @@ class TelemetryBootstrapper extends ConsumerWidget {
     // Separately listen for control unit list changes for the current user.
     // Using a top-level ref.listen within build is required by Riverpod; we
     // must not call ref.listen from inside another listener callback.
-    final watchedUserId = ref.watch(authServiceProvider).currentUserId ?? '';
+    final auth = ref.watch(authServiceProvider);
+    final watchedUserId = auth.currentUserId ?? '';
+
+    // Guard: Don't bootstrap telemetry until auth is initialized (tokens loaded from storage)
+    if (!auth.isInitialized) {
+      debugPrint('TelemetryBootstrapper: waiting for AuthService initialization...');
+      return child;
+    }
+
     final controlProv = eq_provs.controlUnitsProvider(watchedUserId);
     ref.listen<AsyncValue<List<dynamic>>>(controlProv, (prev, nextCu) {
       try {

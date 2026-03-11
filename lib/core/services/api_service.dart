@@ -47,8 +47,14 @@ class ApiService {
       }
       final c = client ?? http.Client();
       final h = requiresAuth ? _withAuth(headers) : (headers ?? {});
+      final hasAuth = h.containsKey('Authorization');
+      final authHeader = h['Authorization'] ?? '<none>';
       debugPrint(
-          'ApiService.GET $path with auth: ${h.containsKey('Authorization')}');
+          'ApiService.GET $path: requiresAuth=$requiresAuth, hasAuth=$hasAuth');
+      if (hasAuth) {
+        debugPrint(
+            'ApiService.GET $path: Token prefix: ${authHeader.length > 15 ? authHeader.substring(0, 15) : authHeader}');
+      }
       final resp = await c.get(url(path), headers: h);
       // print('Response status: ${resp.statusCode}');
       // print('Response body: ${resp.body}');
@@ -261,6 +267,7 @@ class ApiService {
   void _ensureSuccess(http.Response resp, String path) {
     final code = resp.statusCode;
     if (code < 200 || code >= 300) {
+      debugPrint('ApiService.ERROR: HTTP $code at $path. Body: ${resp.body}');
       throw ApiException(code, 'HTTP ${resp.statusCode}',
           path: path, body: resp.body);
     }

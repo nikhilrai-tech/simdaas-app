@@ -26,7 +26,6 @@ class EquipmentListScreen extends ConsumerStatefulWidget {
 class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
     with WidgetsBindingObserver {
   String _filterCategory = 'all';
-  String _deviceFilter = 'all'; // 'all', 'active', 'inactive'
   bool _initialFilterHandled = false;
   late final javaTimer = _setupAutoRefresh();
 
@@ -133,9 +132,6 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
           noEquipMsg = 'No sprayers yet';
           addPlaceholder = 'Tap the + button to add a sprayer';
           break;
-        case 'active':
-          heading = 'Active Devices';
-          break;
       }
     } else if (_filterCategory != 'all') {
        switch (_filterCategory.toLowerCase()) {
@@ -202,13 +198,6 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
               return false;
             }
 
-            // Device Status filter (Active/Inactive)
-            // Active means it has an activeSessionId
-            // User requested to remove filter UI, but we might still want to support 
-            // the 'active' routeCategory which uses _deviceFilter.
-            final isActive = e.activeSessionId != null;
-            if (_deviceFilter == 'active' && !isActive) return false;
-            if (_deviceFilter == 'inactive' && isActive) return false;
 
             return true;
           }).toList();
@@ -513,71 +502,6 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
                                         ),
                                       ),
                                       const SizedBox(width: 8),
-                                      if (e.activeSessionId != null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(left: 8.0),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.green.withAlpha(40),
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  border: Border.all(color: Colors.green, width: 1),
-                                                ),
-                                                child: Row(
-                                                  children: [
-                                                    const Icon(Icons.circle, color: Colors.green, size: 8),
-                                                    const SizedBox(width: 4),
-                                                    const Text('LIVE', style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
-                                                  ],
-                                                ),
-                                              ),
-                                              const SizedBox(height: 8),
-                                              ElevatedButton(
-                                                onPressed: () async {
-                                                  final confirmed = await showDialog<bool>(
-                                                    context: context,
-                                                    builder: (ctx) => AlertDialog(
-                                                      title: const Text('End Session?'),
-                                                      content: Text('Are you sure you want to end the active session for ${e.name}?'),
-                                                      actions: [
-                                                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                                        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('End')),
-                                                      ],
-                                                    )
-                                                  );
-                                                  if (confirmed == true) {
-                                                    try {
-                                                      await ref.read(equipmentControllerProvider).endSession(e.activeSessionId!);
-                                                      if (context.mounted) {
-                                                        ScaffoldMessenger.of(context).showSnackBar(
-                                                          const SnackBar(content: Text('Session ended successfully'))
-                                                        );
-                                                      }
-                                                    } catch (err) {
-                                                      if (context.mounted) {
-                                                        ScaffoldMessenger.of(context).showSnackBar(
-                                                          SnackBar(content: Text('Error: $err'))
-                                                        );
-                                                      }
-                                                    }
-                                                  }
-                                                },
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.red,
-                                                  foregroundColor: Colors.white,
-                                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                                                  minimumSize: const Size(60, 32),
-                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                                  elevation: 2,
-                                                ),
-                                                child: const Text('End', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
                                       ],
                                     ),
                                   ),

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'api_service.dart';
@@ -49,6 +50,7 @@ class AuthService extends ChangeNotifier {
   String? _userId;
   bool _isRefreshing = false;
   Completer<void>? _refreshCompleter;
+  Completer<void> _initCompleter = Completer<void>();
   bool _initialized = false;
   Timer? _refreshTimer;
 
@@ -56,6 +58,7 @@ class AuthService extends ChangeNotifier {
   String? get currentUserId => _userId;
   Map<String, dynamic>? get currentUserMap => _userData;
   bool get isInitialized => _initialized;
+  Future<void> get initialized => _initCompleter.future;
 
   Future<bool> signIn(String usernameOrEmail, String password) async {
     // Postman collection: POST {{baseUrl}}/api/auth/login/ -> returns { access, refresh }
@@ -179,7 +182,7 @@ class AuthService extends ChangeNotifier {
       if (a != null) {
         _token = a;
         _api.setAuthToken(_token);
-        debugPrint('AuthService._loadFromStorage: Token set on ApiService');
+        debugPrint('AuthService._loadFromStorage: Token set on ApiService. token=${_token!.substring(0, min(10, _token!.length))}...');
 
         // Check if token is expired by decoding JWT
         bool isExpired = false;
@@ -236,8 +239,11 @@ class AuthService extends ChangeNotifier {
       if (r != null) _refreshToken = r;
       // notify listeners after loading persisted tokens
       _initialized = true;
+      if (!_initCompleter.isCompleted) _initCompleter.complete();
       notifyListeners();
-    } catch (_) {}
+    } catch (e) {
+      if (!_initCompleter.isCompleted) _initCompleter.complete();
+    }
   }
 
   /// Refresh the access token using refresh token stored in memory or secure storage.

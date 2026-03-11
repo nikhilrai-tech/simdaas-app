@@ -100,7 +100,13 @@ class TelemetryData {
         ts = null;
       }
     }
-    if (ts == null) throw FormatException('invalid timestamp');
+    if (ts == null) {
+      if (json['status'] == 'offline') {
+        ts = DateTime.now().toUtc();
+      } else {
+        throw FormatException('invalid timestamp');
+      }
+    }
 
     return TelemetryData(
       deviceId: deviceId,
@@ -331,6 +337,14 @@ class TelemetryService {
             debugPrint('Telemetry envelope unwrap error: $e');
           }
 
+          if (data['status'] == 'offline') {
+            final offId = canonicalizeMac(data['device_id'] ?? deviceId);
+            debugPrint('Telemetry: Received offline status for $offId');
+            _latest.remove(offId);
+            _activeController.add(getActiveDevices());
+            return;
+          }
+
           TelemetryData t;
           try {
             t = TelemetryData.fromJson(data);
@@ -505,6 +519,14 @@ class TelemetryService {
     ch?.sink.close();
     _latest.remove(norm);
     _reconnectAttempts.remove(norm);
+  }
+
+  /// Manually clear the cached telemetry for a device.
+  void clearCache(String deviceId) {
+    final norm = canonicalizeMac(deviceId);
+    debugPrint('Telemetry: Manually clearing cache for $norm');
+    _latest.remove(norm);
+    _activeController.add(getActiveDevices());
   }
 
   /// Subscribe to a set of device IDs and ensure only those are kept subscribed.

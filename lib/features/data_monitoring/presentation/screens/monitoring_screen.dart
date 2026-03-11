@@ -39,7 +39,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
   bool _isDemoMode = false;
   Timer? _demoTimer;
-  HeatmapType _selectedHeatmap = HeatmapType.spraying;
+  HeatmapType _selectedHeatmap = HeatmapType.gps;
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
   StreamSubscription<TelemetryData>? _deviceSub;
@@ -386,14 +386,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   (f) => f.id == widget.plotId,
                   orElse: () => plots.cast<fm_models.PlotModel>().first)
               : plots.cast<fm_models.PlotModel>().first;
-          // final center = positions.isNotEmpty
-          //     ? LatLng((positions.last['lat'] as num).toDouble(),
-          //         (positions.last['lon'] as num).toDouble())
-          //     : plot.polygon.first;
-          final center = plot.polygon.isNotEmpty
-              ? plot.polygon.first
-              : LatLng((positions.last['lat'] as num).toDouble(),
-                  (positions.last['lon'] as num).toDouble());
+          // Determine center point: prefer plot polygon first point, then last position, then fallback.
+          LatLng center;
+          if (plot.polygon.isNotEmpty) {
+            center = plot.polygon.first;
+          } else if (positions.isNotEmpty) {
+            center = LatLng((positions.last['lat'] as num).toDouble(),
+                (positions.last['lon'] as num).toDouble());
+          } else {
+            // Default center if no plot polygon and no positions (e.g. session just ended)
+            center = const LatLng(20.5937, 78.9629); // India center approx or last known
+          }
           return Stack(children: [
             FlutterMap(
               mapController: _mapController,
@@ -639,12 +642,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                         ));
                                 if (confirmed == true) {
                                   try {
+                                    final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
                                     await ref
                                         .read(eq_provs.equipmentControllerProvider)
-                                        .endSession(sessionIdToEnd);
+                                        .endSession(sessionIdToEnd, deviceId: deviceMac);
                                     
                                     // 1. Mandatory Ignore: Set 2-minute ignore period for this device
-                                    final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
                                     if (deviceMac != null) {
                                       final normMac = canonicalizeMac(deviceMac);
                                       _ignoredUntil[normMac] = DateTime.now().add(const Duration(minutes: 2));
@@ -1470,24 +1473,27 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       final lat = (p['lat'] as num).toDouble();
       final lon = (p['lon'] as num).toDouble();
       final color = _colorForPositionEntry(p, plot);
+      final point = LatLng(lat, lon);
 
       if (currentColor == null) {
         // start new segment
         currentColor = color;
-        currentPoints = [LatLng(lat, lon)];
+        currentPoints = [point];
       } else if (color == currentColor) {
-        currentPoints.add(LatLng(lat, lon));
+        currentPoints.add(point);
       } else {
-        // flush previous segment if it has at least two points
+        // Gap fix: Add the first point of the NEW segment to the OLD segment
+        // to ensure continuity.
+        currentPoints.add(point);
         if (currentPoints.length >= 2) {
           result.add(Polyline(
               points: List<LatLng>.from(currentPoints),
               strokeWidth: 4.0,
-              color: currentColor));
+              color: currentColor!));
         }
-        // start new segment
+        // start new segment from this transition point
         currentColor = color;
-        currentPoints = [LatLng(lat, lon)];
+        currentPoints = [point];
       }
     }
 

@@ -13,7 +13,6 @@ import '../features/data_monitoring/presentation/screens/monitoring_screen.dart'
 import '../features/reports/presentation/screens/reports_list_screen.dart';
 import '../features/equipments/presentation/screens/create_control_unit_screen.dart';
 import '../features/equipments/presentation/screens/scan_control_unit_screen.dart';
-import '../features/reports/presentation/providers/session_providers.dart';
 
 /// Temporary dashboard that resembles the main three-button dashboard but
 /// includes a quick control-centres status card for development/testing.
@@ -126,32 +125,19 @@ class TempDashboard extends ConsumerWidget {
                       children: [
                         const SizedBox(height: 8),
                         // Control centres status card
-                        controlUnitsAsync.when(
-                          data: (items) => _DashboardCard(
-                            icon: Icons.router_outlined,
-                            title: 'Active Devices',
-                            subtitle: _controlSummary(items),
-                            color: const Color(0xFF1565C0),
-                            onTap: () => Navigator.of(context).push(
+                        _DashboardCard(
+                          icon: Icons.devices_other_outlined,
+                          title: 'Active Devices',
+                          subtitle: _controlSummary(controlUnitsAsync.asData?.value ?? []),
+                          color: const Color(0xFF1B5E20),
+                          onTap: () {
+                            final items = controlUnitsAsync.asData?.value ?? [];
+                            Navigator.of(context).push(
                               MaterialPageRoute(
-                                builder: (_) => _ControlUnitsListScreen(
-                                  items: items,
-                                ),
+                                builder: (_) => _ControlUnitsListScreen(items: items),
                               ),
-                            ),
-                          ),
-                          loading: () => const Center(
-                              child: Padding(
-                            padding: EdgeInsets.all(12.0),
-                            child: CircularProgressIndicator(),
-                          )),
-                          error: (e, st) => _DashboardCard(
-                            icon: Icons.warning_amber_outlined,
-                            title: 'Active Devices',
-                            subtitle: 'Error loading control centres',
-                            color: Colors.red,
-                            onTap: () {},
-                          ),
+                            );
+                          },
                         ),
                         const SizedBox(height: 12),
                         _DashboardCard(
@@ -186,6 +172,7 @@ class TempDashboard extends ConsumerWidget {
       ),
     );
   }
+
 
   String _controlSummary(List items) {
     if (items.isEmpty) return 'No control centres';
@@ -383,7 +370,7 @@ class _ControlUnitsListScreenState
                     .map((t) => canonicalizeMac(t.deviceId))
                     .toSet();
 
-                final filteredItems = widget.items.where((cu) {
+                 final filteredItems = widget.items.where((cu) {
                   final deviceId = extractDeviceId(cu);
                   final isActive = deviceId.isNotEmpty &&
                       activeKeys.contains(canonicalizeMac(deviceId));
@@ -425,123 +412,6 @@ class _ControlUnitsListScreenState
                           if (linkedPlotId.isNotEmpty)
                             Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
                           Text('Status: $statusText'),
-                        ],
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (isActive) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.green.withAlpha(40),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.green, width: 1),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.circle,
-                                      color: Colors.green, size: 8),
-                                  const SizedBox(width: 4),
-                                  const Text('LIVE',
-                                      style: TextStyle(
-                                          color: Colors.green,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              onPressed: () async {
-                                int? sessionIdToEnd = cu.activeSessionId;
-
-                                // Try to resolve session ID if null
-                                if (sessionIdToEnd == null && isActive) {
-                                  try {
-                                    final sessions = ref.read(activeSessionsListProvider).asData?.value;
-                                    if (sessions != null && deviceIdNorm.isNotEmpty) {
-                                      final normId = canonicalizeMac(deviceIdNorm);
-                                      for (final s in sessions) {
-                                        final scu = s['control_unit'];
-                                        if (scu != null) {
-                                          final mac = (scu['mac_addr'] ?? scu['mac_address'])?.toString();
-                                          if (mac != null && canonicalizeMac(mac) == normId) {
-                                            sessionIdToEnd = s['id'] as int?;
-                                            break;
-                                          }
-                                        }
-                                      }
-                                    }
-                                  } catch (_) {}
-                                }
-
-                                if (sessionIdToEnd == null) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('No active session ID found.')));
-                                  }
-                                  return;
-                                }
-
-                                final confirmed = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                          title: const Text('End Session?'),
-                                          content: Text(
-                                              'Are you sure you want to end the active session for ${cu.name}?'),
-                                          actions: [
-                                            TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(ctx, false),
-                                                child: const Text('Cancel')),
-                                            TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(ctx, true),
-                                                child: const Text('End')),
-                                          ],
-                                        ));
-                                if (confirmed == true) {
-                                  try {
-                                    await ref
-                                        .read(eq_provs.equipmentControllerProvider)
-                                        .endSession(sessionIdToEnd);
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(
-                                              content: Text(
-                                                  'Session ended successfully')));
-                                    }
-                                  } catch (err) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(SnackBar(
-                                              content: Text('Error: $err')));
-                                    }
-                                  }
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 0),
-                                minimumSize: const Size(60, 32),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8)),
-                                elevation: 2,
-                              ),
-                              child: const Text('End',
-                                  style: TextStyle(
-                                      fontSize: 12, fontWeight: FontWeight.bold)),
-                            ),
-                          ]
- else
-                            Icon(
-                              isActive ? Icons.wifi : Icons.wifi_off,
-                              color: isActive ? Colors.green : Colors.grey,
-                            ),
                         ],
                       ),
                       onTap: deviceIdNorm.isNotEmpty

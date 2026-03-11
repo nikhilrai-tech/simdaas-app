@@ -348,45 +348,81 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   List<Polyline> _buildHeatmapPolylines(List<GPSPointData> trajectory) {
-    if (trajectory.length < 2) return [];
+    final List<Polyline> result = [];
+    if (trajectory.length < 2) return result;
 
-    final polylines = <Polyline>[];
+    List<LatLng> currentPoints = [];
+    Color? currentColor;
 
-    for (int i = 0; i < trajectory.length - 1; i++) {
-      final p1 = trajectory[i];
-      final p2 = trajectory[i + 1];
-
-      // Don't connect points with large time gap (e.g. > 30s)
-      if (p2.timestamp.difference(p1.timestamp).inSeconds > 30) continue;
-
+    for (var i = 0; i < trajectory.length; i++) {
+      final p = trajectory[i];
+      final point = LatLng(p.lat, p.lon);
+      
       Color color;
       switch (_heatmapType) {
         case HeatmapType.speed:
-          color = HeatmapColorUtils.getColorForSpeed(p1.speedKmph);
+          color = HeatmapColorUtils.getColorForSpeed(p.speedKmph);
           break;
         case HeatmapType.spraying:
-          color = HeatmapColorUtils.getColorForSpray(p1.flowRateLpm);
+          color = HeatmapColorUtils.getColorForSpray(p.flowRateLpm);
           break;
         case HeatmapType.gps:
-          // For GPS heatmap in reports, we might not have 'device_in_plot' per point easily 
-          // but we can assume in plot for now or check distance to plot.
-          // For simplicity, we use pto and mode.
           color = HeatmapColorUtils.getColorForGPS(
             isInPlot: true, 
-            ptoOn: true, // Assuming data points only sent when PTO on or similar
-            isAuto: p1.sprayMode == 1,
+            ptoOn: true,
+            isAuto: p.sprayMode == 1,
           );
           break;
       }
 
-      polylines.add(Polyline(
-        points: [LatLng(p1.lat, p1.lon), LatLng(p2.lat, p2.lon)],
-        color: color,
+      // Time gap check (if not first point)
+      if (i > 0) {
+        final prev = trajectory[i - 1];
+        if (p.timestamp.difference(prev.timestamp).inSeconds > 30) {
+          // Flush current segment if exists
+          if (currentPoints.length >= 2 && currentColor != null) {
+            result.add(Polyline(
+              points: List<LatLng>.from(currentPoints),
+              strokeWidth: 4.0,
+              color: currentColor,
+            ));
+          }
+          currentPoints = [point];
+          currentColor = color;
+          continue;
+        }
+      }
+
+      if (currentColor == null) {
+        currentColor = color;
+        currentPoints = [point];
+      } else if (color == currentColor) {
+        currentPoints.add(point);
+      } else {
+        // Gap fix: Transition point
+        currentPoints.add(point);
+        if (currentPoints.length >= 2) {
+          result.add(Polyline(
+            points: List<LatLng>.from(currentPoints),
+            strokeWidth: 4.0,
+            color: currentColor,
+          ));
+        }
+        currentColor = color;
+        currentPoints = [point];
+      }
+    }
+
+    // flush last segment
+    if (currentPoints.length >= 2 && currentColor != null) {
+      result.add(Polyline(
+        points: List<LatLng>.from(currentPoints),
         strokeWidth: 4.0,
+        color: currentColor,
       ));
     }
 
-    return polylines;
+    return result;
   }
 
   LatLng _getCentroid(List<LatLng> points) {

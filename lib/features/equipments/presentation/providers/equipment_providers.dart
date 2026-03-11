@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/services/telemetry_service.dart';
 import '../../data/datasources/equipment_remote_data_source.dart';
 import '../../data/repositories/equipment_repository_impl.dart';
 import '../../domain/entities/equipment.dart';
@@ -9,6 +10,8 @@ final equipmentRepoProvider = Provider((ref) => EquipmentRepositoryImpl(
 
 final equipmentsListProvider =
     FutureProvider.family<List<EquipmentEntity>, String>((ref, userId) async {
+  // Ensure auth is initialized so the token is set on ApiService
+  await ref.read(authServiceProvider).initialized;
   final repo = ref.read(equipmentRepoProvider);
   return repo.getEquipments(userId);
 });
@@ -17,18 +20,21 @@ final equipmentsListProvider =
 // category is required.
 final tractorsProvider =
     FutureProvider.family<List<EquipmentEntity>, String>((ref, userId) async {
+  await ref.read(authServiceProvider).initialized;
   final repo = ref.read(equipmentRepoProvider);
   return repo.getTractors(userId);
 });
 
 final sprayersProvider =
     FutureProvider.family<List<EquipmentEntity>, String>((ref, userId) async {
+  await ref.read(authServiceProvider).initialized;
   final repo = ref.read(equipmentRepoProvider);
   return repo.getSprayers(userId);
 });
 
 final controlUnitsProvider =
     FutureProvider.family<List<EquipmentEntity>, String>((ref, userId) async {
+  await ref.read(authServiceProvider).initialized;
   final repo = ref.read(equipmentRepoProvider);
   return repo.getControlUnits(userId);
 });
@@ -108,9 +114,14 @@ class EquipmentController {
     }
   }
 
-  Future<void> endSession(int sessionId) async {
+  Future<void> endSession(int sessionId, {String? deviceId}) async {
     final repo = ref.read(equipmentRepoProvider);
     await repo.endSession(sessionId);
+    
+    if (deviceId != null) {
+      ref.read(telemetryServiceProvider).clearCache(deviceId);
+    }
+
     final currentUserId =
         ref.read(authServiceProvider).currentUserId ?? 'demo_user';
     ref.invalidate(equipmentsListProvider(currentUserId));
