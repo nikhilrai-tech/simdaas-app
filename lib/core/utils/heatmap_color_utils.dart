@@ -25,6 +25,6 @@ class HeatmapColorUtils {
   }) {
     if (!isInPlot) return Colors.red;
     if (!ptoOn) return Colors.orange;
-    return isAuto ? Colors.blue : Colors.red;
+    return isAuto ? Colors.blue : Colors.orange;
   }
 }

@@ -9,6 +9,79 @@ import 'ws_channel_stub.dart'
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/mac_utils.dart';
 
+/// Possible device lifecycle states driven by backend WebSocket events.
+enum DeviceLifecycleStatus {
+  online,
+  cooldown,  // offline_pending_report — report generating, countdown running
+  offline,
+}
+
+/// Holds the current cooldown / status state for one device.
+/// Emitted via [TelemetryService.deviceCooldownStream].
+class CooldownState {
+  final String deviceId;
+  final DeviceLifecycleStatus status;
+
+  /// When the cooldown ends (null when not in cooldown).
+  final DateTime? cooldownEnd;
+
+  /// 'manual_end' | 'auto_timeout' | null
+  final String? cooldownType;
+
+  /// DB session id (from report_ready event)
+  final int? sessionId;
+
+  /// DB report id (available after report_ready)
+  final int? reportId;
+
+  const CooldownState({
+    required this.deviceId,
+    required this.status,
+    this.cooldownEnd,
+    this.cooldownType,
+    this.sessionId,
+    this.reportId,
+  });
+
+  bool get isInCooldown => status == DeviceLifecycleStatus.cooldown;
+
+  /// Remaining seconds until cooldown ends. Returns 0 when not in cooldown.
+  int get secondsRemaining {
+    if (cooldownEnd == null) return 0;
+    final diff = cooldownEnd!.difference(DateTime.now().toUtc()).inSeconds;
+    return diff < 0 ? 0 : diff;
+  }
+
+  /// Human-readable MM:SS countdown string.
+  String get countdownLabel {
+    final s = secondsRemaining;
+    final m = s ~/ 60;
+    final sec = s % 60;
+    return '${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+  }
+
+  CooldownState copyWith({
+    DeviceLifecycleStatus? status,
+    DateTime? cooldownEnd,
+    String? cooldownType,
+    int? sessionId,
+    int? reportId,
+  }) {
+    return CooldownState(
+      deviceId: deviceId,
+      status: status ?? this.status,
+      cooldownEnd: cooldownEnd ?? this.cooldownEnd,
+      cooldownType: cooldownType ?? this.cooldownType,
+      sessionId: sessionId ?? this.sessionId,
+      reportId: reportId ?? this.reportId,
+    );
+  }
+
+  @override
+  String toString() =>
+      'CooldownState($deviceId, $status, end=$cooldownEnd, type=$cooldownType)';
+}
+
 class TelemetryData {
   final String deviceId;
   final DateTime timestamp;
@@ -30,6 +103,8 @@ class TelemetryData {
   final double? jobCompletionPercent;
   final String? plot;
   final bool? deviceInPlot;
+  final double? flowRateLpm;
+  final double? flowInLitres;
 
   TelemetryData({
     required this.deviceId,
@@ -52,6 +127,8 @@ class TelemetryData {
     this.jobCompletionPercent,
     this.plot,
     this.deviceInPlot,
+    this.flowRateLpm,
+    this.flowInLitres,
   });
 
   /// Parse telemetry JSON. Returns null when required fields (device_id
@@ -172,6 +249,12 @@ class TelemetryData {
               ? (json['device_in_plot'].toString().toLowerCase() == 'true' ||
                   json['device_in_plot'].toString() == '1')
               : null),
+      flowRateLpm: json['flow_rate_lpm'] is num
+          ? (json['flow_rate_lpm'] as num).toDouble()
+          : null,
+      flowInLitres: json['flow_in_litres'] is num
+          ? (json['flow_in_litres'] as num).toDouble()
+          : null,
     );
   }
 }
@@ -200,6 +283,26 @@ class TelemetryService {
   // filter this stream for a particular device id to get live updates.
   final _updatesController = StreamController<TelemetryData>.broadcast();
 
+  // ── Cooldown / lifecycle state ──────────────────────────────────────────
+  // Per-device cooldown state driven by backend WS status events.
+  final Map<String, CooldownState> _cooldownStates = {};
+
+  // Broadcast stream that emits a CooldownState whenever any device's
+  // lifecycle status changes (status_change or report_ready events).
+  final _cooldownController = StreamController<CooldownState>.broadcast();
+
+  /// Stream of CooldownState changes for [deviceId].
+  Stream<CooldownState> deviceCooldownStream(String deviceId) {
+    final norm = canonicalizeMac(deviceId);
+    return _cooldownController.stream
+        .where((s) => canonicalizeMac(s.deviceId) == norm);
+  }
+
+  /// Get the last known CooldownState for [deviceId], or null if unknown.
+  CooldownState? getCooldownState(String deviceId) {
+    return _cooldownStates[canonicalizeMac(deviceId)];
+  }
+
   /// In-memory history of positions per device (normalized device id -> list
   /// of timestamped lat/lon entries). Kept in memory for the app lifetime.
   /// Each entry now also stores the PTO state and whether device was in-plot
@@ -216,30 +319,25 @@ class TelemetryService {
     _pruneTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final now = DateTime.now().toUtc();
       final actives = <TelemetryData>[];
+      
+      // Determine which IDs to remove
+      final toRemove = <String>[];
       _latest.forEach((k, v) {
+        // Use receive time (v.timestamp) for active check.
         final diff = now.difference(v.timestamp.toUtc()).inSeconds;
-        if (diff <= _activeThresholdSeconds) actives.add(v);
-      });
-      // Debug: print what the pruner considers active
-      try {
-        final keys = actives.map((a) => a.deviceId).toList();
-        debugPrint('Telemetry.pruner: active keys -> $keys');
-      } catch (_) {}
-      // Determine which stored device ids are now considered offline. Do NOT
-      // clear their stored telemetry so the UI can continue to show the
-      // last-known values while marking them stale (by timestamp). Clearing
-      // cached telemetry caused abrupt disappearance of markers when the
-      // network dropped; keeping the last value improves UX during retries.
-      try {
-        final activeIds = actives.map((a) => a.deviceId).toSet();
-        final storedIds = _latest.keys.toList();
-        for (final id in storedIds) {
-          if (!activeIds.contains(id)) {
-            debugPrint(
-                'Telemetry.pruner: $id is offline (keeping cached telemetry)');
-          }
+        if (diff <= _activeThresholdSeconds) {
+          actives.add(v);
+        } else {
+          toRemove.add(k);
         }
-      } catch (_) {}
+      });
+
+      // Clear cached data for offline devices to prevent "jumping" when they reconnect
+      for (final id in toRemove) {
+        debugPrint('Telemetry.pruner: $id is offline - clearing cache and history');
+        _latest.remove(id);
+        _positions.remove(id);
+      }
 
       _activeController.add(actives);
     });
@@ -276,22 +374,13 @@ class TelemetryService {
       channel.stream.listen((message) {
         try {
           // log raw message string for easier debugging
-          try {
-            debugPrint(
-                'Telemetry raw (string) for $deviceId: ${safeStringify(message)}');
-          } catch (_) {}
+          debugPrint('Telemetry raw (string) for $deviceId: ${message.toString()}');
+
           Map<String, dynamic> data = (message is String)
               ? json.decode(message) as Map<String, dynamic>
               : (json.decode(utf8.decode(message)) as Map<String, dynamic>);
-          try {
-            debugPrint(
-                'Telemetry raw message for $deviceId -> ${safeStringify(data)}');
-          } catch (_) {}
 
-          // Some servers send an envelope where the actual telemetry JSON is
-          // contained as a string under `data` (or `payload`/`message`).
-          // Unwrap that if present so TelemetryData.fromJson receives the
-          // inner object that contains `device_id` and `timestamp`.
+          // Unwrap envelope if present (Django Channels/Bridge adds these)
           try {
             Map<String, dynamic>? inner;
             if (data.containsKey('data')) {
@@ -299,9 +388,7 @@ class TelemetryService {
               if (d is String) {
                 try {
                   inner = json.decode(d) as Map<String, dynamic>;
-                } catch (_) {
-                  inner = null;
-                }
+                } catch (_) {}
               } else if (d is Map) {
                 inner = Map<String, dynamic>.from(d);
               }
@@ -311,9 +398,7 @@ class TelemetryService {
               if (d is String) {
                 try {
                   inner = json.decode(d) as Map<String, dynamic>;
-                } catch (_) {
-                  inner = null;
-                }
+                } catch (_) {}
               } else if (d is Map) {
                 inner = Map<String, dynamic>.from(d);
               }
@@ -323,24 +408,79 @@ class TelemetryService {
               if (d is String) {
                 try {
                   inner = json.decode(d) as Map<String, dynamic>;
-                } catch (_) {
-                  inner = null;
-                }
+                } catch (_) {}
               } else if (d is Map) {
                 inner = Map<String, dynamic>.from(d);
               }
             }
-            if (inner != null) {
-              data = inner;
-            }
+            if (inner != null) data = inner;
           } catch (e) {
-            debugPrint('Telemetry envelope unwrap error: $e');
+            debugPrint('Telemetry: envelope unwrap error: $e');
           }
 
-          if (data['status'] == 'offline') {
+          // ── Handle lifecycle status events BEFORE telemetry parsing ──────
+          // These arrive as top-level messages (no data envelope) with a
+          // 'type' field set to 'status_change' or 'report_ready'.
+          final msgType = data['type']?.toString();
+
+          if (msgType == 'status_change') {
+            final rawId = data['device_id']?.toString() ?? deviceId;
+            final normId = canonicalizeMac(rawId);
+            final endTs = data['cooldown_end_ts'];
+            DateTime? cooldownEnd;
+            if (endTs != null) {
+              final asNum = endTs is num
+                  ? endTs.toDouble()
+                  : double.tryParse(endTs.toString());
+              if (asNum != null && asNum > 0) {
+                final ms = asNum > 1e12
+                    ? asNum.toInt()
+                    : (asNum * 1000).toInt();
+                cooldownEnd =
+                    DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+              }
+            }
+            final state = CooldownState(
+              deviceId: rawId,
+              status: DeviceLifecycleStatus.cooldown,
+              cooldownEnd: cooldownEnd,
+              cooldownType: data['cooldown_type']?.toString(),
+            );
+            _cooldownStates[normId] = state;
+            _cooldownController.add(state);
+            debugPrint('Telemetry: status_change for $normId → cooldown until $cooldownEnd');
+            return;
+          }
+
+          if (msgType == 'report_ready') {
+            final rawId = data['device_id']?.toString() ?? deviceId;
+            final normId = canonicalizeMac(rawId);
+            final state = CooldownState(
+              deviceId: rawId,
+              status: DeviceLifecycleStatus.offline,
+              sessionId: data['session_id'] is int
+                  ? data['session_id'] as int
+                  : int.tryParse(data['session_id']?.toString() ?? ''),
+              reportId: data['report_id'] is int
+                  ? data['report_id'] as int
+                  : int.tryParse(data['report_id']?.toString() ?? ''),
+            );
+            _cooldownStates[normId] = state;
+            _cooldownController.add(state);
+            // Clear active telemetry cache — device is now fully offline
+            _latest.remove(normId);
+            _positions.remove(normId);
+            _activeController.add(getActiveDevices());
+            debugPrint('Telemetry: report_ready for $normId — device fully offline');
+            return;
+          }
+
+          // Handle explicit offline status (legacy path — keep for compatibility)
+          if (data['status'] == 'offline' && msgType == null) {
             final offId = canonicalizeMac(data['device_id'] ?? deviceId);
-            debugPrint('Telemetry: Received offline status for $offId');
+            debugPrint('Telemetry: explicit offline for $offId - clearing cache');
             _latest.remove(offId);
+            _positions.remove(offId);
             _activeController.add(getActiveDevices());
             return;
           }
@@ -349,22 +489,22 @@ class TelemetryService {
           try {
             t = TelemetryData.fromJson(data);
           } catch (e) {
-            debugPrint('Telemetry: ignoring message (parse failed): $e');
+            debugPrint('Telemetry: parse failed: $e. Data: $data');
             return;
           }
+
           final normId = canonicalizeMac(t.deviceId);
-          // Detailed per-message debug: show subscription key, payload id, ts and age
-          try {
-            final now = DateTime.now().toUtc();
-            final tsUtc = t.timestamp.toUtc();
-            final ageSec = now.difference(tsUtc).inSeconds;
-            debugPrint(
-                'Telemetry.received on subscription=$normKey payload=$normId ts=${tsUtc.toIso8601String()} age=${ageSec}s');
-          } catch (_) {}
-          if (normId.isEmpty) return;
+          final now = DateTime.now().toUtc();
+          final age = now.difference(t.timestamp.toUtc()).inSeconds;
+          debugPrint('Telemetry.received subscription=$normKey payload=$normId age=${age}s');
+
+          // Use the local receive time (not the device clock) for the active
+          // threshold check. The device clock can drift or be unsynchronised,
+          // which would cause the pruner to immediately remove the device from
+          // the active list even though data just arrived.
           final stored = TelemetryData(
             deviceId: normId,
-            timestamp: t.timestamp.toUtc(),
+            timestamp: DateTime.now().toUtc(), // receive time — not device clock
             gpsSignalQuality: t.gpsSignalQuality,
             simSignalQuality: t.simSignalQuality,
             lat: t.lat,
@@ -383,127 +523,56 @@ class TelemetryService {
             jobCompletionPercent: t.jobCompletionPercent,
             plot: t.plot,
             deviceInPlot: t.deviceInPlot,
+            flowRateLpm: t.flowRateLpm,
+            flowInLitres: t.flowInLitres,
           );
-          // Store telemetry under the message's device id
-          _latest[normId] = stored;
-          // Persist lat/lon history for this device if present, but only when
-          // coordinates look valid. We accept single-axis zero values, but
-          // reject clearly invalid or placeholder coordinates such as both
-          // lat and lon near 0.0. Use a small epsilon to avoid floating
-          // point equality edge cases.
-          try {
-            if (stored.lat != null && stored.lon != null) {
-              final lat = stored.lat!;
-              final lon = stored.lon!;
-              const double eps = 1e-6;
-              final bool finiteCoords = lat.isFinite && lon.isFinite;
-              final bool inRange =
-                  lat >= -90.0 && lat <= 90.0 && lon >= -180.0 && lon <= 180.0;
-              final bool bothNearZero = (lat.abs() < eps) && (lon.abs() < eps);
 
-              if (finiteCoords && inRange && !bothNearZero) {
-                final list =
-                    _positions.putIfAbsent(normId, () => <_LatLonEntry>[]);
-                list.add(_LatLonEntry(
-                    timestamp: stored.timestamp.toUtc(),
-                    lat: lat,
-                    lon: lon,
-                    speed: stored.speed,
-                    flowRate: stored.flowRate,
-                    sprayMode: stored.sprayMode,
-                    ptoState: stored.ptoState,
-                    deviceInPlot: stored.deviceInPlot));
-              } else {
-                try {
-                  debugPrint(
-                      'Telemetry: ignoring invalid coords for $normId lat=$lat lon=$lon');
-                } catch (_) {}
-              }
-            }
-          } catch (_) {}
-          // Also store telemetry under the subscription key (normKey) so that
-          // channels which forward messages for other device_ids still mark
-          // the subscribed control unit as active. Use the receive time for
-          // the subscription entry so small network/server timestamp skews
-          // don't mark the device offline immediately.
-          try {
-            if (normKey.isNotEmpty) {
-              final receiveTs = DateTime.now().toUtc();
-              _latest[normKey] = TelemetryData(
-                deviceId: normKey,
-                timestamp: receiveTs,
-                gpsSignalQuality: stored.gpsSignalQuality,
-                simSignalQuality: stored.simSignalQuality,
-                lat: stored.lat,
-                lon: stored.lon,
-                leftDistance: stored.leftDistance,
-                rightDistance: stored.rightDistance,
-                leftDensity: stored.leftDensity,
-                rightDensity: stored.rightDensity,
+          _latest[normId] = stored;
+
+          // Also mark the subscription key as active
+          if (normKey != normId) {
+            _latest[normKey] = stored;
+          }
+
+          // Positional history
+          if (stored.lat != null && stored.lon != null) {
+            final lat = stored.lat!;
+            final lon = stored.lon!;
+            if (lat.abs() > 0.1 || lon.abs() > 0.1) {
+              final list = _positions.putIfAbsent(normId, () => []);
+              list.add(_LatLonEntry(
+                timestamp: stored.timestamp.toUtc(),
+                lat: lat,
+                lon: lon,
                 speed: stored.speed,
                 flowRate: stored.flowRate,
-                leftSolenoidState: stored.leftSolenoidState,
-                rightSolenoidState: stored.rightSolenoidState,
                 sprayMode: stored.sprayMode,
-                tankLevel: stored.tankLevel,
                 ptoState: stored.ptoState,
-                jobCompletionPercent: stored.jobCompletionPercent,
-                plot: stored.plot,
                 deviceInPlot: stored.deviceInPlot,
-              );
-              debugPrint(
-                  'Telemetry: stored telemetry for payload=$normId and subscription=$normKey');
+              ));
             }
-          } catch (_) {}
-          // publish live update for listeners and push current actives immediately
-          try {
-            _updatesController.add(stored);
-          } catch (_) {}
-          // push current actives immediately and log which ids are active
-          final now = DateTime.now().toUtc();
-          final actives = <TelemetryData>[];
-          _latest.forEach((k, v) {
-            final diff = now.difference(v.timestamp.toUtc()).inSeconds;
-            if (diff <= _activeThresholdSeconds) actives.add(v);
-          });
-          try {
-            final keys = actives.map((a) => a.deviceId).toList();
-            debugPrint('Telemetry.immediate: active keys -> $keys');
-          } catch (_) {}
-          _activeController.add(actives);
+          }
+
+          _updatesController.add(stored);
+          _activeController.add(getActiveDevices());
         } catch (e) {
-          debugPrint('Telemetry parse error: $e');
+          debugPrint('Telemetry error for $deviceId: $e');
         }
       }, onError: (err) {
         debugPrint('Telemetry websocket error for $deviceId: $err');
       }, onDone: () {
-        // remove channel and schedule reconnect if still desired
         _channels.remove(normKey);
-        debugPrint('Telemetry websocket closed for $deviceId (norm=$normKey)');
-        // reconnect with exponential backoff, but cap attempts
+        debugPrint('Telemetry websocket closed for $deviceId');
         final attempts = (_reconnectAttempts[normKey] ?? 0) + 1;
         _reconnectAttempts[normKey] = attempts;
-        const maxAttempts = 5;
-        if (_desiredSubscriptions.contains(normKey) &&
-            attempts <= maxAttempts) {
-          final delay = Duration(seconds: (1 << (attempts - 1)).clamp(1, 32));
-          debugPrint(
-              'Telemetry: scheduling reconnect for $normKey in ${delay.inSeconds}s (attempt $attempts)');
+        if (_desiredSubscriptions.contains(normKey) && attempts <= 5) {
+          final delay = Duration(seconds: (1 << (attempts - 1)).clamp(1, 30));
+          debugPrint('Telemetry: reconnecting $normKey in ${delay.inSeconds}s');
           Timer(delay, () {
-            // only attempt if still desired and not currently connected
-            if (_desiredSubscriptions.contains(normKey) &&
-                !_channels.containsKey(normKey)) {
+            if (_desiredSubscriptions.contains(normKey) && !_channels.containsKey(normKey)) {
               subscribe(normKey);
             }
           });
-        } else {
-          if (!_desiredSubscriptions.contains(normKey)) {
-            debugPrint(
-                'Telemetry: not reconnecting $normKey (no longer desired)');
-          } else {
-            debugPrint(
-                'Telemetry: max reconnect attempts reached for $normKey');
-          }
         }
       });
     } catch (e) {
@@ -526,6 +595,7 @@ class TelemetryService {
     final norm = canonicalizeMac(deviceId);
     debugPrint('Telemetry: Manually clearing cache for $norm');
     _latest.remove(norm);
+    _positions.remove(norm); // Also clear history
     _activeController.add(getActiveDevices());
   }
 
@@ -605,11 +675,15 @@ class TelemetryService {
     _latest.clear();
     _pruneTimer?.cancel();
     _positions.clear();
+    _cooldownStates.clear();
     try {
       _updatesController.close();
     } catch (_) {}
     try {
       _activeController.close();
+    } catch (_) {}
+    try {
+      _cooldownController.close();
     } catch (_) {}
   }
 }
@@ -638,9 +712,7 @@ class _LatLonEntry {
 
 final telemetryServiceProvider = Provider<TelemetryService>((ref) {
   // Use provided base URL; default to ws://13.201.0.34:8001
-
   final svc = TelemetryService(baseUrl: 'ws://3.108.218.140:8001');
-
   ref.onDispose(() => svc.dispose());
   return svc;
 });
@@ -648,4 +720,29 @@ final telemetryServiceProvider = Provider<TelemetryService>((ref) {
 final activeDevicesProvider = StreamProvider<List<TelemetryData>>((ref) {
   final svc = ref.watch(telemetryServiceProvider);
   return svc.activeDevicesStream;
+});
+
+final deviceOnlineProvider = Provider.family<bool, String>((ref, deviceId) {
+  final actives = ref.watch(activeDevicesProvider).asData?.value ?? [];
+  final norm = canonicalizeMac(deviceId);
+  return actives.any((a) => canonicalizeMac(a.deviceId) == norm);
+});
+
+/// Provides a stream of [CooldownState] changes for a specific device.
+///
+/// Emits whenever the backend sends a `status_change` or `report_ready`
+/// WebSocket event for [deviceId].  The stream is seeded with the last
+/// known state so screens that mount after an event immediately reflect
+/// the current cooldown.
+final deviceCooldownStateProvider =
+    StreamProvider.family<CooldownState, String>((ref, deviceId) {
+  final svc = ref.watch(telemetryServiceProvider);
+
+  Stream<CooldownState> seeded() async* {
+    final existing = svc.getCooldownState(deviceId);
+    if (existing != null) yield existing;
+    yield* svc.deviceCooldownStream(deviceId);
+  }
+
+  return seeded();
 });

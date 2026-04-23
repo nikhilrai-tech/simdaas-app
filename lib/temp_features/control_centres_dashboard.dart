@@ -23,12 +23,27 @@ class TempDashboard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final userId = ref.read(authServiceProvider).currentUserId ?? '';
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
+    final activeDevices = ref.watch(activeDevicesProvider).asData?.value ?? [];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),
         elevation: 0,
         actions: [
+          // Live status indicator (subtle)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Center(
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: activeDevices.isNotEmpty ? Colors.green : Colors.grey,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Profile',
             icon: const Icon(Icons.account_circle_outlined),
@@ -128,7 +143,10 @@ class TempDashboard extends ConsumerWidget {
                         _DashboardCard(
                           icon: Icons.devices_other_outlined,
                           title: 'Active Devices',
-                          subtitle: _controlSummary(controlUnitsAsync.asData?.value ?? []),
+                          subtitle: _controlSummary(
+                            controlUnitsAsync.asData?.value ?? [],
+                            activeDevices,
+                          ),
                           color: const Color(0xFF1B5E20),
                           onTap: () {
                             final items = controlUnitsAsync.asData?.value ?? [];
@@ -174,15 +192,36 @@ class TempDashboard extends ConsumerWidget {
   }
 
 
-  String _controlSummary(List items) {
+  String _controlSummary(List items, List<TelemetryData> actives) {
     if (items.isEmpty) return 'No control centres';
+
+    final activeKeys = actives.map((t) => canonicalizeMac(t.deviceId)).toSet();
+    int onlineCount = 0;
+
     final statuses = <String, int>{};
     for (final it in items) {
+      final deviceId = extractDeviceId(it);
+      if (deviceId.isNotEmpty && activeKeys.contains(canonicalizeMac(deviceId))) {
+        onlineCount++;
+      }
+
       final s = (it.status ?? 'unknown').toString().toLowerCase();
       statuses[s] = (statuses[s] ?? 0) + 1;
     }
-    final parts =
+
+    final List<String> parts = [];
+    if (onlineCount > 0) {
+      parts.add('Online: $onlineCount');
+    } else if (actives.isEmpty) {
+      // If we have items but none are in the active list
+      parts.add('All Offline');
+    }
+
+    // Include DB status counts as well for context
+    final statusParts =
         statuses.entries.map((e) => '${_capitalize(e.key)}: ${e.value}');
+    parts.addAll(statusParts);
+
     return parts.join(' • ');
   }
 
@@ -404,14 +443,35 @@ class _ControlUnitsListScreenState
                         : (cu.controlUnitId ?? cu.id).toString();
 
                     return ListTile(
-                      title: Text(cu.name.toString()),
+                      leading: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: isActive ? Colors.green : Colors.orange,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            if (isActive)
+                              BoxShadow(
+                                color: Colors.green.withAlpha(100),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              )
+                          ],
+                        ),
+                      ),
+                      title: Text(cu.name.toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (displayId.isNotEmpty) Text('ID: $displayId'),
                           if (linkedPlotId.isNotEmpty)
                             Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
-                          Text('Status: $statusText'),
+                          Text(statusText.toUpperCase(), 
+                            style: TextStyle(
+                              color: isActive ? Colors.green.shade700 : Colors.orange.shade700,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            )),
                         ],
                       ),
                       onTap: deviceIdNorm.isNotEmpty

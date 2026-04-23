@@ -1,13 +1,13 @@
 String canonicalizeMac(String input) {
   final s = input.trim().toLowerCase();
-  // Remove any non-hex characters
-  final hex = s.replaceAll(RegExp(r'[^0-9a-f]'), '');
-  if (hex.length != 12) {
-    // If it doesn't look like a MAC after stripping, fall back to trimmed lower
-    return s;
+  // Remove any non-alphanumeric characters
+  final alnum = s.replaceAll(RegExp(r'[^0-9a-z]'), '');
+  if (alnum.length != 12) {
+    // If it's not a standard length, return the stripped version if not empty
+    return alnum.isEmpty ? s : alnum;
   }
   final parts =
-      List<String>.generate(6, (i) => hex.substring(i * 2, i * 2 + 2));
+      List<String>.generate(6, (i) => alnum.substring(i * 2, i * 2 + 2));
   return parts.join(':');
 }
 

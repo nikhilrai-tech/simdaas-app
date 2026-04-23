@@ -32,9 +32,8 @@ class MonitoringScreen extends ConsumerStatefulWidget {
 }
 
 class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
-  // Static map to persist ignore timestamps across widget rebuilds/navigation 
-  // if needed, or just keep it instance-level if the user stays on the screen.
-  // Using instance-level for now as the user "Ends" while on this screen.
+  // Ignore telemetry for N minutes after a manual end (belt-and-suspenders
+  // in case the WS event arrives late).
   final Map<String, DateTime> _ignoredUntil = {};
 
   bool _isDemoMode = false;
@@ -48,6 +47,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   bool _showSensorOverlay = false;
   final MapController _mapController = MapController();
   bool _outOfPlotSnackVisible = false;
+
+  // ── Cooldown state ───────────────────────────────────────────────────────
+  CooldownState? _cooldownState;
+  StreamSubscription<CooldownState>? _cooldownSub;
+  // Ticks every second to refresh the MM:SS countdown label.
+  Timer? _countdownTimer;
 
   @override
   void initState() {
@@ -107,6 +112,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
             return;
           }
 
+          if (!mounted) return;
+
           setState(() {
             latestTelemetry = t;
             if (t.lat != null && t.lon != null) {
@@ -126,17 +133,82 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           // Show or hide persistent out-of-plot snackbar based on payload.
           _updateOutOfPlotSnack(t);
         });
+
+        // Monitor online status to clear UI when device goes offline
+        ref.listenManual(deviceOnlineProvider(normId), (previous, next) {
+          if (next == false && latestTelemetry != null) {
+            debugPrint('MonitoringScreen: Device $normId gone offline - clearing UI');
+            setState(() {
+              latestTelemetry = null;
+              positions.clear();
+            });
+          }
+        });
       } catch (e, st) {
         debugPrint('MonitoringScreen: deviceTelemetryStream listen error: $e');
         debugPrint('stack: $st');
       }
+
+      // ── Subscribe to cooldown / lifecycle status events ──────────────
+      // Seed from existing state (in case cooldown started before screen mounted).
+      final existing = svc.getCooldownState(normId);
+      if (existing != null) {
+        _cooldownState = existing;
+        _startCountdownTimer();
+      }
+      _cooldownSub = svc.deviceCooldownStream(normId).listen((state) {
+        if (!mounted) return;
+        setState(() => _cooldownState = state);
+        if (state.isInCooldown) {
+          _startCountdownTimer();
+        } else {
+          _stopCountdownTimer();
+          if (state.status == DeviceLifecycleStatus.offline &&
+              state.reportId != null) {
+            // Report is ready — show a snackbar prompt
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: const Text('Report generated! Tap to view.'),
+                  duration: const Duration(seconds: 6),
+                  action: SnackBarAction(
+                    label: 'View',
+                    onPressed: () {
+                      // Navigate to reports list
+                      Navigator.of(context).pushNamed('/reports');
+                    },
+                  ),
+                ));
+              }
+            });
+          }
+        }
+      });
     }
+  }
+
+  void _startCountdownTimer() {
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {}); // rebuild to update MM:SS label
+      if ((_cooldownState?.secondsRemaining ?? 0) <= 0) {
+        _stopCountdownTimer();
+      }
+    });
+  }
+
+  void _stopCountdownTimer() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
   }
 
   @override
   void dispose() {
     _demoTimer?.cancel();
     _deviceSub?.cancel();
+    _cooldownSub?.cancel();
+    _countdownTimer?.cancel();
     super.dispose();
   }
 
@@ -205,6 +277,78 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   void _stopDemo() {
     _demoTimer?.cancel();
     _demoTimer = null;
+  }
+
+  // ── Cooldown banner widget ───────────────────────────────────────────────
+  Widget _buildCooldownBanner(CooldownState state) {
+    final isManual = state.cooldownType == 'manual_end';
+    final label = isManual
+        ? 'Session ended — report generating'
+        : 'Device offline — report generating';
+    final countdown = state.countdownLabel;
+    final seconds = state.secondsRemaining;
+    // Progress fraction: manual = 120 s max, auto = 600 s max
+    final total = isManual ? 120.0 : 600.0;
+    final fraction = (seconds / total).clamp(0.0, 1.0);
+
+    return Container(
+      color: Colors.orange.shade800.withOpacity(0.95),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.hourglass_top_rounded,
+                    color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    countdown,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: fraction,
+                backgroundColor: Colors.white.withOpacity(0.25),
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(Colors.white),
+                minHeight: 4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   int getSignalBars(int signalQuality) {
@@ -306,7 +450,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   ),
                 ),
           title: Row(children: [
-            Text(resolvedControlUnitName ?? 'Data Monitoring'),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(resolvedControlUnitName ?? 'Data Monitoring', style: const TextStyle(fontSize: 18)),
+                if (latestTelemetry != null && 
+                    DateTime.now().difference(latestTelemetry!.timestamp.toLocal()).inSeconds < 10)
+                  const Text('● LIVE', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+              ],
+            ),
             const Spacer(),
             if (latestTelemetry != null) ...[
               // Signal/GPS status chip
@@ -646,28 +799,48 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                     await ref
                                         .read(eq_provs.equipmentControllerProvider)
                                         .endSession(sessionIdToEnd, deviceId: deviceMac);
-                                    
-                                    // 1. Mandatory Ignore: Set 2-minute ignore period for this device
+
+                                    // 1. Mandatory ignore: block incoming telemetry for 2 min
+                                    //    (the WS status_change event is the authoritative source,
+                                    //    but this guards against late-arriving packets).
                                     if (deviceMac != null) {
                                       final normMac = canonicalizeMac(deviceMac);
-                                      _ignoredUntil[normMac] = DateTime.now().add(const Duration(minutes: 2));
+                                      _ignoredUntil[normMac] = DateTime.now()
+                                          .add(const Duration(minutes: 2));
                                     }
 
-                                    // 2. Immediate UI Feedback: Clear local telemetry state
+                                    // 2. Immediate UI feedback: clear local telemetry state
                                     setState(() {
                                       latestTelemetry = null;
                                       positions.clear();
+                                      _demoTimer?.cancel();
+                                      _demoTimer = null;
+                                      _isDemoMode = false;
+                                      // Show a local cooldown state immediately — the WS event
+                                      // will arrive shortly and replace this with the real end_ts.
+                                      _cooldownState = CooldownState(
+                                        deviceId: deviceMac ?? '',
+                                        status: DeviceLifecycleStatus.cooldown,
+                                        cooldownEnd: DateTime.now()
+                                            .toUtc()
+                                            .add(const Duration(minutes: 2)),
+                                        cooldownType: 'manual_end',
+                                      );
+                                      _startCountdownTimer();
                                     });
 
-                                    // 3. Stop Demo if active
-                                    if (_isDemoMode) {
-                                      _stopDemo();
+                                    // 3. Clear service cache as well (extra safety)
+                                    if (deviceMac != null) {
+                                      ref.read(telemetryServiceProvider).clearCache(deviceMac);
                                     }
 
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(const SnackBar(content: Text('Session ended. Device will stay offline for 2 mins.')));
-                                      // Navigator.of(context).pop(); // Don't pop, let them see it's offline
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Session ended. Report will be generated in 2 minutes.'),
+                                          duration: Duration(seconds: 4),
+                                        ),
+                                      );
                                     }
                                   } catch (err) {
                                     if (context.mounted) {
@@ -747,10 +920,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'end_session',
-                                  enabled: sessionsLoaded && (resolvedActiveSessionId != null || (sessionsAsync.asData?.value != null)),
-                                  child: Text(
-                                      !sessionsLoaded ? 'End active device (loading...)' : 'End active device',
-                                      style: TextStyle(color: sessionsLoaded ? Colors.red : Colors.grey))),
+                                  child: Row(
+                                    children: const [
+                                      Icon(Icons.stop_circle_outlined,
+                                          color: Colors.redAccent, size: 20),
+                                      SizedBox(width: 8),
+                                      Text('End active device',
+                                          style: TextStyle(color: Colors.redAccent)),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ],
                           ),
@@ -762,7 +941,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               ),
             ),
 
-            // Top-left L/R nozzle indicators (left/right)
+            // ── Cooldown / offline-pending banner ──────────────────────────
+            if (_cooldownState != null &&
+                _cooldownState!.status == DeviceLifecycleStatus.cooldown)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _buildCooldownBanner(_cooldownState!),
+              ),
+
+            // ── Top-left L/R nozzle indicators (left/right) ───────────────
             Positioned(
               top: 12,
               left: 12,
@@ -851,6 +1040,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   final speed = t != null && t.speed != null
                       ? t.speed!.toStringAsFixed(2)
                       : read(m['tractorSpeed'] ?? m['speed']);
+                  
+                  final flowRateLpmStr = t != null && t.flowRateLpm != null
+                      ? t.flowRateLpm!.toStringAsFixed(2)
+                      : flowRate;
+                  final flowInLitresStr = t != null && t.flowInLitres != null
+                      ? t.flowInLitres!.toStringAsFixed(2)
+                      : '-';
 
                   final ptoOn = t != null && t.ptoState != null
                       ? (t.ptoState == 1)
@@ -911,8 +1107,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                           mainAxisAlignment:
                                               MainAxisAlignment.spaceAround,
                                           children: [
-                                            _smallStat('Flow LPM', flowRate),
-                                            _smallStat('Flow L', '-'),
+                                            _smallStat('Flow LPM', flowRateLpmStr),
+                                            _smallStat('Flow L', flowInLitresStr),
                                             _smallStat('Speed', '$speed kmph'),
                                             _ptoSmallStat(ptoOn),
                                           ]),

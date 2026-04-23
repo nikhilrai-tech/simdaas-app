@@ -273,40 +273,125 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     final points = report.trajectory.map((p) => LatLng(p.lat, p.lon)).toList();
     final centroid = _getCentroid(points);
 
-    return Container(
-      height: 250,
-      decoration: BoxDecoration(
-        color: Colors.grey[900],
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: FlutterMap(
-          options: MapOptions(
-            initialCenter: centroid,
-            initialZoom: 18.0,
+    return Stack(
+      children: [
+        Container(
+          height: 250,
+          decoration: BoxDecoration(
+            color: Colors.grey[900],
+            borderRadius: BorderRadius.circular(16),
           ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-              subdomains: const ['a', 'b', 'c'],
-            ),
-            if (report.plot != null)
-              PolygonLayer(
-                polygons: [
-                  Polygon(
-                    points: report.plot!.polygon,
-                    color: const Color(0xFF00A36C).withOpacity(0.1),
-                    borderStrokeWidth: 2.0,
-                    borderColor: const Color(0xFF00A36C).withOpacity(0.5),
-                  ),
-                ],
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: centroid,
+                initialZoom: 18.0,
               ),
-            PolylineLayer(
-              polylines: _buildHeatmapPolylines(report.trajectory),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                  subdomains: const ['a', 'b', 'c'],
+                ),
+                if (report.plot != null)
+                  PolygonLayer(
+                    polygons: [
+                      Polygon(
+                        points: report.plot!.polygon,
+                        color: const Color(0xFF00A36C).withOpacity(0.1),
+                        borderStrokeWidth: 2.0,
+                        borderColor: const Color(0xFF00A36C).withOpacity(0.5),
+                      ),
+                    ],
+                  ),
+                PolylineLayer(
+                  polylines: _buildHeatmapPolylines(report.trajectory),
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: points.first,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(Icons.play_circle_fill, color: Colors.green, size: 30),
+                    ),
+                    Marker(
+                      point: points.last,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(Icons.stop_circle, color: Colors.red, size: 30),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ],
+          ),
         ),
+        Positioned(
+          top: 12,
+          right: 12,
+          child: _buildLegend(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLegend() {
+    List<Widget> items = [];
+    switch (_heatmapType) {
+      case HeatmapType.gps:
+        items = [
+          _legendItem('Auto', Colors.blue),
+          _legendItem('Manual', Colors.orange),
+          _legendItem('Out Plot', Colors.red),
+        ];
+        break;
+      case HeatmapType.speed:
+        items = [
+          _legendItem('Low', Colors.green),
+          _legendItem('Med', Colors.yellow),
+          _legendItem('High', Colors.red),
+        ];
+        break;
+      case HeatmapType.spraying:
+        items = [
+          _legendItem('Light', Colors.blue.shade100),
+          _legendItem('Heavy', Colors.blue.shade900),
+        ];
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: items,
+      ),
+    );
+  }
+
+  Widget _legendItem(String label, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+        ],
       ),
     );
   }
@@ -383,7 +468,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           if (currentPoints.length >= 2 && currentColor != null) {
             result.add(Polyline(
               points: List<LatLng>.from(currentPoints),
-              strokeWidth: 4.0,
+              strokeWidth: 6.0,
               color: currentColor,
             ));
           }
@@ -417,7 +502,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     if (currentPoints.length >= 2 && currentColor != null) {
       result.add(Polyline(
         points: List<LatLng>.from(currentPoints),
-        strokeWidth: 4.0,
+        strokeWidth: 6.0,
         color: currentColor,
       ));
     }
