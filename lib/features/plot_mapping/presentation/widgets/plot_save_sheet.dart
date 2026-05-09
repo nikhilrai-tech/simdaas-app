@@ -413,6 +413,7 @@ Future<bool> showPlotSaveSheet(
       treeCount: treeCount,
       polygon: normalizedPoints,
       userId: owner,
+      rowLines: existingPlot?.rowLines,
   );
 
   final repo = ref.read(plotRepoProvider);

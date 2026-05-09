@@ -45,6 +45,23 @@ class TempDashboard extends ConsumerWidget {
             ),
           ),
           IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              ref.invalidate(eq_provs.controlUnitsProvider(userId));
+              ref.invalidate(eq_provs.equipmentsListProvider(userId));
+              ref.invalidate(fm_provs.plotsListProvider(userId));
+              ref.invalidate(activeDevicesProvider);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Refreshing...'),
+                  duration: Duration(seconds: 1),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+          ),
+          IconButton(
             tooltip: 'Profile',
             icon: const Icon(Icons.account_circle_outlined),
             onPressed: () => Navigator.of(context).pushNamed('/profile'),
@@ -295,41 +312,14 @@ class _ControlUnitsListScreen extends ConsumerStatefulWidget {
 
 class _ControlUnitsListScreenState
     extends ConsumerState<_ControlUnitsListScreen> {
-  TelemetryService? _telemetrySvc;
   String _deviceFilter = 'all'; // 'all', 'active', 'inactive'
-  @override
-  void initState() {
-    super.initState();
-    // Cache telemetry service to avoid using `ref` during dispose.
-    _telemetrySvc = ref.read(telemetryServiceProvider);
-    // Subscribe to telemetry for all listed control units that have an id
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final svc = _telemetrySvc;
-      if (svc == null) return;
-      for (final cu in widget.items) {
-        try {
-          final id = extractDeviceId(cu);
-          if (id.isNotEmpty) svc.subscribe(id);
-        } catch (_) {}
-      }
-    });
-  }
 
-  @override
-  void dispose() {
-    // Unsubscribe from telemetry for listed control units
-    final svc = _telemetrySvc;
-    if (svc != null) {
-      for (final cu in widget.items) {
-        try {
-          final id = extractDeviceId(cu);
-          if (id.isNotEmpty) svc.unsubscribe(id);
-        } catch (_) {}
-      }
-    }
-    super.dispose();
-  }
+  // NOTE: this screen does NOT manage telemetry subscriptions itself.
+  // TelemetryBootstrapper at app root subscribes to every control unit owned
+  // by the signed-in user via `subscribeToDevices`. If we also subscribe
+  // here and unsubscribe in dispose(), navigating away from this screen
+  // closes the WebSocket channels and breaks the dashboard's
+  // `activeDevicesProvider` (it goes empty → "All Offline").
 
   @override
   Widget build(BuildContext context) {
@@ -429,74 +419,16 @@ class _ControlUnitsListScreenState
                   separatorBuilder: (_, __) => const Divider(),
                   itemBuilder: (context, i) {
                     final cu = filteredItems[i];
+                    final deviceId = extractDeviceId(cu);
+                    final isInActiveList = deviceId.isNotEmpty &&
+                        activeKeys.contains(canonicalizeMac(deviceId));
                     final linkedPlotId = (cu.linkedPlotId ?? '').toString();
                     final linkedPlotName =
                         _extractPlotNameFromLinked(linkedPlotId, plotMap);
-
-                    final deviceId = extractDeviceId(cu);
-                    final deviceIdNorm = deviceId;
-                    final isActive = deviceIdNorm.isNotEmpty &&
-                        activeKeys.contains(canonicalizeMac(deviceIdNorm));
-                    final statusText = isActive ? 'online' : 'offline';
-                    final displayId = deviceId.isNotEmpty
-                        ? deviceId
-                        : (cu.controlUnitId ?? cu.id).toString();
-
-                    return ListTile(
-                      leading: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: isActive ? Colors.green : Colors.orange,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            if (isActive)
-                              BoxShadow(
-                                color: Colors.green.withAlpha(100),
-                                blurRadius: 4,
-                                spreadRadius: 1,
-                              )
-                          ],
-                        ),
-                      ),
-                      title: Text(cu.name.toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (displayId.isNotEmpty) Text('ID: $displayId'),
-                          if (linkedPlotId.isNotEmpty)
-                            Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
-                          Text(statusText.toUpperCase(), 
-                            style: TextStyle(
-                              color: isActive ? Colors.green.shade700 : Colors.orange.shade700,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            )),
-                        ],
-                      ),
-                      onTap: deviceIdNorm.isNotEmpty
-                          ? () {
-                              // Try to extract a usable plot id from the linkedPlotId
-                              String? plotIdForNav;
-                              try {
-                                if (linkedPlotId.isNotEmpty) {
-                                  final idMatch =
-                                      RegExp(r'id\s*[:=]\s*([0-9A-Za-z-]+)')
-                                          .firstMatch(linkedPlotId);
-                                  if (idMatch != null) {
-                                    plotIdForNav = idMatch.group(1);
-                                  } else {
-                                    plotIdForNav = linkedPlotId;
-                                  }
-                                }
-                              } catch (_) {}
-
-                              Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => MonitoringScreen(
-                                      deviceId: deviceIdNorm,
-                                      plotId: plotIdForNav)));
-                            }
-                          : null,
+                    return _DeviceListItem(
+                      cu: cu,
+                      isInActiveList: isInActiveList,
+                      linkedPlotName: linkedPlotName,
                     );
                   },
                 );
@@ -730,6 +662,136 @@ class _ControlUnitsListScreenState
 
   // Status icon/color helper removed; list now shows online/offline using
   // wifi/wifi_off icons and explicit colors.
+}
+
+/// Single row in the Active Devices list.
+/// Watches the device's cooldown stream so the status dot and label
+/// update immediately when a session is ended (no screen reload needed).
+class _DeviceListItem extends ConsumerWidget {
+  final dynamic cu;
+  final bool isInActiveList;
+  final String? linkedPlotName;
+
+  const _DeviceListItem({
+    required this.cu,
+    required this.isInActiveList,
+    this.linkedPlotName,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final deviceId = extractDeviceId(cu);
+    final lookupId = deviceId.isNotEmpty ? deviceId : '__none__';
+    final cooldownAsync = ref.watch(deviceCooldownStateProvider(lookupId));
+    final cooldownState = cooldownAsync.asData?.value;
+
+    final isInCooldown = cooldownState?.isInCooldown ?? false;
+    final isEffectivelyActive = isInActiveList && !isInCooldown &&
+        (cooldownState?.status != DeviceLifecycleStatus.offline);
+
+    final String statusText;
+    final Color statusColor;
+    if (isInCooldown) {
+      statusText = 'COOLDOWN';
+      statusColor = Colors.orange;
+    } else if (isEffectivelyActive) {
+      statusText = 'ONLINE';
+      statusColor = Colors.green;
+    } else {
+      statusText = 'OFFLINE';
+      statusColor = Colors.orange;
+    }
+
+    final linkedPlotId = (cu.linkedPlotId ?? '').toString();
+    final displayId = deviceId.isNotEmpty
+        ? deviceId
+        : (cu.controlUnitId ?? cu.id).toString();
+
+    // The status pill: COOLDOWN sits on the right (trailing) in blue so it
+    // is visually distinct from ONLINE/OFFLINE which stay in the subtitle.
+    final cooldownPill = isInCooldown
+        ? Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.blue.withAlpha(30),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'COOLDOWN',
+              style: TextStyle(
+                color: Colors.blue,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+          )
+        : null;
+
+    return ListTile(
+      leading: Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          color: isInCooldown ? Colors.blue : statusColor,
+          shape: BoxShape.circle,
+          boxShadow: [
+            if (isEffectivelyActive)
+              BoxShadow(
+                color: Colors.green.withAlpha(100),
+                blurRadius: 4,
+                spreadRadius: 1,
+              ),
+          ],
+        ),
+      ),
+      title: Text(
+        cu.name.toString(),
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (displayId.isNotEmpty) Text('ID: $displayId'),
+          if (linkedPlotId.isNotEmpty)
+            Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
+          if (!isInCooldown)
+            Text(
+              statusText,
+              style: TextStyle(
+                color: isEffectivelyActive
+                    ? Colors.green.shade700
+                    : statusColor.withAlpha(200),
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+        ],
+      ),
+      trailing: cooldownPill,
+      onTap: deviceId.isNotEmpty
+          ? () {
+              String? plotIdForNav;
+              try {
+                if (linkedPlotId.isNotEmpty) {
+                  final idMatch =
+                      RegExp(r'id\s*[:=]\s*([0-9A-Za-z-]+)')
+                          .firstMatch(linkedPlotId);
+                  if (idMatch != null) {
+                    plotIdForNav = idMatch.group(1);
+                  } else {
+                    plotIdForNav = linkedPlotId;
+                  }
+                }
+              } catch (_) {}
+              Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) =>
+                      MonitoringScreen(deviceId: deviceId, plotId: plotIdForNav)));
+            }
+          : null,
+    );
+  }
 }
 
 class _DashboardCard extends StatelessWidget {

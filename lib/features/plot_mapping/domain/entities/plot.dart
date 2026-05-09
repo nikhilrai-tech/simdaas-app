@@ -19,6 +19,8 @@ class PlotEntity {
   final double? bedHeight;
   // creation timestamp
   final DateTime? createdAt;
+  // saved row lines: each entry is a 2-point segment [[start],[end]]
+  final List<List<LatLng>>? rowLines;
 
   PlotEntity({
     required this.id,
@@ -31,5 +33,6 @@ class PlotEntity {
     this.centroid,
     this.bedHeight,
     this.createdAt,
+    this.rowLines,
   });
 }

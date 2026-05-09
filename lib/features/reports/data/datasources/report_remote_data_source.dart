@@ -14,7 +14,13 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
   @override
   Future<List<ReportModel>> getReports() async {
     try {
-      final response = await api.getJson('/jobs/api/reports/');
+      final response = await api.getJson('/jobs/api/reports/?page_size=200');
+      // Backend now returns a paginated dict: { count, next, previous, results }.
+      // Fall back to a plain list for forward/backwards compatibility.
+      if (response is Map && response['results'] is List) {
+        final results = response['results'] as List;
+        return results.map((e) => ReportModel.fromJson(e)).toList();
+      }
       if (response is List) {
         return response.map((e) => ReportModel.fromJson(e)).toList();
       }
@@ -28,7 +34,7 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
   @override
   Future<ReportModel> getReport(String id) async {
     try {
-      final response = await api.getJson('/jobs/api/sessions/$id/report/');
+      final response = await api.getJson('/jobs/api/reports/$id/');
       return ReportModel.fromJson(response);
     } catch (e) {
       debugPrint('Error fetching report detail: $e');

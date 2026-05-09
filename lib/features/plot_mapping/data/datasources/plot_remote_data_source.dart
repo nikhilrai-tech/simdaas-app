@@ -29,7 +29,7 @@ class PlotRemoteDataSourceImpl implements PlotRemoteDataSource {
       'name': plot.name,
       'polygon': polygon,
       'row_spacing': plot.rowSpacing,
-      'tree_count': plot.treeCount,
+      'tree_count': plot.treeCount, // null is accepted; backend field is nullable
       'user_area_acre': plot.area,
       'approxArea': plot.area,
       // backend sample used a string for bed_height; convert to string if present

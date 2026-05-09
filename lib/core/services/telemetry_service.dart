@@ -448,6 +448,15 @@ class TelemetryService {
             );
             _cooldownStates[normId] = state;
             _cooldownController.add(state);
+            // Remove from active tracking immediately; subsequent telemetry
+            // from the still-running hardware is suppressed below.
+            _latest.remove(normId);
+            _positions.remove(normId);
+            if (normKey != normId) {
+              _latest.remove(normKey);
+              _positions.remove(normKey);
+            }
+            _activeController.add(getActiveDevices());
             debugPrint('Telemetry: status_change for $normId → cooldown until $cooldownEnd');
             return;
           }
@@ -494,6 +503,28 @@ class TelemetryService {
           }
 
           final normId = canonicalizeMac(t.deviceId);
+
+          // Suppress telemetry from hardware that keeps sending during cooldown.
+          final cs = _cooldownStates[normId];
+          if (cs != null && cs.status == DeviceLifecycleStatus.cooldown) {
+            debugPrint('Telemetry: suppressing $normId — device is in cooldown');
+            return;
+          }
+          // Fresh telemetry after fully offline means a new session started.
+          // Clear the cooldown state AND broadcast an `online` event so any
+          // UI subscribed via `deviceCooldownStream` (e.g. the Active Devices
+          // list) learns the device is no longer offline. Without this
+          // broadcast the StreamProvider keeps its last cached `offline`
+          // value and the device stays stuck on "OFFLINE" even though
+          // active telemetry is flowing.
+          if (cs != null && cs.status == DeviceLifecycleStatus.offline) {
+            _cooldownStates.remove(normId);
+            _cooldownController.add(CooldownState(
+              deviceId: cs.deviceId,
+              status: DeviceLifecycleStatus.online,
+            ));
+          }
+
           final now = DateTime.now().toUtc();
           final age = now.difference(t.timestamp.toUtc()).inSeconds;
           debugPrint('Telemetry.received subscription=$normKey payload=$normId age=${age}s');

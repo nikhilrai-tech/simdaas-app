@@ -287,7 +287,7 @@ class _PlotListScreenState extends ConsumerState<PlotListScreen>
                                     ),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: PlotThumbnail(polygon: f.polygon),
+                                  child: PlotThumbnail(polygon: f.polygon, rowLines: f.rowLines),
                                 ),
                               ),
                               const SizedBox(width: 16),
@@ -395,27 +395,15 @@ class _PlotListScreenState extends ConsumerState<PlotListScreen>
 
 class PlotThumbnail extends StatelessWidget {
   final List<LatLng> polygon;
-  const PlotThumbnail({super.key, required this.polygon});
+  final List<List<LatLng>>? rowLines;
+  const PlotThumbnail({super.key, required this.polygon, this.rowLines});
 
   @override
   Widget build(BuildContext context) {
-    if (polygon.isEmpty) {
-      return Container(
-        color: Colors.grey.shade200,
-        child:
-            const Center(child: Icon(Icons.map, size: 28, color: Colors.grey)),
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        color: Colors.white,
-        child: CustomPaint(
-          painter: PlotPolygonPainter(polygon),
-          child: const SizedBox.expand(),
-        ),
-      ),
+    return PlotPreview(
+      polygon: polygon,
+      useMap: true,
+      rowLines: rowLines,
     );
   }
 }

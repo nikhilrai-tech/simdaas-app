@@ -13,18 +13,21 @@ import 'dart:ui' as ui;
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
 import 'map_screen.dart';
+import 'row_line_screen.dart';
 
 class PlotPreview extends StatelessWidget {
   final List<LatLng> polygon;
   final double width;
   final double height;
   final bool useMap;
+  final List<List<LatLng>>? rowLines;
   const PlotPreview({
     super.key,
     required this.polygon,
     this.width = 300,
     this.height = 200,
     this.useMap = false,
+    this.rowLines,
   });
 
   @override
@@ -70,6 +73,17 @@ class PlotPreview extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (rowLines != null && rowLines!.isNotEmpty)
+                    PolylineLayer(
+                      polylines: rowLines!
+                          .where((seg) => seg.length >= 2)
+                          .map((seg) => Polyline(
+                                points: seg,
+                                color: Colors.yellow.withAlpha(220),
+                                strokeWidth: 2.0,
+                              ))
+                          .toList(),
+                    ),
                 ],
               )
             : CustomPaint(
@@ -175,8 +189,6 @@ class PlotDetailsScreen extends StatefulWidget {
 }
 
 class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
-  bool _useMapView = false;
-
   @override
   Widget build(BuildContext context) {
     // We need a Consumer to access ref, but we are in a StatefulWidget.
@@ -206,6 +218,7 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
                       centroid: plot.centroid,
                       bedHeight: plot.bedHeight,
                       createdAt: plot.createdAt,
+                      rowLines: plot.rowLines,
                     ),
                   ),
                 ),
@@ -217,6 +230,35 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
                   ref.invalidate(plotsListProvider(currentUserId));
                 }
                 showSuccessSnackBar(context, 'Map updated');
+              }
+            },
+          ),
+          IconButton(
+            tooltip: 'Edit row lines',
+            icon: const Icon(Icons.grid_on),
+            onPressed: () async {
+              final plotModel = PlotModel(
+                id: plot.id,
+                name: plot.name,
+                userId: plot.userId,
+                area: plot.area,
+                treeCount: plot.treeCount,
+                rowSpacing: plot.rowSpacing,
+                polygon: plot.polygon,
+                centroid: plot.centroid,
+                bedHeight: plot.bedHeight,
+                createdAt: plot.createdAt,
+                rowLines: plot.rowLines,
+              );
+              final saved = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                  builder: (_) => RowLineScreen(plot: plotModel),
+                ),
+              );
+              if (saved == true && context.mounted) {
+                final uid = ref.read(authServiceProvider).currentUserId;
+                if (uid != null) ref.invalidate(plotsListProvider(uid));
+                showSuccessSnackBar(context, 'Row lines updated');
               }
             },
           ),
@@ -576,6 +618,7 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
                   area: double.tryParse(res['area'] ?? ''),
                   rowSpacing: double.tryParse(res['rowSpacing'] ?? ''),
                   treeCount: int.tryParse(res['treeCount'] ?? ''),
+                  rowLines: plot.rowLines,
                 );
                 try {
                   await repo.updatePlot(updated);
@@ -651,39 +694,16 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
                 child: LayoutBuilder(builder: (ctx, bc) {
                   final maxWidth = bc.maxWidth;
                   final previewWidth = maxWidth < 520 ? maxWidth * 0.9 : 520.0;
-                  return Stack(
-                    children: [
-                      SizedBox(
-                        width: previewWidth,
-                        height: previewWidth * 0.56,
-                        child: PlotPreview(
-                          polygon: plot.polygon,
-                          width: previewWidth,
-                          height: previewWidth * 0.56,
-                          useMap: _useMapView,
-                        ),
-                      ),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Material(
-                          color: Colors.white,
-                          elevation: 2,
-                          shape: const CircleBorder(),
-                          child: IconButton(
-                            tooltip: _useMapView
-                                ? 'Switch to Shape view'
-                                : 'Switch to GPS view',
-                            icon: Icon(
-                                _useMapView ? Icons.image : Icons.map_outlined,
-                                size: 20),
-                            onPressed: () {
-                              setState(() => _useMapView = !_useMapView);
-                            },
-                          ),
-                        ),
-                      ),
-                    ],
+                  return SizedBox(
+                    width: previewWidth,
+                    height: previewWidth * 0.56,
+                    child: PlotPreview(
+                      polygon: plot.polygon,
+                      width: previewWidth,
+                      height: previewWidth * 0.56,
+                      useMap: true,
+                      rowLines: plot.rowLines,
+                    ),
                   );
                 }),
               ),
@@ -850,28 +870,13 @@ class _PlotSummaryHeader extends SliverPersistentHeaderDelegate {
       color: Theme.of(context).scaffoldBackgroundColor,
       padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
       child: LayoutBuilder(builder: (ctx, bc) {
-        final narrow = bc.maxWidth < 520;
         final card = Card(
           child: Padding(
             padding: const EdgeInsets.all(12.0),
-            child: narrow
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: _buildFields(context))
-                : Row(children: [
-                    Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: _buildFields(context))),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                        width: 140,
-                        height: 90,
-                        child: plot.polygon.isNotEmpty
-                            ? CustomPaint(
-                                painter: PlotPolygonPainter(plot.polygon))
-                            : Container(color: Colors.grey.shade200))
-                  ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: _buildFields(context),
+            ),
           ),
         );
 

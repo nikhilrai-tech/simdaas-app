@@ -6,6 +6,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import '../../domain/report.dart';
 import '../../../plot_mapping/domain/entities/plot.dart';
+import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
+import '../providers/report_providers.dart';
 import '../widgets/plot_snapshot.dart';
 import '../widgets/saved_donut_chart.dart';
 
@@ -23,7 +25,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final report = widget.report;
+    // The list endpoint returns a lightweight payload (no plot_snapshot,
+    // no GPS trajectory). Fetch the full report when the detail screen
+    // opens; fall back to the list-cached object while loading.
+    final detailAsync = ref.watch(reportDetailProvider(widget.report.id));
+    final report = detailAsync.asData?.value ?? widget.report;
     final dateFormat = DateFormat('h:mm a, dd MMM yyyy');
 
     return Scaffold(
@@ -304,6 +310,24 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       ),
                     ],
                   ),
+                if (report.plot != null &&
+                    report.plot!.rowLines != null &&
+                    report.plot!.rowLines!.isNotEmpty) ...[
+                  PolygonLayer(
+                    polygons: RowLineCoverage.buildCoverageBands(
+                      rowLines: report.plot!.rowLines!,
+                      gpsTrack: report.trajectory
+                          .map((p) => LatLng(p.lat, p.lon))
+                          .toList(),
+                      rowSpacing: report.plot!.rowSpacing ?? 3.0,
+                    ),
+                  ),
+                  PolylineLayer(
+                    polylines: RowLineCoverage.buildRowLines(
+                      rowLines: report.plot!.rowLines!,
+                    ),
+                  ),
+                ],
                 PolylineLayer(
                   polylines: _buildHeatmapPolylines(report.trajectory),
                 ),

@@ -14,6 +14,7 @@ class PlotModel extends PlotEntity {
     super.centroid,
     super.bedHeight,
     super.createdAt,
+    super.rowLines,
   });
 
   factory PlotModel.fromJson(String id, Map<String, dynamic> json) {
@@ -60,6 +61,34 @@ class PlotModel extends PlotEntity {
       centroid = LatLng(avgLat, avgLng);
     }
 
+    // Parse row_lines: list of 2-point segments, each point is [lat, lng]
+    List<List<LatLng>>? rowLines;
+    final rawRowLines = json['row_lines'];
+    if (rawRowLines is List && rawRowLines.isNotEmpty) {
+      rowLines = [];
+      for (final seg in rawRowLines) {
+        if (seg is! List) continue;
+        final points = <LatLng>[];
+        for (final pt in seg) {
+          try {
+            if (pt is List && pt.length >= 2) {
+              points.add(LatLng((pt[0] as num).toDouble(), (pt[1] as num).toDouble()));
+            } else if (pt is Map) {
+              final lat = (pt['lat'] ?? pt['latitude']) as num?;
+              final lng = (pt['lng'] ?? pt['longitude']) as num?;
+              if (lat != null && lng != null) {
+                points.add(LatLng(lat.toDouble(), lng.toDouble()));
+              }
+            }
+          } catch (e) {
+            debugPrint('plot_model.fromJson: skipping invalid row_lines entry: $e');
+          }
+        }
+        if (points.length >= 2) rowLines.add(points);
+      }
+      if (rowLines.isEmpty) rowLines = null;
+    }
+
     return PlotModel(
       id: id,
       name: json['name'] as String,
@@ -75,6 +104,7 @@ class PlotModel extends PlotEntity {
       createdAt: json['created_at'] != null
           ? DateTime.parse(json['created_at'].toString())
           : null,
+      rowLines: rowLines,
     );
   }
 
@@ -90,5 +120,8 @@ class PlotModel extends PlotEntity {
             ? null
             : {'lat': centroid!.latitude, 'lng': centroid!.longitude},
         'polygon': polygon.map((p) => [p.latitude, p.longitude]).toList(),
+        'row_lines': rowLines
+            ?.map((seg) => seg.map((p) => [p.latitude, p.longitude]).toList())
+            .toList(),
       };
 }

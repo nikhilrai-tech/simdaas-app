@@ -9,6 +9,7 @@ import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
 import '../../../plot_mapping/domain/entities/plot.dart';
+import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
 import '../providers/monitoring_providers.dart';
 import '../../../equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
@@ -53,6 +54,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   StreamSubscription<CooldownState>? _cooldownSub;
   // Ticks every second to refresh the MM:SS countdown label.
   Timer? _countdownTimer;
+
+  // Top notification banner is only visible for ~5 s after a cooldown
+  // begins. The cooldown itself still runs to completion in the background.
+  bool _cooldownBannerVisible = false;
+  Timer? _cooldownBannerDismissTimer;
+
+  // Set to true when the user manually ends the session on this screen.
+  // Blocks incoming telemetry so the device cannot flicker back to "online"
+  // before the cooldown event lands. Cleared automatically once the cooldown
+  // ends (state transitions out of `cooldown`), so the next session can show.
+  bool _sessionEndedManually = false;
 
   @override
   void initState() {
@@ -104,11 +116,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
       try {
         _deviceSub = svc.deviceTelemetryStream(normId).listen((t) {
-          // Mandatory ignore check: if we manually ended the session recently,
-          // ignore any incoming telemetry for 2 minutes.
+          // If the session was manually ended on this screen, permanently
+          // block incoming telemetry so the device cannot reappear as online.
+          if (_sessionEndedManually) return;
+
+          // Belt-and-suspenders: also block during the ignore window (covers
+          // the gap before the WS status_change event arrives).
           final ignoreTime = _ignoredUntil[normId];
           if (ignoreTime != null && DateTime.now().isBefore(ignoreTime)) {
-            // debugPrint('MonitoringScreen: Ignoring telemetry for $normId (manual end cooldown)');
             return;
           }
 
@@ -158,11 +173,36 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       }
       _cooldownSub = svc.deviceCooldownStream(normId).listen((state) {
         if (!mounted) return;
-        setState(() => _cooldownState = state);
+        final wasInCooldown = _cooldownState?.isInCooldown ?? false;
+        setState(() {
+          _cooldownState = state;
+          // When a cooldown begins, drop the cached telemetry so the next
+          // session starts at 0% completion / 0 distance instead of briefly
+          // flashing the previous session's stats.
+          if (state.isInCooldown && !wasInCooldown) {
+            latestTelemetry = null;
+            positions.clear();
+          }
+        });
         if (state.isInCooldown) {
           _startCountdownTimer();
+          // Show the top banner briefly when a new cooldown begins.
+          if (!wasInCooldown) _showCooldownBannerBriefly();
         } else {
           _stopCountdownTimer();
+          // Cooldown is over: stop blocking telemetry on this screen so the
+          // next session can be picked up. Clear stale telemetry too so the
+          // new session's first sample paints a clean UI.
+          _sessionEndedManually = false;
+          _ignoredUntil.clear();
+          _cooldownBannerDismissTimer?.cancel();
+          _cooldownBannerVisible = false;
+          if (state.status == DeviceLifecycleStatus.online) {
+            setState(() {
+              latestTelemetry = null;
+              positions.clear();
+            });
+          }
           if (state.status == DeviceLifecycleStatus.offline &&
               state.reportId != null) {
             // Report is ready — show a snackbar prompt
@@ -175,7 +215,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                     label: 'View',
                     onPressed: () {
                       // Navigate to reports list
-                      Navigator.of(context).pushNamed('/reports');
+                      Navigator.of(context).pushNamed('/job_reports');
                     },
                   ),
                 ));
@@ -185,6 +225,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         }
       });
     }
+  }
+
+  void _showCooldownBannerBriefly() {
+    _cooldownBannerDismissTimer?.cancel();
+    setState(() => _cooldownBannerVisible = true);
+    _cooldownBannerDismissTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      setState(() => _cooldownBannerVisible = false);
+    });
   }
 
   void _startCountdownTimer() {
@@ -209,6 +258,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     _deviceSub?.cancel();
     _cooldownSub?.cancel();
     _countdownTimer?.cancel();
+    _cooldownBannerDismissTimer?.cancel();
     super.dispose();
   }
 
@@ -287,15 +337,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         : 'Device offline — report generating';
     final countdown = state.countdownLabel;
     final seconds = state.secondsRemaining;
-    // Progress fraction: manual = 120 s max, auto = 600 s max
-    final total = isManual ? 120.0 : 600.0;
+    // Manual cooldown is 2 min, auto-timeout cooldown is 10 min. Use the
+    // appropriate total so the progress bar fills correctly.
+    final total = (isManual ? 120.0 : 600.0);
     final fraction = (seconds / total).clamp(0.0, 1.0);
 
     return Container(
       color: Colors.orange.shade800.withOpacity(0.95),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: SafeArea(
-        top: false,
+        bottom: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -581,6 +632,31 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                             : Colors.red,
                         borderStrokeWidth: 2.5)
                   ]),
+                // Planned spray path: filled coverage bands between rows
+                // (transparent → light/medium/dark grey by pass count) drawn
+                // *under* the always-yellow row lines themselves.
+                if (plot.rowLines != null && plot.rowLines!.isNotEmpty) ...[
+                  PolygonLayer(
+                    polygons: RowLineCoverage.buildCoverageBands(
+                      rowLines: plot.rowLines!,
+                      gpsTrack: positions
+                          .map((p) {
+                            final lat = (p['lat'] as num?)?.toDouble();
+                            final lon = (p['lon'] as num?)?.toDouble();
+                            if (lat == null || lon == null) return null;
+                            return LatLng(lat, lon);
+                          })
+                          .whereType<LatLng>()
+                          .toList(),
+                      rowSpacing: plot.rowSpacing ?? 3.0,
+                    ),
+                  ),
+                  PolylineLayer(
+                    polylines: RowLineCoverage.buildRowLines(
+                      rowLines: plot.rowLines!,
+                    ),
+                  ),
+                ],
                 // If a device id was provided, render historical positions and live marker
                 if (widget.deviceId != null && positions.isNotEmpty) ...[
                   // Build colored polyline segments by grouping consecutive
@@ -800,24 +876,26 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                         .read(eq_provs.equipmentControllerProvider)
                                         .endSession(sessionIdToEnd, deviceId: deviceMac);
 
-                                    // 1. Mandatory ignore: block incoming telemetry for 2 min
-                                    //    (the WS status_change event is the authoritative source,
-                                    //    but this guards against late-arriving packets).
+                                    // 1. Block telemetry on this screen until the cooldown ends
+                                    //    (cleared automatically when the cooldown stream emits an
+                                    //    out-of-cooldown state).
+                                    _sessionEndedManually = true;
                                     if (deviceMac != null) {
                                       final normMac = canonicalizeMac(deviceMac);
+                                      // Manual cooldown is 2 min on the backend.
                                       _ignoredUntil[normMac] = DateTime.now()
                                           .add(const Duration(minutes: 2));
                                     }
 
                                     // 2. Immediate UI feedback: clear local telemetry state
+                                    //    and transition to cooldown immediately without waiting
+                                    //    for the WS event (which may be delayed).
                                     setState(() {
                                       latestTelemetry = null;
                                       positions.clear();
                                       _demoTimer?.cancel();
                                       _demoTimer = null;
                                       _isDemoMode = false;
-                                      // Show a local cooldown state immediately — the WS event
-                                      // will arrive shortly and replace this with the real end_ts.
                                       _cooldownState = CooldownState(
                                         deviceId: deviceMac ?? '',
                                         status: DeviceLifecycleStatus.cooldown,
@@ -828,20 +906,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                       );
                                       _startCountdownTimer();
                                     });
+                                    _showCooldownBannerBriefly();
 
-                                    // 3. Clear service cache as well (extra safety)
+                                    // 3. Clear service cache so device is no longer "active".
                                     if (deviceMac != null) {
                                       ref.read(telemetryServiceProvider).clearCache(deviceMac);
                                     }
 
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Session ended. Report will be generated in 2 minutes.'),
-                                          duration: Duration(seconds: 4),
-                                        ),
-                                      );
-                                    }
+                                    // The top cooldown banner already conveys this; no extra
+                                    // snackbar so we don't get duplicate notifications.
                                   } catch (err) {
                                     if (context.mounted) {
                                       ScaffoldMessenger.of(context)
@@ -942,10 +1015,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
             ),
 
             // ── Cooldown / offline-pending banner ──────────────────────────
-            if (_cooldownState != null &&
+            // Shown briefly at the top when a cooldown begins, then auto
+            // dismisses after 5 s. The cooldown itself keeps running.
+            if (_cooldownBannerVisible &&
+                _cooldownState != null &&
                 _cooldownState!.status == DeviceLifecycleStatus.cooldown)
               Positioned(
-                bottom: 0,
+                top: 0,
                 left: 0,
                 right: 0,
                 child: _buildCooldownBanner(_cooldownState!),
