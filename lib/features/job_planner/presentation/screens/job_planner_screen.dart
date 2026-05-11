@@ -151,7 +151,13 @@ class JobPlannerScreen extends ConsumerWidget {
                       }
                     });
 
-                    return ListView.builder(
+                    return RefreshIndicator(
+                      onRefresh: () async {
+                        ref.invalidate(jobsListProvider(userId));
+                        ref.invalidate(
+                            fm_providers.plotsListProvider(userId));
+                      },
+                      child: ListView.builder(
                       padding: const EdgeInsets.only(bottom: 80),
                       itemCount: sortedJobs.length,
                       itemBuilder: (context, i) {
@@ -390,7 +396,8 @@ class JobPlannerScreen extends ConsumerWidget {
                           ),
                         );
                       },
-                    );
+                    ),   // ListView.builder
+                    );   // RefreshIndicator
                   },
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),

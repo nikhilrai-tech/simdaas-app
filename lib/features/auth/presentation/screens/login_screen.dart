@@ -84,8 +84,8 @@ class LoginScreen extends ConsumerWidget {
                         ),
                       ],
                     ),
-                    child: const Padding(
-                      padding: EdgeInsets.all(32.0),
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
                       child: LoginForm(),
                     ),
                   ),

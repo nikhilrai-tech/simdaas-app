@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/utils/api_error.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
+
+const _storage = FlutterSecureStorage();
+const _kSavedEmail = 'saved_login_email';
 
 // Validation regexes
 final _emailRegex = RegExp(r"^[^\s@]+@[^\s@]+\.[^\s@]+$");
@@ -200,16 +204,20 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                       setState(() => _loading = true);
                                       final svc = ref.read(authServiceProvider);
                                       try {
+                                        final email = _email.text.trim();
                                         await svc.register(
                                             _username.text.trim(),
-                                            _email.text.trim(),
+                                            email,
                                             _password.text.trim(),
                                             _confirm.text.trim());
+                                        // Pre-fill login screen after signup
+                                        await _storage.write(
+                                            key: _kSavedEmail, value: email);
                                         setState(() => _loading = false);
                                         if (mounted) {
                                           Navigator.of(context).pushReplacementNamed(
                                               '/verify-email',
-                                              arguments: _email.text.trim());
+                                              arguments: email);
                                         }
                                       } catch (e) {
                                         setState(() => _loading = false);
