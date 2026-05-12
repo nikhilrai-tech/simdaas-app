@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 
 import 'row_line_generator.dart';
 
@@ -91,6 +92,122 @@ class RowLineCoverage {
             LatLng(p0.latitude - perp.latitude, p0.longitude - perp.longitude),
           ],
           color: _bandColor(count),
+          borderColor: Colors.transparent,
+          borderStrokeWidth: 0,
+        ));
+      }
+    }
+
+    return bands;
+  }
+
+  /// Build heatmap-colored coverage bands using telemetry metadata.
+  ///
+  /// Only [insidePoints] (points inside the plot boundary) are used to fill
+  /// bands. Outside-plot points are handled separately as polylines.
+  ///
+  /// - GPS / Speed heatmaps: "no overlap" — latest state wins per sub-band.
+  /// - Spray heatmap: "overlap required" — flow rates are accumulated per band.
+  static List<Polygon> buildHeatmapCoverageBands({
+    required List<List<LatLng>> rowLines,
+    required List<HeatmapTrackPoint> insidePoints,
+    required double rowSpacing,
+    required HeatmapType heatmapType,
+  }) {
+    if (rowLines.length < 2) return const [];
+    final bands = <Polygon>[];
+
+    for (int ri = 0; ri < rowLines.length - 1; ri++) {
+      final rowA = rowLines[ri];
+      final rowB = rowLines[ri + 1];
+      if (rowA.length < 2 || rowB.length < 2) continue;
+
+      final midStart = _lerp(rowA[0], rowB[0], 0.5);
+      final midEnd   = _lerp(rowA[1], rowB[1], 0.5);
+
+      final segLen = RowLineGenerator
+          .pointToSegmentInfo(midStart, midStart, midEnd)
+          .segmentLengthMeters;
+      if (segLen < 0.5) continue;
+
+      final numSub =
+          (segLen / subSegmentLengthMeters).ceil().clamp(1, 1000).toInt();
+      final halfWidth = rowSpacing / 2;
+
+      // Spray: accumulate flow rates; GPS/Speed: track latest color.
+      final accumulated = List<double>.filled(numSub, 0.0);
+      final latestColor = List<Color?>.filled(numSub, null);
+
+      // Track last index in this corridor so we can fill the gap to the next
+      // point — GPS samples are sparse and often skip 1-2 sub-bands.
+      int? prevIdxInCorridor;
+
+      for (int k = 0; k < insidePoints.length; k++) {
+        final pt = insidePoints[k];
+        final info =
+            RowLineGenerator.pointToSegmentInfo(pt.position, midStart, midEnd);
+        if (info.distance > halfWidth) {
+          prevIdxInCorridor = null; // gap in corridor; reset interpolation anchor
+          continue;
+        }
+
+        final idx = (info.t * numSub).floor().clamp(0, numSub - 1);
+        final color = heatmapType == HeatmapType.spraying
+            ? null
+            : HeatmapColorUtils.getColorForInsidePoint(pt, heatmapType);
+
+        // Fill every sub-band from the previous in-corridor index to this one
+        // so that GPS sampling gaps don't leave blank stripes.
+        final prev = prevIdxInCorridor;
+        final lo = prev != null ? math.min(prev, idx) : idx;
+        final hi = prev != null ? math.max(prev, idx) : idx;
+
+        for (int s = lo; s <= hi; s++) {
+          if (heatmapType == HeatmapType.spraying) {
+            accumulated[s] += pt.flowRate ?? 0.0;
+          } else {
+            latestColor[s] ??= color; // first-write wins for intermediate bands
+          }
+        }
+        // Always overwrite with the actual latest value at the current index.
+        if (heatmapType != HeatmapType.spraying) {
+          latestColor[idx] = color;
+        }
+
+        prevIdxInCorridor = idx;
+      }
+
+      prevIdxInCorridor = null; // reset for next corridor
+
+      final perp = _perpendicularOffsetLatLng(midStart, midEnd, halfWidth);
+      if (perp == null) continue;
+
+      for (int i = 0; i < numSub; i++) {
+        Color? bandColor;
+        if (heatmapType == HeatmapType.spraying) {
+          if (accumulated[i] <= 0.0) continue;
+          bandColor = HeatmapColorUtils.getColorForSpray(accumulated[i]);
+        } else {
+          bandColor = latestColor[i];
+          if (bandColor == null) continue;
+        }
+
+        final t0 = i / numSub;
+        final t1 = (i + 1) / numSub;
+        final p0 = _lerp(midStart, midEnd, t0);
+        final p1 = _lerp(midStart, midEnd, t1);
+        bands.add(Polygon(
+          points: [
+            LatLng(p0.latitude + perp.latitude,
+                p0.longitude + perp.longitude),
+            LatLng(p1.latitude + perp.latitude,
+                p1.longitude + perp.longitude),
+            LatLng(p1.latitude - perp.latitude,
+                p1.longitude - perp.longitude),
+            LatLng(p0.latitude - perp.latitude,
+                p0.longitude - perp.longitude),
+          ],
+          color: bandColor.withAlpha(200),
           borderColor: Colors.transparent,
           borderStrokeWidth: 0,
         ));

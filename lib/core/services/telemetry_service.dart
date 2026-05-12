@@ -332,11 +332,12 @@ class TelemetryService {
         }
       });
 
-      // Clear cached data for offline devices to prevent "jumping" when they reconnect
+      // Remove stale live snapshot only — GPS history (_positions) is kept
+      // until the session actually ends (status_change / report_ready event).
+      // This ensures the track remains visible if the device temporarily stops.
       for (final id in toRemove) {
-        debugPrint('Telemetry.pruner: $id is offline - clearing cache and history');
+        debugPrint('Telemetry.pruner: $id is offline - clearing live snapshot (history preserved)');
         _latest.remove(id);
-        _positions.remove(id);
       }
 
       _activeController.add(actives);

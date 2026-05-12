@@ -314,12 +314,12 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     report.plot!.rowLines != null &&
                     report.plot!.rowLines!.isNotEmpty) ...[
                   PolygonLayer(
-                    polygons: RowLineCoverage.buildCoverageBands(
+                    polygons: RowLineCoverage.buildHeatmapCoverageBands(
                       rowLines: report.plot!.rowLines!,
-                      gpsTrack: report.trajectory
-                          .map((p) => LatLng(p.lat, p.lon))
-                          .toList(),
+                      insidePoints: _buildInsideTrackPoints(
+                          report.trajectory, report.plot),
                       rowSpacing: report.plot!.rowSpacing ?? 3.0,
+                      heatmapType: _heatmapType,
                     ),
                   ),
                   PolylineLayer(
@@ -329,7 +329,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   ),
                 ],
                 PolylineLayer(
-                  polylines: _buildHeatmapPolylines(report.trajectory),
+                  polylines:
+                      _buildHeatmapPolylines(report.trajectory, report.plot),
                 ),
                 MarkerLayer(
                   markers: [
@@ -366,21 +367,23 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       case HeatmapType.gps:
         items = [
           _legendItem('Auto', Colors.blue),
-          _legendItem('Manual', Colors.orange),
-          _legendItem('Out Plot', Colors.red),
+          _legendItem('Manual', Colors.grey),
+          _legendItem('PTO Off', Colors.orange),
+          _legendItem('Outside', Colors.red),
         ];
         break;
       case HeatmapType.speed:
         items = [
-          _legendItem('Low', Colors.green),
-          _legendItem('Med', Colors.yellow),
-          _legendItem('High', Colors.red),
+          _legendItem('0-3 km/h', Colors.yellow),
+          _legendItem('3-7 km/h', Colors.green),
+          _legendItem('7+ km/h', Colors.red),
         ];
         break;
       case HeatmapType.spraying:
         items = [
-          _legendItem('Light', Colors.blue.shade100),
-          _legendItem('Heavy', Colors.blue.shade900),
+          _legendItem('0-70 L/m', Colors.blue.shade400),
+          _legendItem('70-200 L/m', Colors.red.shade400),
+          _legendItem('>200 L/m', Colors.black),
         ];
         break;
     }
@@ -456,50 +459,87 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     );
   }
 
-  List<Polyline> _buildHeatmapPolylines(List<GPSPointData> trajectory) {
+  // Build inside-plot HeatmapTrackPoints from trajectory.
+  // PTO is assumed ON for report data (recorded during active session).
+  List<HeatmapTrackPoint> _buildInsideTrackPoints(
+      List<GPSPointData> trajectory, PlotEntity? plot) {
+    final result = <HeatmapTrackPoint>[];
+    for (final p in trajectory) {
+      final point = LatLng(p.lat, p.lon);
+      bool isInPlot = true;
+      if (plot?.polygon != null && plot!.polygon.length >= 3) {
+        isInPlot = _isPointInPolygon(point, plot.polygon);
+      }
+      if (!isInPlot) continue;
+      result.add(HeatmapTrackPoint(
+        position: point,
+        isInPlot: true,
+        ptoOn: true,
+        isAuto: p.sprayMode == 1,
+        speed: p.speedKmph,
+        flowRate: p.flowRateLpm,
+      ));
+    }
+    return result;
+  }
+
+  // Outside-plot trajectory polylines only.
+  // Inside-plot points are visualized via colored row bands.
+  // GPS outside: always red. Speed/Spray: value-coded.
+  List<Polyline> _buildHeatmapPolylines(
+      List<GPSPointData> trajectory, PlotEntity? plot) {
     final List<Polyline> result = [];
     if (trajectory.length < 2) return result;
 
     List<LatLng> currentPoints = [];
     Color? currentColor;
 
+    void flush({double strokeWidth = 4.0}) {
+      if (currentPoints.length >= 2 && currentColor != null) {
+        result.add(Polyline(
+          points: List<LatLng>.from(currentPoints),
+          strokeWidth: strokeWidth,
+          color: currentColor!,
+        ));
+      }
+      currentPoints = [];
+      currentColor = null;
+    }
+
     for (var i = 0; i < trajectory.length; i++) {
       final p = trajectory[i];
       final point = LatLng(p.lat, p.lon);
-      
-      Color color;
+
+      bool isInPlot = false;
+      if (plot?.polygon != null && plot!.polygon.length >= 3) {
+        isInPlot = _isPointInPolygon(point, plot.polygon);
+      }
+
+      // Inside plot → no line; flush any open outside segment.
+      if (isInPlot) {
+        flush();
+        continue;
+      }
+
+      // Time gap: flush and restart.
+      if (i > 0) {
+        final prev = trajectory[i - 1];
+        if (p.timestamp.difference(prev.timestamp).inSeconds > 30) {
+          flush(strokeWidth: 6.0);
+        }
+      }
+
+      final Color color;
       switch (_heatmapType) {
+        case HeatmapType.gps:
+          color = Colors.red;
+          break;
         case HeatmapType.speed:
           color = HeatmapColorUtils.getColorForSpeed(p.speedKmph);
           break;
         case HeatmapType.spraying:
           color = HeatmapColorUtils.getColorForSpray(p.flowRateLpm);
           break;
-        case HeatmapType.gps:
-          color = HeatmapColorUtils.getColorForGPS(
-            isInPlot: true, 
-            ptoOn: true,
-            isAuto: p.sprayMode == 1,
-          );
-          break;
-      }
-
-      // Time gap check (if not first point)
-      if (i > 0) {
-        final prev = trajectory[i - 1];
-        if (p.timestamp.difference(prev.timestamp).inSeconds > 30) {
-          // Flush current segment if exists
-          if (currentPoints.length >= 2 && currentColor != null) {
-            result.add(Polyline(
-              points: List<LatLng>.from(currentPoints),
-              strokeWidth: 6.0,
-              color: currentColor,
-            ));
-          }
-          currentPoints = [point];
-          currentColor = color;
-          continue;
-        }
       }
 
       if (currentColor == null) {
@@ -508,30 +548,33 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       } else if (color == currentColor) {
         currentPoints.add(point);
       } else {
-        // Gap fix: Transition point
-        currentPoints.add(point);
-        if (currentPoints.length >= 2) {
-          result.add(Polyline(
-            points: List<LatLng>.from(currentPoints),
-            strokeWidth: 4.0,
-            color: currentColor,
-          ));
-        }
+        currentPoints.add(point); // bridge transition
+        flush();
         currentColor = color;
         currentPoints = [point];
       }
     }
 
-    // flush last segment
-    if (currentPoints.length >= 2 && currentColor != null) {
-      result.add(Polyline(
-        points: List<LatLng>.from(currentPoints),
-        strokeWidth: 6.0,
-        color: currentColor,
-      ));
-    }
-
+    flush(strokeWidth: 6.0);
     return result;
+  }
+
+  bool _isPointInPolygon(LatLng point, List<LatLng> polygon) {
+    if (polygon.length < 3) return false;
+    var intersections = 0;
+    for (var i = 0; i < polygon.length; i++) {
+      final p1 = polygon[i];
+      final p2 = polygon[(i + 1) % polygon.length];
+      if (p1.longitude > point.longitude != p2.longitude > point.longitude &&
+          point.latitude <
+              (p2.latitude - p1.latitude) *
+                      (point.longitude - p1.longitude) /
+                      (p2.longitude - p1.longitude) +
+                  p1.latitude) {
+        intersections++;
+      }
+    }
+    return intersections % 2 != 0;
   }
 
   LatLng _getCentroid(List<LatLng> points) {

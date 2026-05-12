@@ -149,13 +149,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           _updateOutOfPlotSnack(t);
         });
 
-        // Monitor online status to clear UI when device goes offline
+        // When device goes offline, clear the live telemetry snapshot (hides
+        // the live marker and stats) but keep the GPS track intact so the
+        // existing path stays visible until the session actually ends.
         ref.listenManual(deviceOnlineProvider(normId), (previous, next) {
           if (next == false && latestTelemetry != null) {
-            debugPrint('MonitoringScreen: Device $normId gone offline - clearing UI');
+            debugPrint('MonitoringScreen: Device $normId gone offline - clearing live snapshot only');
             setState(() {
               latestTelemetry = null;
-              positions.clear();
+              // positions intentionally preserved — track cleared only on new session
             });
           }
         });
@@ -632,23 +634,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                             : Colors.red,
                         borderStrokeWidth: 2.5)
                   ]),
-                // Planned spray path: filled coverage bands between rows
-                // (transparent → light/medium/dark grey by pass count) drawn
-                // *under* the always-yellow row lines themselves.
+                // Heatmap-colored coverage bands between rows.
+                // Only inside-plot positions fill the bands; color depends on
+                // the selected heatmap type.
                 if (plot.rowLines != null && plot.rowLines!.isNotEmpty) ...[
                   PolygonLayer(
-                    polygons: RowLineCoverage.buildCoverageBands(
+                    polygons: RowLineCoverage.buildHeatmapCoverageBands(
                       rowLines: plot.rowLines!,
-                      gpsTrack: positions
-                          .map((p) {
-                            final lat = (p['lat'] as num?)?.toDouble();
-                            final lon = (p['lon'] as num?)?.toDouble();
-                            if (lat == null || lon == null) return null;
-                            return LatLng(lat, lon);
-                          })
-                          .whereType<LatLng>()
-                          .toList(),
+                      insidePoints: _buildInsideTrackPoints(positions, plot),
                       rowSpacing: plot.rowSpacing ?? 3.0,
+                      heatmapType: _selectedHeatmap,
                     ),
                   ),
                   PolylineLayer(
@@ -657,15 +652,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                     ),
                   ),
                 ],
-                // If a device id was provided, render historical positions and live marker
+                // Outside-plot trajectory lines only (inside → no line, filled
+                // rows above handle the inside visualization).
                 if (widget.deviceId != null && positions.isNotEmpty) ...[
-                  // Build colored polyline segments by grouping consecutive
-                  // position points that share the same color according to the
-                  // device_in_plot and pto state.
                   PolylineLayer(
                       polylines:
-                          _buildColoredPolylinesFromPositions(positions, 
-                            ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull)),
+                          _buildColoredPolylinesFromPositions(positions, plot)),
                 ],
                 if (widget.deviceId != null && latestTelemetry != null)
                   MarkerLayer(markers: [
@@ -1591,26 +1583,39 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     }
   }
 
+  // Returns the live marker color based on the currently selected heatmap type.
+  // Outside plot → red for all heatmaps.
+  // Inside plot  → color rules per heatmap spec.
   Color _markerColorForTelemetry(TelemetryData t, PlotEntity? plot) {
     try {
       bool inPlot = t.deviceInPlot == true ||
           (t.deviceInPlot?.toString().toLowerCase() == 'true') ||
           (t.deviceInPlot?.toString() == '1');
-      
-      // Local reinforcement: calculate in-plot status if we have the polygon
-      if (plot?.polygon != null && plot!.polygon.length >= 3 && t.lat != null && t.lon != null) {
-        final locallyInPlot = _isPointInPolygon(LatLng(t.lat!, t.lon!), plot.polygon);
-        inPlot = locallyInPlot;
+
+      if (plot?.polygon != null &&
+          plot!.polygon.length >= 3 &&
+          t.lat != null &&
+          t.lon != null) {
+        inPlot = _isPointInPolygon(LatLng(t.lat!, t.lon!), plot.polygon);
       }
 
-      final ptoOn = (t.ptoState != null && t.ptoState == 1);
-      final isAuto = (t.sprayMode != null && t.sprayMode == 1);
+      if (!inPlot) return Colors.red; // always red when outside
 
-      return HeatmapColorUtils.getColorForGPS(
-        isInPlot: inPlot,
-        ptoOn: ptoOn,
-        isAuto: isAuto,
-      );
+      final ptoOn = t.ptoState == 1;
+      final isAuto = t.sprayMode == 1;
+
+      switch (_selectedHeatmap) {
+        case HeatmapType.gps:
+          // PTO off → orange, auto → blue, manual → grey
+          if (!ptoOn) return Colors.orange;
+          return isAuto ? Colors.blue : Colors.grey;
+
+        case HeatmapType.speed:
+          return HeatmapColorUtils.getColorForSpeed(t.speed);
+
+        case HeatmapType.spraying:
+          return HeatmapColorUtils.getColorForSpray(t.flowRate);
+      }
     } catch (e, st) {
       debugPrint('MonitoringScreen._markerColorForTelemetry error: $e');
       debugPrint('stack: $st');
@@ -1681,37 +1686,44 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     }
   }
 
-  // Compute the color for a single stored position entry based on selected heatmap type.
-  Color _colorForPositionEntry(Map<String, dynamic> p, PlotEntity? plot) {
-    switch (_selectedHeatmap) {
-      case HeatmapType.speed:
-        return HeatmapColorUtils.getColorForSpeed((p['speed'] as num?)?.toDouble());
-      case HeatmapType.spraying:
-        return HeatmapColorUtils.getColorForSpray((p['flow_rate'] as num?)?.toDouble());
-      case HeatmapType.gps:
-        final devInPlot = p['device_in_plot'];
-        final lat = (p['lat'] as num?)?.toDouble();
-        final lon = (p['lon'] as num?)?.toDouble();
-        
-        bool isInPlot = (devInPlot == true ||
-            (devInPlot != null && devInPlot.toString().toLowerCase() == 'true') ||
-            (devInPlot != null && devInPlot.toString() == '1'));
-        
-        // Local reinforcement for historical points using the passed plot
-        if (plot?.polygon != null && plot!.polygon.length >= 3 && lat != null && lon != null) {
-          isInPlot = _isPointInPolygon(LatLng(lat, lon), plot.polygon);
-        }
+  // Build inside-plot HeatmapTrackPoints from raw position list.
+  List<HeatmapTrackPoint> _buildInsideTrackPoints(
+      List<Map<String, dynamic>> positions, PlotEntity? plot) {
+    final result = <HeatmapTrackPoint>[];
+    for (final p in positions) {
+      final lat = (p['lat'] as num?)?.toDouble();
+      final lon = (p['lon'] as num?)?.toDouble();
+      if (lat == null || lon == null) continue;
 
-        final pto = p['pto'];
-        final ptoOn = (pto != null && (pto is int ? pto == 1 : pto.toString() == '1'));
-        final spray = p['spray_mode'];
-        final isAuto = (spray != null && (spray is int ? spray == 1 : spray.toString() == '1'));
-        return HeatmapColorUtils.getColorForGPS(
-          isInPlot: isInPlot,
-          ptoOn: ptoOn,
-          isAuto: isAuto,
-        );
+      bool isInPlot;
+      if (plot?.polygon != null && plot!.polygon.length >= 3) {
+        isInPlot = _isPointInPolygon(LatLng(lat, lon), plot.polygon);
+      } else {
+        final devInPlot = p['device_in_plot'];
+        isInPlot = devInPlot == true ||
+            devInPlot?.toString().toLowerCase() == 'true' ||
+            devInPlot?.toString() == '1';
+      }
+
+      if (!isInPlot) continue;
+
+      final pto = p['pto'];
+      final ptoOn =
+          pto != null && (pto is int ? pto == 1 : pto.toString() == '1');
+      final spray = p['spray_mode'];
+      final isAuto =
+          spray != null && (spray is int ? spray == 1 : spray.toString() == '1');
+
+      result.add(HeatmapTrackPoint(
+        position: LatLng(lat, lon),
+        isInPlot: true,
+        ptoOn: ptoOn,
+        isAuto: isAuto,
+        speed: (p['speed'] as num?)?.toDouble(),
+        flowRate: (p['flow_rate'] as num?)?.toDouble(),
+      ));
     }
+    return result;
   }
 
   // Ray-casting algorithm to determine if a point is within a polygon
@@ -1729,9 +1741,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     return intersections % 2 != 0;
   }
 
-  // Build a list of Polylines by grouping consecutive position points that
-  // share the same color. Each resulting Polyline will be drawn with the
-  // color for that segment.
+  // Build outside-plot trajectory polylines only.
+  // Inside-plot positions are visualized via colored row bands, not lines.
+  // GPS heatmap outside: always red. Speed/Spray: color-coded by value.
   List<Polyline> _buildColoredPolylinesFromPositions(
       List<Map<String, dynamic>> pos, PlotEntity? plot) {
     final List<Polyline> result = [];
@@ -1740,43 +1752,70 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     List<LatLng> currentPoints = [];
     Color? currentColor;
 
+    void flush() {
+      if (currentPoints.length >= 2 && currentColor != null) {
+        result.add(Polyline(
+            points: List<LatLng>.from(currentPoints),
+            strokeWidth: 4.0,
+            color: currentColor!));
+      }
+      currentPoints = [];
+      currentColor = null;
+    }
+
     for (var i = 0; i < pos.length; i++) {
       final p = pos[i];
-      final lat = (p['lat'] as num).toDouble();
-      final lon = (p['lon'] as num).toDouble();
-      final color = _colorForPositionEntry(p, plot);
+      final lat = (p['lat'] as num?)?.toDouble();
+      final lon = (p['lon'] as num?)?.toDouble();
+      if (lat == null || lon == null) continue;
       final point = LatLng(lat, lon);
 
+      bool isInPlot;
+      if (plot?.polygon != null && plot!.polygon.length >= 3) {
+        isInPlot = _isPointInPolygon(point, plot.polygon);
+      } else {
+        final devInPlot = p['device_in_plot'];
+        isInPlot = devInPlot == true ||
+            devInPlot?.toString().toLowerCase() == 'true' ||
+            devInPlot?.toString() == '1';
+      }
+
+      // Inside plot → no trajectory line; flush any open outside segment.
+      if (isInPlot) {
+        flush();
+        continue;
+      }
+
+      // Outside plot → draw colored line.
+      final Color color;
+      switch (_selectedHeatmap) {
+        case HeatmapType.gps:
+          color = Colors.red;
+          break;
+        case HeatmapType.speed:
+          color = HeatmapColorUtils.getColorForSpeed(
+              (p['speed'] as num?)?.toDouble());
+          break;
+        case HeatmapType.spraying:
+          color = HeatmapColorUtils.getColorForSpray(
+              (p['flow_rate'] as num?)?.toDouble());
+          break;
+      }
+
       if (currentColor == null) {
-        // start new segment
         currentColor = color;
         currentPoints = [point];
       } else if (color == currentColor) {
         currentPoints.add(point);
       } else {
-        // Gap fix: Add the first point of the NEW segment to the OLD segment
-        // to ensure continuity.
-        currentPoints.add(point);
-        if (currentPoints.length >= 2) {
-          result.add(Polyline(
-              points: List<LatLng>.from(currentPoints),
-              strokeWidth: 4.0,
-              color: currentColor!));
-        }
-        // start new segment from this transition point
+        currentPoints.add(point); // bridge transition
+        flush();
         currentColor = color;
         currentPoints = [point];
       }
     }
 
-    // flush last segment
-    if (currentPoints.length >= 2 && currentColor != null) {
-      result.add(Polyline(
-          points: List<LatLng>.from(currentPoints),
-          strokeWidth: 4.0,
-          color: currentColor));
-    }
-
+    flush();
     return result;
   }
 
