@@ -152,6 +152,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         // When device goes offline, clear the live telemetry snapshot (hides
         // the live marker and stats) but keep the GPS track intact so the
         // existing path stays visible until the session actually ends.
+        // Also start the countdown timer so the WAITING chip in the AppBar ticks.
         ref.listenManual(deviceOnlineProvider(normId), (previous, next) {
           if (next == false && latestTelemetry != null) {
             debugPrint('MonitoringScreen: Device $normId gone offline - clearing live snapshot only');
@@ -159,6 +160,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               latestTelemetry = null;
               // positions intentionally preserved — track cleared only on new session
             });
+            _startCountdownTimer();
+          } else if (next == true && !(_cooldownState?.isInCooldown ?? false)) {
+            // Device came back online with no cooldown — stop waiting timer.
+            _stopCountdownTimer();
           }
         });
       } catch (e, st) {
@@ -243,10 +248,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {}); // rebuild to update MM:SS label
-      if ((_cooldownState?.secondsRemaining ?? 0) <= 0) {
+      final cooldownDone = (_cooldownState?.secondsRemaining ?? 0) <= 0;
+      final waitingDone = _waitingSecondsRemaining() <= 0;
+      if (cooldownDone && waitingDone) {
         _stopCountdownTimer();
       }
     });
+  }
+
+  int _waitingSecondsRemaining() {
+    if (widget.deviceId == null) return 0;
+    if (_cooldownState?.isInCooldown ?? false) return 0;
+    if (_cooldownState?.status == DeviceLifecycleStatus.offline) return 0;
+    final svc = ref.read(telemetryServiceProvider);
+    final nid = canonicalizeMac(widget.deviceId!);
+    final lastSeen = svc.getLastSeenAt(nid);
+    if (lastSeen == null) return 0;
+    final elapsed = DateTime.now().toUtc().difference(lastSeen).inSeconds;
+    final remaining = TelemetryService.sessionTimeoutMinutes * 60 - elapsed;
+    return remaining > 0 ? remaining : 0;
   }
 
   void _stopCountdownTimer() {
@@ -508,9 +528,19 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(resolvedControlUnitName ?? 'Data Monitoring', style: const TextStyle(fontSize: 18)),
-                if (latestTelemetry != null && 
+                if (latestTelemetry != null &&
                     DateTime.now().difference(latestTelemetry!.timestamp.toLocal()).inSeconds < 10)
-                  const Text('● LIVE', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                  const Text('● LIVE', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold))
+                else if (_waitingSecondsRemaining() > 0)
+                  Builder(builder: (_) {
+                    final s = _waitingSecondsRemaining();
+                    final m = s ~/ 60;
+                    final sec = s % 60;
+                    return Text(
+                      '⏳ ${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}',
+                      style: const TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold),
+                    );
+                  }),
               ],
             ),
             const Spacer(),

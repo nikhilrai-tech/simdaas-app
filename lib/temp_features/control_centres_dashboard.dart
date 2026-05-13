@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -689,14 +690,32 @@ class _DeviceListItem extends ConsumerWidget {
     final isEffectivelyActive = isInActiveList && !isInCooldown &&
         (cooldownState?.status != DeviceLifecycleStatus.offline);
 
+    // WAITING = device recently stopped sending (< 10 min ago) but session
+    // is not yet ended on the backend. Track remains visible in monitoring.
+    DateTime? lastSeenAt;
+    bool isWaiting = false;
+    if (!isEffectivelyActive && !isInCooldown &&
+        cooldownState?.status != DeviceLifecycleStatus.offline &&
+        deviceId.isNotEmpty) {
+      final svc = ref.read(telemetryServiceProvider);
+      lastSeenAt = svc.getLastSeenAt(deviceId);
+      if (lastSeenAt != null) {
+        final elapsed = DateTime.now().toUtc().difference(lastSeenAt).inMinutes;
+        isWaiting = elapsed < TelemetryService.sessionTimeoutMinutes;
+      }
+    }
+
     final String statusText;
     final Color statusColor;
     if (isInCooldown) {
       statusText = 'COOLDOWN';
-      statusColor = Colors.orange;
+      statusColor = Colors.blue;
     } else if (isEffectivelyActive) {
       statusText = 'ONLINE';
       statusColor = Colors.green;
+    } else if (isWaiting) {
+      statusText = 'WAITING';
+      statusColor = Colors.amber;
     } else {
       statusText = 'OFFLINE';
       statusColor = Colors.orange;
@@ -707,39 +726,46 @@ class _DeviceListItem extends ConsumerWidget {
         ? deviceId
         : (cu.controlUnitId ?? cu.id).toString();
 
-    // The status pill: COOLDOWN sits on the right (trailing) in blue so it
-    // is visually distinct from ONLINE/OFFLINE which stay in the subtitle.
-    final cooldownPill = isInCooldown
-        ? Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.blue.withAlpha(30),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              'COOLDOWN',
-              style: TextStyle(
-                color: Colors.blue,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
-              ),
-            ),
-          )
-        : null;
+    // Trailing pill: COOLDOWN in blue, WAITING with countdown in amber.
+    Widget? trailingWidget;
+    if (isInCooldown) {
+      trailingWidget = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.blue.withAlpha(30),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text(
+          'COOLDOWN',
+          style: TextStyle(
+            color: Colors.blue,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
+        ),
+      );
+    } else if (isWaiting && lastSeenAt != null) {
+      trailingWidget = _WaitingCountdownPill(lastSeenAt: lastSeenAt);
+    }
 
     return ListTile(
       leading: Container(
         width: 12,
         height: 12,
         decoration: BoxDecoration(
-          color: isInCooldown ? Colors.blue : statusColor,
+          color: statusColor,
           shape: BoxShape.circle,
           boxShadow: [
             if (isEffectivelyActive)
               BoxShadow(
                 color: Colors.green.withAlpha(100),
+                blurRadius: 4,
+                spreadRadius: 1,
+              ),
+            if (isWaiting)
+              BoxShadow(
+                color: Colors.amber.withAlpha(120),
                 blurRadius: 4,
                 spreadRadius: 1,
               ),
@@ -769,7 +795,7 @@ class _DeviceListItem extends ConsumerWidget {
             ),
         ],
       ),
-      trailing: cooldownPill,
+      trailing: trailingWidget,
       onTap: deviceId.isNotEmpty
           ? () {
               String? plotIdForNav;
@@ -790,6 +816,63 @@ class _DeviceListItem extends ConsumerWidget {
                       MonitoringScreen(deviceId: deviceId, plotId: plotIdForNav)));
             }
           : null,
+    );
+  }
+}
+
+/// Amber pill showing "⏳ MM:SS" countdown until the backend session timeout.
+/// Runs its own 1-second timer so parent doesn't need to be stateful.
+class _WaitingCountdownPill extends StatefulWidget {
+  final DateTime lastSeenAt;
+  const _WaitingCountdownPill({required this.lastSeenAt});
+
+  @override
+  State<_WaitingCountdownPill> createState() => _WaitingCountdownPillState();
+}
+
+class _WaitingCountdownPillState extends State<_WaitingCountdownPill> {
+  late Timer _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final elapsed =
+        DateTime.now().toUtc().difference(widget.lastSeenAt.toUtc()).inSeconds;
+    final remaining =
+        TelemetryService.sessionTimeoutMinutes * 60 - elapsed;
+    if (remaining <= 0) return const SizedBox.shrink();
+    final m = remaining ~/ 60;
+    final s = remaining % 60;
+    final label =
+        '⏳ ${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.amber.withAlpha(30),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.amber,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.5,
+        ),
+      ),
     );
   }
 }

@@ -287,6 +287,15 @@ class TelemetryService {
   // Per-device cooldown state driven by backend WS status events.
   final Map<String, CooldownState> _cooldownStates = {};
 
+  // Last time telemetry was received per device. Not cleared by the pruner —
+  // only cleared when the session actually ends (status_change / report_ready)
+  // or on unsubscribe/clearCache. Used to show a "waiting" countdown on the UI
+  // during the 10-minute backend idle window before session auto-timeout.
+  final Map<String, DateTime> _lastSeenAt = {};
+
+  /// Idle minutes before the backend auto-ends a session (mirrors SESSION_TIMEOUT_MINUTES).
+  static const int sessionTimeoutMinutes = 10;
+
   // Broadcast stream that emits a CooldownState whenever any device's
   // lifecycle status changes (status_change or report_ready events).
   final _cooldownController = StreamController<CooldownState>.broadcast();
@@ -302,6 +311,11 @@ class TelemetryService {
   CooldownState? getCooldownState(String deviceId) {
     return _cooldownStates[canonicalizeMac(deviceId)];
   }
+
+  /// Last time telemetry was received from [deviceId].
+  /// Returns null if no telemetry has been received or the session has ended.
+  DateTime? getLastSeenAt(String deviceId) =>
+      _lastSeenAt[canonicalizeMac(deviceId)];
 
   /// In-memory history of positions per device (normalized device id -> list
   /// of timestamped lat/lon entries). Kept in memory for the app lifetime.
@@ -453,9 +467,11 @@ class TelemetryService {
             // from the still-running hardware is suppressed below.
             _latest.remove(normId);
             _positions.remove(normId);
+            _lastSeenAt.remove(normId);
             if (normKey != normId) {
               _latest.remove(normKey);
               _positions.remove(normKey);
+              _lastSeenAt.remove(normKey);
             }
             _activeController.add(getActiveDevices());
             debugPrint('Telemetry: status_change for $normId → cooldown until $cooldownEnd');
@@ -480,6 +496,7 @@ class TelemetryService {
             // Clear active telemetry cache — device is now fully offline
             _latest.remove(normId);
             _positions.remove(normId);
+            _lastSeenAt.remove(normId);
             _activeController.add(getActiveDevices());
             debugPrint('Telemetry: report_ready for $normId — device fully offline');
             return;
@@ -491,6 +508,7 @@ class TelemetryService {
             debugPrint('Telemetry: explicit offline for $offId - clearing cache');
             _latest.remove(offId);
             _positions.remove(offId);
+            _lastSeenAt.remove(offId);
             _activeController.add(getActiveDevices());
             return;
           }
@@ -560,10 +578,12 @@ class TelemetryService {
           );
 
           _latest[normId] = stored;
+          _lastSeenAt[normId] = DateTime.now().toUtc();
 
           // Also mark the subscription key as active
           if (normKey != normId) {
             _latest[normKey] = stored;
+            _lastSeenAt[normKey] = DateTime.now().toUtc();
           }
 
           // Positional history
@@ -619,6 +639,7 @@ class TelemetryService {
     final ch = _channels.remove(norm);
     ch?.sink.close();
     _latest.remove(norm);
+    _lastSeenAt.remove(norm);
     _reconnectAttempts.remove(norm);
   }
 
@@ -627,7 +648,8 @@ class TelemetryService {
     final norm = canonicalizeMac(deviceId);
     debugPrint('Telemetry: Manually clearing cache for $norm');
     _latest.remove(norm);
-    _positions.remove(norm); // Also clear history
+    _positions.remove(norm);
+    _lastSeenAt.remove(norm);
     _activeController.add(getActiveDevices());
   }
 
@@ -707,6 +729,7 @@ class TelemetryService {
     _latest.clear();
     _pruneTimer?.cancel();
     _positions.clear();
+    _lastSeenAt.clear();
     _cooldownStates.clear();
     try {
       _updatesController.close();
