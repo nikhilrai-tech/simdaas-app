@@ -1114,9 +1114,19 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   // Prefer live telemetry values when available, otherwise fall back
                   // to the metrics provider values.
                   final t = latestTelemetry;
-                  final coverage = t != null && t.jobCompletionPercent != null
-                      ? t.jobCompletionPercent!
-                      : (m['coveragePercent'] ?? m['coverage'] ?? 0).toDouble();
+                  // Coverage: prefer live telemetry, then service-stored last
+                  // known value (persists while device is temporarily offline),
+                  // then 0.0 (only when session is truly new/unstarted).
+                  final double coverage;
+                  if (t != null && t.jobCompletionPercent != null) {
+                    coverage = t.jobCompletionPercent!;
+                  } else {
+                    final svc = ref.read(telemetryServiceProvider);
+                    final nid = widget.deviceId != null
+                        ? canonicalizeMac(widget.deviceId!)
+                        : null;
+                    coverage = (nid != null ? svc.getLastKnownCoverage(nid) : null) ?? 0.0;
+                  }
 
                   // final leftNozzle = t != null && t.leftSolenoidState != null
                   //     ? (t.leftSolenoidState == 1 ? 'On' : 'Off')

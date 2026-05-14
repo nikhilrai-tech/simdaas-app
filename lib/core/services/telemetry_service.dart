@@ -293,6 +293,11 @@ class TelemetryService {
   // during the 10-minute backend idle window before session auto-timeout.
   final Map<String, DateTime> _lastSeenAt = {};
 
+  // Last known job_completion_percent per device. Not cleared by the pruner so
+  // the monitoring screen can show the correct coverage % even when the device
+  // is temporarily offline (latestTelemetry is null). Cleared on session end.
+  final Map<String, double> _lastKnownCoverage = {};
+
   /// Idle minutes before the backend auto-ends a session (mirrors SESSION_TIMEOUT_MINUTES).
   static const int sessionTimeoutMinutes = 10;
 
@@ -316,6 +321,12 @@ class TelemetryService {
   /// Returns null if no telemetry has been received or the session has ended.
   DateTime? getLastSeenAt(String deviceId) =>
       _lastSeenAt[canonicalizeMac(deviceId)];
+
+  /// Last known job_completion_percent for [deviceId].
+  /// Persists even when device is temporarily offline (not cleared by pruner).
+  /// Returns null if no coverage has been received or the session has ended.
+  double? getLastKnownCoverage(String deviceId) =>
+      _lastKnownCoverage[canonicalizeMac(deviceId)];
 
   /// In-memory history of positions per device (normalized device id -> list
   /// of timestamped lat/lon entries). Kept in memory for the app lifetime.
@@ -468,10 +479,12 @@ class TelemetryService {
             _latest.remove(normId);
             _positions.remove(normId);
             _lastSeenAt.remove(normId);
+            _lastKnownCoverage.remove(normId);
             if (normKey != normId) {
               _latest.remove(normKey);
               _positions.remove(normKey);
               _lastSeenAt.remove(normKey);
+              _lastKnownCoverage.remove(normKey);
             }
             _activeController.add(getActiveDevices());
             debugPrint('Telemetry: status_change for $normId → cooldown until $cooldownEnd');
@@ -497,6 +510,7 @@ class TelemetryService {
             _latest.remove(normId);
             _positions.remove(normId);
             _lastSeenAt.remove(normId);
+            _lastKnownCoverage.remove(normId);
             _activeController.add(getActiveDevices());
             debugPrint('Telemetry: report_ready for $normId — device fully offline');
             return;
@@ -579,11 +593,17 @@ class TelemetryService {
 
           _latest[normId] = stored;
           _lastSeenAt[normId] = DateTime.now().toUtc();
+          if (stored.jobCompletionPercent != null) {
+            _lastKnownCoverage[normId] = stored.jobCompletionPercent!;
+          }
 
           // Also mark the subscription key as active
           if (normKey != normId) {
             _latest[normKey] = stored;
             _lastSeenAt[normKey] = DateTime.now().toUtc();
+            if (stored.jobCompletionPercent != null) {
+              _lastKnownCoverage[normKey] = stored.jobCompletionPercent!;
+            }
           }
 
           // Positional history
@@ -640,6 +660,7 @@ class TelemetryService {
     ch?.sink.close();
     _latest.remove(norm);
     _lastSeenAt.remove(norm);
+    _lastKnownCoverage.remove(norm);
     _reconnectAttempts.remove(norm);
   }
 
@@ -650,6 +671,7 @@ class TelemetryService {
     _latest.remove(norm);
     _positions.remove(norm);
     _lastSeenAt.remove(norm);
+    _lastKnownCoverage.remove(norm);
     _activeController.add(getActiveDevices());
   }
 
@@ -730,6 +752,7 @@ class TelemetryService {
     _pruneTimer?.cancel();
     _positions.clear();
     _lastSeenAt.clear();
+    _lastKnownCoverage.clear();
     _cooldownStates.clear();
     try {
       _updatesController.close();
