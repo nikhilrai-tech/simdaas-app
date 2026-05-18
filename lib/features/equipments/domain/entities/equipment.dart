@@ -29,6 +29,7 @@ class EquipmentEntity {
   final String? linkedPlotId;
   final int? activeSessionId;
   // timestamps
+  final DateTime? lastSeenAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   // legacy mounting/w lidar/ultrasonic kept for compatibility
@@ -55,6 +56,7 @@ class EquipmentEntity {
     this.linkedTractorId,
     this.linkedPlotId,
     this.activeSessionId,
+    this.lastSeenAt,
     this.createdAt,
     this.updatedAt,
   });
@@ -104,6 +106,7 @@ class ControlUnitEntity extends EquipmentEntity {
     super.linkedTractorId,
     super.linkedPlotId,
     super.activeSessionId,
+    super.lastSeenAt,
     super.lidarNozzleDistance,
     super.mountingHeight,
     super.ultrasonicDistance,

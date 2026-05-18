@@ -12,6 +12,7 @@ import '../core/services/telemetry_service.dart';
 import '../core/utils/mac_utils.dart';
 import '../features/data_monitoring/presentation/screens/monitoring_screen.dart';
 import '../features/reports/presentation/screens/reports_list_screen.dart';
+import 'user_guide_pdf_screen.dart';
 import '../features/equipments/presentation/screens/create_control_unit_screen.dart';
 import '../features/equipments/presentation/screens/scan_control_unit_screen.dart';
 
@@ -31,20 +32,6 @@ class TempDashboard extends ConsumerWidget {
         title: const Text('Dashboard'),
         elevation: 0,
         actions: [
-          // Live status indicator (subtle)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Center(
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: activeDevices.isNotEmpty ? Colors.green : Colors.grey,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-          ),
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
@@ -109,30 +96,55 @@ class TempDashboard extends ConsumerWidget {
                                   ),
                             ),
                             const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary.withAlpha(25),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.info_outline,
-                                    size: 14,
-                                    color: Theme.of(context).colorScheme.primary,
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primary.withAlpha(25),
+                                    borderRadius: BorderRadius.circular(20),
                                   ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Quick access to control centres',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: Theme.of(context).colorScheme.primary,
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline,
+                                        size: 14,
+                                        color: Theme.of(context).colorScheme.primary,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Quick access to control centres',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                              color: Theme.of(context).colorScheme.primary,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(width: 8),
+                                GestureDetector(
+                                  onTap: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const UserGuidePdfScreen(),
+                                    ),
+                                  ),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).colorScheme.primary.withAlpha(25),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Icon(
+                                      Icons.picture_as_pdf_outlined,
+                                      size: 14,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -216,31 +228,15 @@ class TempDashboard extends ConsumerWidget {
     final activeKeys = actives.map((t) => canonicalizeMac(t.deviceId)).toSet();
     int onlineCount = 0;
 
-    final statuses = <String, int>{};
     for (final it in items) {
       final deviceId = extractDeviceId(it);
       if (deviceId.isNotEmpty && activeKeys.contains(canonicalizeMac(deviceId))) {
         onlineCount++;
       }
-
-      final s = (it.status ?? 'unknown').toString().toLowerCase();
-      statuses[s] = (statuses[s] ?? 0) + 1;
     }
 
-    final List<String> parts = [];
-    if (onlineCount > 0) {
-      parts.add('Online: $onlineCount');
-    } else if (actives.isEmpty) {
-      // If we have items but none are in the active list
-      parts.add('All Offline');
-    }
-
-    // Include DB status counts as well for context
-    final statusParts =
-        statuses.entries.map((e) => '${_capitalize(e.key)}: ${e.value}');
-    parts.addAll(statusParts);
-
-    return parts.join(' • ');
+    final offlineCount = items.length - onlineCount;
+    return 'offline: $offlineCount. online: $onlineCount.';
   }
 
   String _getGreeting() {
@@ -249,9 +245,6 @@ class TempDashboard extends ConsumerWidget {
     if (hour < 17) return 'Good Afternoon';
     return 'Good Evening';
   }
-
-  String _capitalize(String s) =>
-      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 }
 
 /// Simple model used for dummy report data in the temporary UI.
@@ -326,6 +319,7 @@ class _ControlUnitsListScreenState
   Widget build(BuildContext context) {
     final userId = ref.read(authServiceProvider).currentUserId ?? '';
     final plotsAsync = ref.watch(fm_provs.plotsListProvider(userId));
+    final sprayersAsync = ref.watch(eq_provs.sprayersProvider(userId));
 
     // Build a quick mapping of plot id -> plot name when available.
     final Map<String, String> plotMap = {};
@@ -337,6 +331,15 @@ class _ControlUnitsListScreenState
         } catch (_) {
           // ignore malformed plot objects
         }
+      }
+    }
+
+    // Build a quick mapping of sprayer id -> sprayer name.
+    final Map<String, String> sprayerMap = {};
+    final sprayers = sprayersAsync.asData?.value;
+    if (sprayers != null) {
+      for (final s in sprayers) {
+        sprayerMap[s.id.toString()] = s.name;
       }
     }
 
@@ -426,10 +429,15 @@ class _ControlUnitsListScreenState
                     final linkedPlotId = (cu.linkedPlotId ?? '').toString();
                     final linkedPlotName =
                         _extractPlotNameFromLinked(linkedPlotId, plotMap);
+                    final linkedSprayerId = (cu.linkedSprayerId ?? '').toString();
+                    final linkedSprayerName = linkedSprayerId.isNotEmpty
+                        ? sprayerMap[linkedSprayerId]
+                        : null;
                     return _DeviceListItem(
                       cu: cu,
                       isInActiveList: isInActiveList,
                       linkedPlotName: linkedPlotName,
+                      linkedSprayerName: linkedSprayerName,
                     );
                   },
                 );
@@ -672,11 +680,13 @@ class _DeviceListItem extends ConsumerWidget {
   final dynamic cu;
   final bool isInActiveList;
   final String? linkedPlotName;
+  final String? linkedSprayerName;
 
   const _DeviceListItem({
     required this.cu,
     required this.isInActiveList,
     this.linkedPlotName,
+    this.linkedSprayerName,
   });
 
   @override
@@ -692,17 +702,21 @@ class _DeviceListItem extends ConsumerWidget {
 
     // WAITING = device recently stopped sending (< 10 min ago) but session
     // is not yet ended on the backend. Track remains visible in monitoring.
+    // Always prefer the in-memory last-seen (actual last MQTT receive time)
+    // over cu.lastSeenAt — the DB field gets updated when a new session is
+    // created on the backend, which would show the wrong "offline since" time.
     DateTime? lastSeenAt;
+    if (deviceId.isNotEmpty) {
+      lastSeenAt = ref.read(telemetryServiceProvider).getLastSeenAt(deviceId);
+    }
+    lastSeenAt ??= (cu.lastSeenAt as DateTime?);
+
     bool isWaiting = false;
     if (!isEffectivelyActive && !isInCooldown &&
         cooldownState?.status != DeviceLifecycleStatus.offline &&
-        deviceId.isNotEmpty) {
-      final svc = ref.read(telemetryServiceProvider);
-      lastSeenAt = svc.getLastSeenAt(deviceId);
-      if (lastSeenAt != null) {
-        final elapsed = DateTime.now().toUtc().difference(lastSeenAt).inMinutes;
-        isWaiting = elapsed < TelemetryService.sessionTimeoutMinutes;
-      }
+        lastSeenAt != null) {
+      final elapsed = DateTime.now().toUtc().difference(lastSeenAt).inMinutes;
+      isWaiting = elapsed < TelemetryService.sessionTimeoutMinutes;
     }
 
     final String statusText;
@@ -726,25 +740,11 @@ class _DeviceListItem extends ConsumerWidget {
         ? deviceId
         : (cu.controlUnitId ?? cu.id).toString();
 
-    // Trailing pill: COOLDOWN in blue, WAITING with countdown in amber.
+    // Trailing pill: cooldown countdown in blue, waiting countdown in amber.
+    // Offline state shows no trailing pill.
     Widget? trailingWidget;
     if (isInCooldown) {
-      trailingWidget = Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.blue.withAlpha(30),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Text(
-          'COOLDOWN',
-          style: TextStyle(
-            color: Colors.blue,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-          ),
-        ),
-      );
+      trailingWidget = _CooldownCountdownPill(cooldownEnd: cooldownState?.cooldownEnd);
     } else if (isWaiting && lastSeenAt != null) {
       trailingWidget = _WaitingCountdownPill(lastSeenAt: lastSeenAt);
     }
@@ -782,6 +782,15 @@ class _DeviceListItem extends ConsumerWidget {
           if (displayId.isNotEmpty) Text('ID: $displayId'),
           if (linkedPlotId.isNotEmpty)
             Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
+          if (linkedSprayerName != null)
+            Text('Default sprayer: $linkedSprayerName'),
+          if (statusText == 'OFFLINE')
+            Text(
+              lastSeenAt != null
+                  ? 'Offline since: ${_formatTimeOfDay(lastSeenAt)}'
+                  : 'Offline since: --',
+              style: TextStyle(fontSize: 11, color: Colors.orange.shade700),
+            ),
           if (!isInCooldown)
             Text(
               statusText,
@@ -816,6 +825,79 @@ class _DeviceListItem extends ConsumerWidget {
                       MonitoringScreen(deviceId: deviceId, plotId: plotIdForNav)));
             }
           : null,
+    );
+  }
+}
+
+/// Blue pill showing "❄️ MM:SS" countdown until cooldown ends.
+/// Runs its own 1-second timer so parent doesn't need to be stateful.
+class _CooldownCountdownPill extends StatefulWidget {
+  final DateTime? cooldownEnd;
+  const _CooldownCountdownPill({this.cooldownEnd});
+
+  @override
+  State<_CooldownCountdownPill> createState() => _CooldownCountdownPillState();
+}
+
+class _CooldownCountdownPillState extends State<_CooldownCountdownPill> {
+  late Timer _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.cooldownEnd == null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.blue.withAlpha(30),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text(
+          '❄️ COOLDOWN',
+          style: TextStyle(
+            color: Colors.blue,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
+        ),
+      );
+    }
+    final remaining =
+        widget.cooldownEnd!.toUtc().difference(DateTime.now().toUtc()).inSeconds;
+    if (remaining <= 0) return const SizedBox.shrink();
+    final m = remaining ~/ 60;
+    final s = remaining % 60;
+    final label =
+        '❄️ ${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.blue.withAlpha(30),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.blue,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.5,
+        ),
+      ),
     );
   }
 }
@@ -875,6 +957,11 @@ class _WaitingCountdownPillState extends State<_WaitingCountdownPill> {
       ),
     );
   }
+}
+
+String _formatTimeOfDay(DateTime dt) {
+  final local = dt.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
 }
 
 class _DashboardCard extends StatelessWidget {

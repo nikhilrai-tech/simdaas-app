@@ -641,11 +641,40 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               ],
             ),
           ),
+          // Tap-to-mark hint: shown when no boundary points placed yet
+          if (points.isEmpty)
+            Positioned(
+              bottom: 140,
+              left: 16,
+              right: 90,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(184),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.touch_app, color: Colors.white, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Tap on the map to mark your field boundary',
+                          style: TextStyle(color: Colors.white, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           // controls for selected vertex
           if (selectedVertex != null)
             Positioned(
               bottom: 80,
-              right: 12,
+              right: 90,
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.all(8.0),

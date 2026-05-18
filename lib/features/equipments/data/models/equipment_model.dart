@@ -23,6 +23,7 @@ class EquipmentModel extends EquipmentEntity {
     super.linkedTractorId,
     super.linkedPlotId,
     super.activeSessionId,
+    super.lastSeenAt,
     super.createdAt,
     super.updatedAt,
   });
@@ -112,6 +113,7 @@ class EquipmentModel extends EquipmentEntity {
         linkedTractorId: _extractId(json['tractor']),
         linkedPlotId: _extractId(json['plot']),
         activeSessionId: json['active_session'] as int?,
+        lastSeenAt: parseTime('last_seen_at', 'lastSeenAt'),
         createdAt: parseTime('createdAt', 'created_at'),
         updatedAt: parseTime('updatedAt', 'updated_at'),
       );
@@ -229,6 +231,7 @@ class ControlUnitModel extends EquipmentModel {
     super.linkedTractorId,
     super.linkedPlotId,
     super.activeSessionId,
+    super.lastSeenAt,
     super.mountingHeight,
     super.lidarNozzleDistance,
     super.ultrasonicDistance,

@@ -1149,11 +1149,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                       ? t.speed!.toStringAsFixed(2)
                       : read(m['tractorSpeed'] ?? m['speed']);
                   
-                  final flowRateLpmStr = t != null && t.flowRateLpm != null
-                      ? t.flowRateLpm!.toStringAsFixed(2)
+                  final flowRateLpmStr = t != null && t.flowRate != null
+                      ? t.flowRate!.toStringAsFixed(2)
                       : flowRate;
-                  final flowInLitresStr = t != null && t.flowInLitres != null
-                      ? t.flowInLitres!.toStringAsFixed(2)
+                  final flowInLitresStr = t != null && t.tankLevel != null
+                      ? t.tankLevel!.toStringAsFixed(2)
                       : '-';
 
                   final ptoOn = t != null && t.ptoState != null

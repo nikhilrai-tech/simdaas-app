@@ -134,8 +134,9 @@ class RowLineCoverage {
           (segLen / subSegmentLengthMeters).ceil().clamp(1, 1000).toInt();
       final halfWidth = rowSpacing / 2;
 
-      // Spray: accumulate flow rates; GPS/Speed: track latest color.
+      // Spray: accumulate flow rates + counts for averaging; GPS/Speed: track latest color.
       final accumulated = List<double>.filled(numSub, 0.0);
+      final accumulatedCount = List<int>.filled(numSub, 0);
       final latestColor = List<Color?>.filled(numSub, null);
 
       // Track last index in this corridor so we can fill the gap to the next
@@ -165,6 +166,7 @@ class RowLineCoverage {
         for (int s = lo; s <= hi; s++) {
           if (heatmapType == HeatmapType.spraying) {
             accumulated[s] += pt.flowRate ?? 0.0;
+            accumulatedCount[s]++;
           } else {
             latestColor[s] ??= color; // first-write wins for intermediate bands
           }
@@ -185,8 +187,16 @@ class RowLineCoverage {
       for (int i = 0; i < numSub; i++) {
         Color? bandColor;
         if (heatmapType == HeatmapType.spraying) {
-          if (accumulated[i] <= 0.0) continue;
-          bandColor = HeatmapColorUtils.getColorForSpray(accumulated[i]);
+          if (accumulated[i] <= 0.0 || accumulatedCount[i] == 0) continue;
+          // Average flow rate across all GPS samples in this sub-band.
+          final avgFlow = accumulated[i] / accumulatedCount[i];
+          debugPrint(
+            '[FlowHeatmap] corridor=$ri sub=$i '
+            'samples=${accumulatedCount[i]} '
+            'sum=${accumulated[i].toStringAsFixed(1)} '
+            'avg=${avgFlow.toStringAsFixed(1)} LPM',
+          );
+          bandColor = HeatmapColorUtils.getColorForSpray(avgFlow);
         } else {
           bandColor = latestColor[i];
           if (bandColor == null) continue;

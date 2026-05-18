@@ -50,6 +50,7 @@ dependencies:
 
   intl: any
   fl_chart: ^1.1.1
+  pdfrx: ^2.2.24
 dev_dependencies:
   flutter_test:
     sdk: flutter
