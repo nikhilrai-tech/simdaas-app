@@ -157,6 +157,13 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
         plotMap[p.id.toString()] = p.name;
       }
     });
+    final sprayersListAsync = ref.watch(sprayersProvider(userId));
+    final Map<String, String> sprayerMap = {};
+    sprayersListAsync.whenData((items) {
+      for (final s in items) {
+        sprayerMap[s.id.toString()] = s.name;
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -383,10 +390,14 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
                             final linkedPlotId = (e.linkedPlotId ?? '').toString();
                             final linkedPlotName =
                                 _extractPlotNameFromLinked(linkedPlotId, plotMap);
+                            final linkedSprayerId = (e.linkedSprayerId ?? '').toString();
+                            final linkedSprayerName = sprayerMap[linkedSprayerId];
 
-                            final details = (e.category == 'sprayer')
-                                ? 'Plot: ${linkedPlotName ?? '-'} • Mount H: ${e.mountingHeight ?? '-'} m • Lidar-Nozzle: ${e.lidarNozzleDistance ?? '-'} m'
-                                : 'Plot: ${linkedPlotName ?? '-'}';
+                            final details = (e.category == 'control_unit')
+                                ? 'Default plot: ${linkedPlotName ?? '-'}  •  Default sprayer: ${linkedSprayerName ?? '-'}'
+                                : (e.category == 'tractor')
+                                    ? 'Default plot: ${linkedPlotName ?? '-'}'
+                                    : '';
 
                             IconData getCategoryIcon(String category) {
                               switch (category.toLowerCase()) {
@@ -489,15 +500,17 @@ class _EquipmentListScreenState extends ConsumerState<EquipmentListScreen>
                                                         .secondary,
                                                   ),
                                             ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              details,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
+                                            if (details.isNotEmpty) ...[
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                details,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ],
                                           ],
                                         ),
                                       ),

@@ -6,6 +6,7 @@ import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 
+import 'package:simdaas/core/services/location_service.dart';
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
 import '../utils/row_line_generator.dart';
@@ -136,6 +137,81 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     }
   }
 
+  // ── Map tool actions ─────────────────────────────────────────────────────
+
+  void _zoomIn() {
+    final cam = _mapController.camera;
+    _mapController.move(cam.center, (cam.zoom + 1).clamp(5.0, 22.0));
+  }
+
+  void _zoomOut() {
+    final cam = _mapController.camera;
+    _mapController.move(cam.center, (cam.zoom - 1).clamp(5.0, 22.0));
+  }
+
+  Future<void> _centerOnLocation() async {
+    try {
+      final loc = await LocationService().getCurrentLocation();
+      if (loc.latitude == 0 && loc.longitude == 0) return;
+      _mapController.move(loc, 18.0);
+    } catch (e) {
+      if (mounted) showPolishedError(context, e, fallback: 'Location error');
+    }
+  }
+
+  // ── Boundary snapping helpers ────────────────────────────────────────────
+
+  LatLng _clampToBoundary(LatLng point, List<LatLng> polygon) {
+    if (polygon.length < 3) return point;
+    if (_isInsidePolygon(point, polygon)) return point;
+    LatLng nearest = polygon.first;
+    double minDistSq = double.infinity;
+    for (int i = 0; i < polygon.length; i++) {
+      final a = polygon[i];
+      final b = polygon[(i + 1) % polygon.length];
+      final c = _nearestPointOnSegment(point, a, b);
+      final d = _distanceSq(point, c);
+      if (d < minDistSq) {
+        minDistSq = d;
+        nearest = c;
+      }
+    }
+    return nearest;
+  }
+
+  bool _isInsidePolygon(LatLng p, List<LatLng> poly) {
+    int crossings = 0;
+    for (int i = 0; i < poly.length; i++) {
+      final a = poly[i];
+      final b = poly[(i + 1) % poly.length];
+      if (((a.longitude <= p.longitude) && (p.longitude < b.longitude)) ||
+          ((b.longitude <= p.longitude) && (p.longitude < a.longitude))) {
+        final lat = a.latitude +
+            (p.longitude - a.longitude) *
+                (b.latitude - a.latitude) /
+                (b.longitude - a.longitude);
+        if (p.latitude < lat) crossings++;
+      }
+    }
+    return crossings.isOdd;
+  }
+
+  LatLng _nearestPointOnSegment(LatLng p, LatLng a, LatLng b) {
+    final dx = b.latitude - a.latitude;
+    final dy = b.longitude - a.longitude;
+    if (dx == 0 && dy == 0) return a;
+    final t = ((p.latitude - a.latitude) * dx + (p.longitude - a.longitude) * dy) /
+        (dx * dx + dy * dy);
+    final tc = t.clamp(0.0, 1.0);
+    return LatLng(a.latitude + tc * dx, a.longitude + tc * dy);
+  }
+
+  double _distanceSq(LatLng a, LatLng b) {
+    final dlat = a.latitude - b.latitude;
+    final dlon = a.longitude - b.longitude;
+    return dlat * dlat + dlon * dlon;
+  }
+
   // ── Map overlay builders ─────────────────────────────────────────────────
 
   List<Polyline> _buildRowPolylines() {
@@ -185,10 +261,11 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 final dLon = currLL.longitude - lastLL.longitude;
                 setState(() {
                   final newSeg = List<LatLng>.from(_rowLines[rowIdx]);
-                  newSeg[endIdx] = LatLng(
+                  final moved = LatLng(
                     newSeg[endIdx].latitude + dLat,
                     newSeg[endIdx].longitude + dLon,
                   );
+                  newSeg[endIdx] = _clampToBoundary(moved, widget.plot.polygon);
                   _rowLines = List<List<LatLng>>.from(_rowLines)..[rowIdx] = newSeg;
                   _lastPointerPos = ev.position;
                 });
@@ -296,6 +373,37 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               if (_rowLines.isNotEmpty)
                 MarkerLayer(markers: _buildRowEndpointMarkers()),
             ],
+          ),
+
+          // ── Map tool FABs (zoom / location) ─────────────────────────────
+          Positioned(
+            right: 8,
+            bottom: 168,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'row_zoom_in',
+                  onPressed: _zoomIn,
+                  tooltip: 'Zoom in',
+                  child: const Icon(Icons.add),
+                ),
+                const SizedBox(height: 6),
+                FloatingActionButton.small(
+                  heroTag: 'row_zoom_out',
+                  onPressed: _zoomOut,
+                  tooltip: 'Zoom out',
+                  child: const Icon(Icons.remove),
+                ),
+                const SizedBox(height: 10),
+                FloatingActionButton(
+                  heroTag: 'row_my_location',
+                  onPressed: _centerOnLocation,
+                  tooltip: 'My location',
+                  child: const Icon(Icons.my_location),
+                ),
+              ],
+            ),
           ),
 
           // ── Bottom mode bar ─────────────────────────────────────────────

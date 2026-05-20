@@ -351,107 +351,298 @@ class _EquipmentDetailsScreenState
               ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // left: flexible area for name/category/details so long text wraps
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildHeroCard(context),
+            const SizedBox(height: 12),
+            _buildMetaCard(context, currentUserId),
+            const SizedBox(height: 12),
+            _buildSpecsCard(context, sprayersAsync, tractorsAsync, plotsAsync),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  String _fmtNum(num? v) {
+    if (v == null) return '-';
+    final d = v.toDouble();
+    if (d == d.truncateToDouble()) return d.toStringAsFixed(0);
+    final s = d.toStringAsFixed(3).replaceAll(RegExp(r'0+$'), '');
+    return s.endsWith('.') ? s.substring(0, s.length - 1) : s;
+  }
+
+  String _fmtDate(DateTime? dt) {
+    if (dt == null) return '-';
+    final local = dt.toLocal();
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    final h = local.hour.toString().padLeft(2, '0');
+    final m = local.minute.toString().padLeft(2, '0');
+    return '${local.day} ${months[local.month - 1]} ${local.year}, $h:$m';
+  }
+
+  Color _categoryColor(BuildContext context) {
+    final cat = displayedEquipment.category.toLowerCase();
+    if (cat == 'control_unit') return Colors.blue;
+    if (cat == 'sprayer') return Colors.green;
+    if (cat == 'tractor') return Colors.orange;
+    return Theme.of(context).colorScheme.primary;
+  }
+
+  String _categoryLabel() {
+    switch (displayedEquipment.category.toLowerCase()) {
+      case 'control_unit': return 'Control Unit';
+      case 'sprayer': return 'Sprayer';
+      case 'tractor': return 'Tractor';
+      default: return displayedEquipment.category;
+    }
+  }
+
+  // ── Cards ─────────────────────────────────────────────────────────────────
+
+  Widget _buildHeroCard(BuildContext context) {
+    final color = _categoryColor(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: color.withAlpha(30),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                displayedEquipment.category.toLowerCase() == 'control_unit'
+                    ? Icons.router_outlined
+                    : displayedEquipment.category.toLowerCase() == 'sprayer'
+                        ? Icons.water_drop_outlined
+                        : Icons.agriculture_outlined,
+                color: color,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(displayedEquipment.name,
-                        style: Theme.of(context).textTheme.titleLarge),
-                    const SizedBox(height: 4),
-                    Text(displayedEquipment.category, softWrap: true),
-                  ]),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayedEquipment.name,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 6),
+                  Chip(
+                    label: Text(
+                      _categoryLabel(),
+                      style: TextStyle(
+                          color: color,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    backgroundColor: color.withAlpha(25),
+                    side: BorderSide(color: color.withAlpha(80)),
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
             ),
-          ]),
-          const SizedBox(height: 16),
-          // allow owner and other fields to wrap and flow vertically
-          if (displayedEquipment.userId == null)
-            const Text('Owner: -', softWrap: true)
-          else
-            ref.watch(userByIdProvider(displayedEquipment.userId!)).when(
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetaCard(BuildContext context, String currentUserId) {
+    final muted = Theme.of(context).colorScheme.onSurface.withAlpha(140);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          children: [
+            // Owner row
+            if (displayedEquipment.userId == null)
+              _iconRow(context, Icons.person_outline, 'Owner', '-', muted)
+            else
+              ref.watch(userByIdProvider(displayedEquipment.userId!)).when(
                 data: (u) {
                   final ownerName = u != null
-                      ? (u['username'] ??
-                              u['name'] ??
-                              u['email'] ??
-                              displayedEquipment.userId)
-                          .toString()
+                      ? (u['username'] ?? u['name'] ?? u['email'] ??
+                              displayedEquipment.userId).toString()
                       : _ownerDisplay(displayedEquipment.userId);
-                  return Text('Owner: $ownerName', softWrap: true);
+                  return _iconRow(context, Icons.person_outline, 'Owner', ownerName, muted);
                 },
-                loading: () => const Text('Owner: ...', softWrap: true),
-                error: (_, __) => Text(
-                    'Owner: ${_ownerDisplay(displayedEquipment.userId)}',
-                    softWrap: true)),
-          if (displayedEquipment.createdAt != null)
-            Text(
-                'Created: ${displayedEquipment.createdAt!.toLocal().toIso8601String()}',
-                softWrap: true),
-          if (displayedEquipment.updatedAt != null)
-            Text(
-                'Updated: ${displayedEquipment.updatedAt!.toLocal().toIso8601String()}',
-                softWrap: true),
-          const SizedBox(height: 8),
-          if (displayedEquipment.category == 'sprayer') ...[
-            Text(
-                'Wheel diameter (m): ${displayedEquipment.wheelDiameter ?? '-'}',
-                softWrap: true),
-            Text(
-                'No. of screws/nuts in wheel: ${displayedEquipment.screwsInWheel ?? '-'}',
-                softWrap: true),
-            Text('Axle length (m): ${displayedEquipment.axleLength ?? '-'}',
-                softWrap: true),
-            // nozzle count and tank capacity were not shown previously; show them
-            Text('Number of nozzles: ${displayedEquipment.nozzleCount ?? '-'}',
-                softWrap: true),
-            Text('Tank capacity (L): ${displayedEquipment.tankCapacity ?? '-'}',
-                softWrap: true),
-            Text('Hinge → Axle (m): ${displayedEquipment.hingeToAxle ?? '-'}',
-                softWrap: true),
-            Text(
-                'Hinge → Nozzle (m): ${displayedEquipment.hingeToNozzle ?? '-'}',
-                softWrap: true),
-            Text(
-                'Hinge → Control unit (m): ${displayedEquipment.hingeToControlUnit ?? '-'}',
-                softWrap: true),
-            const SizedBox(height: 8),
-          ] else if (displayedEquipment.category == 'tractor') ...[
-            Text(
-                'Wheel diameter (m): ${displayedEquipment.wheelDiameter ?? '-'}',
-                softWrap: true),
-            Text('Screws in wheel: ${displayedEquipment.screwsInWheel ?? '-'}',
-                softWrap: true),
-            Text('Axle length (m): ${displayedEquipment.axleLength ?? '-'}',
-                softWrap: true),
-            const SizedBox(height: 8),
+                loading: () => _iconRow(context, Icons.person_outline, 'Owner', '…', muted),
+                error: (_, __) => _iconRow(context, Icons.person_outline, 'Owner',
+                    _ownerDisplay(displayedEquipment.userId), muted),
+              ),
+            if (displayedEquipment.createdAt != null) ...[
+              const Divider(height: 1),
+              _iconRow(context, Icons.calendar_today_outlined, 'Created',
+                  _fmtDate(displayedEquipment.createdAt), muted),
+            ],
+            if (displayedEquipment.updatedAt != null) ...[
+              const Divider(height: 1),
+              _iconRow(context, Icons.update_outlined, 'Updated',
+                  _fmtDate(displayedEquipment.updatedAt), muted),
+            ],
           ],
-          if (displayedEquipment.category == 'control_unit') ...[
-            Text('MAC address: ${displayedEquipment.macAddress ?? '-'}',
-                softWrap: true),
-            Text(
-                'Linked sprayer: ${_resolveEquipmentName(displayedEquipment.linkedSprayerId, sprayersAsync)}',
-                softWrap: true),
-            Text(
-                'Linked tractor: ${_resolveEquipmentName(displayedEquipment.linkedTractorId, tractorsAsync)}',
-                softWrap: true),
-            Text(
-                'Linked plot: ${_resolvePlotName(displayedEquipment.linkedPlotId, plotsAsync)}',
-                softWrap: true),
-            Text(
-                'Distance sensor→nozzle (m): ${displayedEquipment.lidarNozzleDistance ?? '-'}',
-                softWrap: true),
-            Text(
-                'Mounting height of lidar (m): ${displayedEquipment.mountingHeight ?? '-'}',
-                softWrap: true),
-            Text(
-                'Ultrasonic distance (m): ${displayedEquipment.ultrasonicDistance ?? '-'}',
-                softWrap: true),
-            const SizedBox(height: 8),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSpecsCard(
+    BuildContext context,
+    AsyncValue<List<EquipmentEntity>> sprayersAsync,
+    AsyncValue<List<EquipmentEntity>> tractorsAsync,
+    AsyncValue<List<dynamic>> plotsAsync,
+  ) {
+    final cat = displayedEquipment.category.toLowerCase();
+    final rows = <Widget>[];
+
+    if (cat == 'sprayer') {
+      rows.addAll([
+        _specRow(context, 'Wheel diameter', '${_fmtNum(displayedEquipment.wheelDiameter)} m'),
+        _specRow(context, 'Screws / nuts in wheel', '${displayedEquipment.screwsInWheel ?? '-'}'),
+        _specRow(context, 'Axle length', '${_fmtNum(displayedEquipment.axleLength)} m'),
+        _specRow(context, 'Number of nozzles', '${displayedEquipment.nozzleCount ?? '-'}'),
+        _specRow(context, 'Tank capacity', '${_fmtNum(displayedEquipment.tankCapacity)} L'),
+        _specRow(context, 'Hinge → Axle', '${_fmtNum(displayedEquipment.hingeToAxle)} m'),
+        _specRow(context, 'Hinge → Nozzle', '${_fmtNum(displayedEquipment.hingeToNozzle)} m'),
+        _specRow(context, 'Hinge → Control unit', '${_fmtNum(displayedEquipment.hingeToControlUnit)} m'),
+      ]);
+    } else if (cat == 'tractor') {
+      rows.addAll([
+        _specRow(context, 'Wheel diameter', '${_fmtNum(displayedEquipment.wheelDiameter)} m'),
+        _specRow(context, 'Screws in wheel', '${displayedEquipment.screwsInWheel ?? '-'}'),
+        _specRow(context, 'Axle length', '${_fmtNum(displayedEquipment.axleLength)} m'),
+      ]);
+    } else if (cat == 'control_unit') {
+      rows.addAll([
+        _specRow(context, 'MAC address', displayedEquipment.macAddress ?? '-'),
+        _specRow(context, 'Linked sprayer',
+            _resolveEquipmentName(displayedEquipment.linkedSprayerId, sprayersAsync)),
+        _specRow(context, 'Linked tractor',
+            _resolveEquipmentName(displayedEquipment.linkedTractorId, tractorsAsync)),
+        _specRow(context, 'Linked plot',
+            _resolvePlotName(displayedEquipment.linkedPlotId, plotsAsync)),
+        _specRow(context, 'Distance sensor → nozzle',
+            '${_fmtNum(displayedEquipment.lidarNozzleDistance)} m'),
+        _specRow(context, 'Lidar mounting height',
+            '${_fmtNum(displayedEquipment.mountingHeight)} m'),
+        _specRow(context, 'Ultrasonic distance',
+            displayedEquipment.ultrasonicDistance != null
+                ? '${_fmtNum(displayedEquipment.ultrasonicDistance)} m'
+                : '-'),
+      ]);
+    }
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    final children = <Widget>[];
+    for (int i = 0; i < rows.length; i++) {
+      children.add(rows[i]);
+      if (i < rows.length - 1) children.add(const Divider(height: 1));
+    }
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 10, bottom: 6),
+              child: Text(
+                'Specifications',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                    ),
+              ),
+            ),
+            const Divider(height: 1),
+            ...children,
+            const SizedBox(height: 4),
           ],
-        ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _iconRow(BuildContext context, IconData icon, String label,
+      String value, Color muted) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: muted),
+          const SizedBox(width: 10),
+          Text('$label  ', style: TextStyle(color: muted, fontSize: 13)),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _specRow(BuildContext context, String label, String value) {
+    final muted = Theme.of(context).colorScheme.onSurface.withAlpha(140);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text(label,
+                style: TextStyle(fontSize: 13, color: muted)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+              textAlign: TextAlign.end,
+            ),
+          ),
+        ],
       ),
     );
   }

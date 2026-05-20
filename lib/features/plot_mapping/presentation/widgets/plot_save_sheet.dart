@@ -7,8 +7,8 @@ import '../providers/plot_providers.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 
 /// Shows the save-field bottom sheet and performs save.
-/// Returns true if saved successfully, false otherwise.
-Future<bool> showPlotSaveSheet(
+/// Returns the saved [PlotModel] on success, null otherwise.
+Future<PlotModel?> showPlotSaveSheet(
     BuildContext context,
     WidgetRef ref,
     List<LatLng> normalizedPoints,
@@ -101,6 +101,7 @@ Future<bool> showPlotSaveSheet(
         areaCtrl.text = newVal.toStringAsFixed(2);
         areaUnit = newUnit;
       }
+      String? nameError;
       return StatefulBuilder(builder: (ctx2, setState2) {
         return PopScope(
           canPop: false,
@@ -159,12 +160,16 @@ Future<bool> showPlotSaveSheet(
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                const Text('Plot Name'),
+                                const Text('Plot Name *'),
                                 const SizedBox(height: 6),
                                 TextFormField(
                                     controller: nameCtrl,
-                                    decoration: const InputDecoration(
-                                        hintText: 'Plot Name'),
+                                    decoration: InputDecoration(
+                                        hintText: 'Plot Name',
+                                        errorText: nameError),
+                                    onChanged: (_) {
+                                      if (nameError != null) setState2(() => nameError = null);
+                                    },
                                     validator: (v) => (v == null || v.trim().isEmpty)
                                         ? 'Enter plot name'
                                         : null),
@@ -316,8 +321,25 @@ Future<bool> showPlotSaveSheet(
                           ),
                           const SizedBox(height: 16),
                           ElevatedButton(
-                            onPressed: () {
+                            onPressed: () async {
                               if (!formKey.currentState!.validate()) return;
+
+                              // Duplicate name check
+                              final enteredName = nameCtrl.text.trim().toLowerCase();
+                              final owner = ref.read(authServiceProvider).currentUserId ?? '';
+                              try {
+                                final existing = await ref.read(plotRepoProvider).getPlots(owner);
+                                final duplicate = existing.any((p) =>
+                                    p.name.trim().toLowerCase() == enteredName &&
+                                    p.id != existingPlot?.id);
+                                if (duplicate) {
+                                  setState2(() => nameError = 'A plot with this name already exists');
+                                  return;
+                                }
+                              } catch (_) {
+                                // if fetch fails, allow save to proceed
+                              }
+
                               // Convert current values back to base units (m/ha) for result
                               String bedOut = bedHeightCtrl.text;
                               if (bedOut.isNotEmpty) {
@@ -377,7 +399,7 @@ Future<bool> showPlotSaveSheet(
     },
   );
 
-  if (resMap == null) return false;
+  if (resMap == null) return null;
   
   final owner = ref.read(authServiceProvider).currentUserId;
   double? approx;
@@ -417,21 +439,24 @@ Future<bool> showPlotSaveSheet(
   );
 
   final repo = ref.read(plotRepoProvider);
+  PlotModel savedModel = model;
   try {
     if (existingPlot != null) {
       await repo.updatePlot(model);
     } else {
-      await repo.addPlot(model);
+      // Capture server-assigned id so downstream screens (e.g. RowLineScreen)
+      // can PATCH the correct resource.
+      savedModel = await repo.addPlot(model);
     }
   } catch (e) {
     if (context.mounted) {
       showPolishedError(context, e, fallback: 'Error saving plot');
     }
-    return false;
+    return null;
   }
 
   final currentUserId =
       ref.read(authServiceProvider).currentUserId ?? 'demo_user';
   ref.invalidate(plotsListProvider(currentUserId));
-  return true;
+  return savedModel;
 }

@@ -57,7 +57,7 @@ class _CreateControlUnitScreenState
   final _lidarNozzleDistance = TextEditingController();
   final _mountHeightOfLidar = TextEditingController();
   final _ultrasonicDistance = TextEditingController();
-  String _sensorType = 'lidar';
+  String _sensorType = '1d_lidar';
   // cache of existing MACs for quick uniqueness check (normalized)
   Set<String> _existingMacs = {};
   // flags to lock fields that were provided by QR scan
@@ -153,13 +153,8 @@ class _CreateControlUnitScreenState
   // - sensor 'lidar' -> pages [0,1,2]
   // - sensor 'ultrasonic' -> pages [0,3]
   List<int> get visible {
-    final v = <int>[0];
-    if (_sensorType == 'lidar') {
-      v.addAll([1, 2]);
-    } else {
-      v.addAll([1, 3]);
-    }
-    return v;
+    // Both 1D and 2D lidar use the same measurement pages (sensor-nozzle + mount height).
+    return [0, 1, 2];
   }
 
   int get totalPages => visible.length;
@@ -238,7 +233,9 @@ class _CreateControlUnitScreenState
         }
         if (m.containsKey('sensorType') &&
             (m['sensorType'] as String?)?.isNotEmpty == true) {
-          _sensorType = m['sensorType'] as String;
+          final st = m['sensorType'] as String;
+          // Migrate legacy 'lidar'/'ultrasonic' values to new names
+          _sensorType = (st == 'lidar' || st == '1d_lidar') ? '1d_lidar' : '2d_lidar';
         }
         if (m.containsKey('lidarNozzleDistance') &&
             m['lidarNozzleDistance'] != null) {
@@ -282,7 +279,8 @@ class _CreateControlUnitScreenState
         }
         if (m.containsKey('sensorType') &&
             (m['sensorType'] as String?)?.isNotEmpty == true) {
-          _sensorType = m['sensorType'] as String;
+          final st = m['sensorType'] as String;
+          _sensorType = (st == 'lidar' || st == '1d_lidar') ? '1d_lidar' : '2d_lidar';
           _prefilledSensorType = true;
         }
         if (m.containsKey('lidarNozzleDistance') &&
@@ -428,7 +426,7 @@ class _CreateControlUnitScreenState
                                             DropdownButtonFormField<String?>(
                                           initialValue: _linkedSprayerId,
                                           decoration: const InputDecoration(
-                                              labelText: 'Linked sprayer'),
+                                              labelText: 'Default sprayer'),
                                           items: [
                                             const DropdownMenuItem(
                                                 value: null,
@@ -582,44 +580,24 @@ class _CreateControlUnitScreenState
                                       labelText: 'Sensor type'),
                                   items: const [
                                     DropdownMenuItem(
-                                        value: 'lidar', child: Text('LIDAR')),
+                                        value: '1d_lidar',
+                                        child: Text('1D Lidar')),
                                     DropdownMenuItem(
-                                        value: 'ultrasonic',
-                                        child: Text('Ultrasonic')),
+                                        value: '2d_lidar',
+                                        child: Text('2D Lidar')),
                                   ],
                                   onChanged: _prefilledSensorType
                                       ? null
                                       : (v) {
-                                          final nv = v ?? 'lidar';
-                                          setState(() {
-                                            _sensorType = nv;
-                                            if (_sensorType == 'lidar') {
-                                              _ultrasonicDistance.clear();
-                                            } else {
-                                              _mountHeightOfLidar.clear();
-                                              _lidarNozzleDistance.clear();
-                                            }
-                                          });
-                                          // If the current page is not visible for the
-                                          // newly selected sensor type, jump back to
-                                          // the first visible page (main page).
-                                          WidgetsBinding.instance
-                                              .addPostFrameCallback((_) {
-                                            final v = visible;
-                                            if (!v.contains(_currentPage)) {
-                                              _pageController.animateToPage(
-                                                  v.first,
-                                                  duration: const Duration(
-                                                      milliseconds: 250),
-                                                  curve: Curves.easeInOut);
-                                            }
-                                          });
+                                          setState(() => _sensorType = v ?? '1d_lidar');
                                         },
                                   validator: (v) => (v == null || v.isEmpty)
                                       ? 'Select sensor type'
                                       : null,
                                   disabledHint: _prefilledSensorType
-                                      ? Text(_sensorType.toUpperCase())
+                                      ? Text(_sensorType == '1d_lidar'
+                                          ? '1D Lidar'
+                                          : '2D Lidar')
                                       : null,
                                 ),
                                 const SizedBox(height: 8),

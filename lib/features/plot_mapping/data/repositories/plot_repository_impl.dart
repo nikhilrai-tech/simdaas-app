@@ -3,7 +3,7 @@ import '../datasources/plot_remote_data_source.dart';
 import '../models/plot_model.dart';
 
 abstract class PlotRepository {
-  Future<void> addPlot(PlotModel plot);
+  Future<PlotModel> addPlot(PlotModel plot);
   Future<List<PlotEntity>> getPlots(String userId);
   Future<void> updatePlot(PlotModel plot);
   Future<void> deletePlot(String id);
@@ -14,7 +14,7 @@ class PlotRepositoryImpl implements PlotRepository {
   PlotRepositoryImpl(this.remote);
 
   @override
-  Future<void> addPlot(PlotModel plot) async {
+  Future<PlotModel> addPlot(PlotModel plot) async {
     return remote.addPlot(plot);
   }
 

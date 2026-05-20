@@ -14,6 +14,7 @@ import 'package:simdaas/core/services/location_service.dart';
 import '../../data/models/plot_model.dart';
 import '../widgets/plot_save_sheet.dart';
 import '../widgets/map_layers.dart';
+import 'row_line_screen.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
   final LatLng? initialCenter;
@@ -376,17 +377,54 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Future<void> _saveField() async {
     final mapState = ref.read(mapStateProvider);
     final points = mapState.points;
+
+    if (points.length < 3) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mark at least 3 boundary points to form a closed polygon.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final normalizedPoints = _normalizePolygon(points);
     // update stored points to normalized
     ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
 
-    final saved =
+    final savedPlot =
         await showPlotSaveSheet(context, ref, normalizedPoints, _computeAreaHa, existingPlot: widget.existingPlot);
-    if (saved && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+    if (savedPlot != null && mounted) {
+      final goToRowLine = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('AB Line Plotting'),
+          content: const Text(
+              'Plot saved successfully. Do you want to proceed to AB line (row line) plotting now?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Skip'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Proceed'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (goToRowLine == true) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => RowLineScreen(plot: savedPlot),
+          ),
+        );
+        if (mounted) Navigator.of(context).pop(true);
+      } else {
         Navigator.of(context).pop(true);
-      });
+      }
     }
   }
 

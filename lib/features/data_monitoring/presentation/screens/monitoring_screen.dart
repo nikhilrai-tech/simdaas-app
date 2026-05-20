@@ -204,12 +204,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           _ignoredUntil.clear();
           _cooldownBannerDismissTimer?.cancel();
           _cooldownBannerVisible = false;
-          if (state.status == DeviceLifecycleStatus.online) {
-            setState(() {
-              latestTelemetry = null;
-              positions.clear();
-            });
-          }
+          // Clear stale track and telemetry whenever the session is fully done —
+          // whether device came back online (new session) or went offline after
+          // auto-timeout (report_ready received with no preceding cooldown).
+          setState(() {
+            latestTelemetry = null;
+            positions.clear();
+          });
           if (state.status == DeviceLifecycleStatus.offline &&
               state.reportId != null) {
             // Report is ready — show a snackbar prompt

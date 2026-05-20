@@ -255,8 +255,6 @@ class _PlotListScreenState extends ConsumerState<PlotListScreen>
                     if (f.rowSpacing != null) summary.add('${f.rowSpacing} m');
                     if (f.treeCount != null)
                       summary.add('${f.treeCount} trees');
-                    if (f.bedHeight != null)
-                      summary.add('Bed H: ${f.bedHeight} m');
 
                     return Card(
                       margin: const EdgeInsets.symmetric(
