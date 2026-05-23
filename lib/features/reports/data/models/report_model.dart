@@ -20,6 +20,8 @@ class ReportModel extends Report {
     super.controlUnitId,
     super.controlUnitName,
     required super.createdAt,
+    super.startedAt,
+    super.endedAt,
     super.trajectory = const [],
   });
 
@@ -64,6 +66,8 @@ class ReportModel extends Report {
       controlUnitId: json['control_unit_details']?['id']?.toString(),
       controlUnitName: json['control_unit_details']?['name']?.toString(),
       createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+      startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at']) : null,
+      endedAt: json['ended_at'] != null ? DateTime.tryParse(json['ended_at']) : null,
       trajectory: (json['trajectory'] as List<dynamic>?)
               ?.map((e) => GPSPointData(
                     lat: parseDouble(e['lat']),

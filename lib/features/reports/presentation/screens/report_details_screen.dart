@@ -68,13 +68,13 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               children: [
                 _metricCard('Area Covered', '${(report.areaCoveredSqm / 10000).toStringAsFixed(2)} ha', Icons.area_chart, color: Colors.green),
                 const SizedBox(width: 12),
-                _metricCard('Material Used', '${report.sprayUsedLitres} L', Icons.water_drop, color: Colors.blue),
+                _metricCard('Tank Used', '${report.sprayUsedLitres.toStringAsFixed(1)}%', Icons.water_drop, color: Colors.blue),
               ],
             ),
             const SizedBox(height: 12),
             Row(
               children: [
-                _metricCard('Avg. Flow Rate', '${report.avgFlowRate} L/m', Icons.speed, color: Colors.orange),
+                _metricCard('Avg. Flow Rate', '${report.avgFlowRate.toStringAsFixed(2)} L/min', Icons.speed, color: Colors.orange),
                 const SizedBox(width: 12),
                 _metricCard('Completion', '${report.completionPercentage.toStringAsFixed(1)}%', Icons.pie_chart, color: Colors.purple),
               ],
@@ -85,15 +85,18 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             // Time and Distance Details
             _sectionHeader('Session Details'),
             Builder(builder: (context) {
-              final duration = report.trajectory.isNotEmpty
-                  ? report.trajectory.last.timestamp.difference(report.trajectory.first.timestamp)
-                  : Duration.zero;
-              
+              // Prefer actual session start/end from backend; fall back to
+              // trajectory timestamps only when session times are unavailable.
+              final startTime = report.startedAt ??
+                  (report.trajectory.isNotEmpty ? report.trajectory.first.timestamp : report.createdAt);
+              final endTime = report.endedAt ??
+                  (report.trajectory.isNotEmpty ? report.trajectory.last.timestamp : report.createdAt);
+
+              final duration = endTime.difference(startTime);
               final hours = duration.inHours;
               final minutes = duration.inMinutes % 60;
               final timeStr = hours > 0 ? '${hours}h ${minutes}m' : '${minutes}m';
-              
-              // Avg Speed = Total Distance / Total Time (in hours)
+
               final hoursDecimal = duration.inSeconds / 3600;
               final avgSpeed = hoursDecimal > 0 ? (report.distanceTravelledKm / hoursDecimal) : 0.0;
 
@@ -106,9 +109,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         children: [
-                          _detailRow('Start Time', dateFormat.format(report.trajectory.isNotEmpty ? report.trajectory.first.timestamp : report.createdAt), Icons.access_time),
+                          _detailRow('Start Time', dateFormat.format(startTime), Icons.access_time),
                           const Divider(height: 24),
-                          _detailRow('End Time', dateFormat.format(report.trajectory.isNotEmpty ? report.trajectory.last.timestamp : report.createdAt), Icons.timer_off_outlined),
+                          _detailRow('End Time', dateFormat.format(endTime), Icons.timer_off_outlined),
                           const Divider(height: 24),
                           _detailRow('Total Time', timeStr, Icons.hourglass_bottom),
                         ],
@@ -138,10 +141,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             // Saved Section
             _sectionHeader('Saved '),
             Builder(builder: (context) {
-              final duration = report.trajectory.isNotEmpty
-                  ? report.trajectory.last.timestamp.difference(report.trajectory.first.timestamp)
-                  : Duration.zero;
-              final hoursDecimal = duration.inSeconds / 3600;
+              final startTime = report.startedAt ??
+                  (report.trajectory.isNotEmpty ? report.trajectory.first.timestamp : report.createdAt);
+              final endTime = report.endedAt ??
+                  (report.trajectory.isNotEmpty ? report.trajectory.last.timestamp : report.createdAt);
+              final hoursDecimal = endTime.difference(startTime).inSeconds / 3600;
               final avgSpeed = hoursDecimal > 0 ? (report.distanceTravelledKm / hoursDecimal) : 0.0;
 
               return Card(

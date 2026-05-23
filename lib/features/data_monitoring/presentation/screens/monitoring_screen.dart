@@ -197,37 +197,51 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           if (!wasInCooldown) _showCooldownBannerBriefly();
         } else {
           _stopCountdownTimer();
-          // Cooldown is over: stop blocking telemetry on this screen so the
-          // next session can be picked up. Clear stale telemetry too so the
-          // new session's first sample paints a clean UI.
           _sessionEndedManually = false;
           _ignoredUntil.clear();
           _cooldownBannerDismissTimer?.cancel();
           _cooldownBannerVisible = false;
-          // Clear stale track and telemetry whenever the session is fully done —
-          // whether device came back online (new session) or went offline after
-          // auto-timeout (report_ready received with no preceding cooldown).
-          setState(() {
-            latestTelemetry = null;
-            positions.clear();
-          });
-          if (state.status == DeviceLifecycleStatus.offline &&
-              state.reportId != null) {
-            // Report is ready — show a snackbar prompt
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: const Text('Report generated! Tap to view.'),
-                  duration: const Duration(seconds: 6),
-                  action: SnackBarAction(
-                    label: 'View',
-                    onPressed: () {
-                      // Navigate to reports list
-                      Navigator.of(context).pushNamed('/job_reports');
-                    },
-                  ),
-                ));
-              }
+
+          if (state.status == DeviceLifecycleStatus.offline) {
+            // Session ended (report_ready received).
+            // Clear positions UNLESS the device has already started a new
+            // active session (report_ready arrived late). Check the service's
+            // live snapshot: if it has the device, new telemetry is flowing.
+            final offlineSvc = ref.read(telemetryServiceProvider);
+            final offlineNid = canonicalizeMac(widget.deviceId ?? '');
+            final newSessionActive = offlineSvc.latestTelemetry.containsKey(offlineNid);
+            if (!newSessionActive) {
+              setState(() {
+                latestTelemetry = null;
+                positions.clear();
+              });
+            } else {
+              setState(() { latestTelemetry = null; });
+            }
+            if (state.reportId != null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: const Text('Report generated! Tap to view.'),
+                    duration: const Duration(seconds: 6),
+                    action: SnackBarAction(
+                      label: 'View',
+                      onPressed: () {
+                        Navigator.of(context).pushNamed('/job_reports');
+                      },
+                    ),
+                  ));
+                }
+              });
+            }
+          } else {
+            // Device came back online (new session starting). Clear stale
+            // previous-session data so the new session starts with a clean UI.
+            // This fires BEFORE the first new-session telemetry via _deviceSub,
+            // so positions should already be empty at this point.
+            setState(() {
+              latestTelemetry = null;
+              positions.clear();
             });
           }
         }
@@ -250,8 +264,26 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       if (!mounted) return;
       setState(() {}); // rebuild to update MM:SS label
       final cooldownDone = (_cooldownState?.secondsRemaining ?? 0) <= 0;
-      final waitingDone = _waitingSecondsRemaining() <= 0;
-      if (cooldownDone && waitingDone) {
+      final waitingSecsLeft = _waitingSecondsRemaining();
+
+      // Fallback: if the 10-min session timeout has expired and no report_ready
+      // WebSocket event was received (Celery Beat may be down or WS missed it),
+      // clear stale GPS track proactively so the UI doesn't keep showing old data.
+      if (waitingSecsLeft == 0 &&
+          _cooldownState == null &&
+          positions.isNotEmpty) {
+        final fbSvc = ref.read(telemetryServiceProvider);
+        final fbNid = canonicalizeMac(widget.deviceId ?? '');
+        final isNewSessionActive = fbSvc.latestTelemetry.containsKey(fbNid);
+        if (!isNewSessionActive) {
+          setState(() {
+            latestTelemetry = null;
+            positions.clear();
+          });
+        }
+      }
+
+      if (cooldownDone && waitingSecsLeft <= 0) {
         _stopCountdownTimer();
       }
     });
@@ -360,9 +392,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         : 'Device offline — report generating';
     final countdown = state.countdownLabel;
     final seconds = state.secondsRemaining;
-    // Manual cooldown is 2 min, auto-timeout cooldown is 10 min. Use the
-    // appropriate total so the progress bar fills correctly.
-    final total = (isManual ? 120.0 : 600.0);
+    // Only manual-end triggers this banner (2-min cooldown).
+    // Auto-timeout goes directly to report_ready with no cooldown banner.
+    const total = 120.0;
     final fraction = (seconds / total).clamp(0.0, 1.0);
 
     return Container(
@@ -810,15 +842,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                               } else if (v == 'gps_heatmap') {
                                 setState(() {
                                   _selectedHeatmap = HeatmapType.gps;
-                                });
-                              } else if (v == 'toggle_demo') {
-                                setState(() {
-                                  _isDemoMode = !_isDemoMode;
-                                  if (_isDemoMode) {
-                                    _startDemo();
-                                  } else {
-                                    _stopDemo();
-                                  }
                                 });
                               } else if (v == 'end_session') {
                                 debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');

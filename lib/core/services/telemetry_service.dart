@@ -506,13 +506,21 @@ class TelemetryService {
             );
             _cooldownStates[normId] = state;
             _cooldownController.add(state);
-            // Clear active telemetry cache — device is now fully offline
-            _latest.remove(normId);
-            _positions.remove(normId);
-            _lastSeenAt.remove(normId);
-            _lastKnownCoverage.remove(normId);
-            _activeController.add(getActiveDevices());
-            debugPrint('Telemetry: report_ready for $normId — device fully offline');
+            // Only wipe the live snapshot and position history if the device
+            // is not already sending fresh telemetry (i.e. a new session has
+            // not already started). If report_ready arrives late — after the
+            // device came back online — clearing _latest would cause a brief
+            // deviceOnlineProvider=false flash and erase new-session positions.
+            final alreadyActive = _latest.containsKey(normId);
+            if (!alreadyActive) {
+              _latest.remove(normId);
+              _positions.remove(normId);
+              _lastSeenAt.remove(normId);
+              _lastKnownCoverage.remove(normId);
+              _activeController.add(getActiveDevices());
+            }
+            debugPrint('Telemetry: report_ready for $normId — '
+                '${alreadyActive ? "new session already active, positions preserved" : "device fully offline"}');
             return;
           }
 
@@ -637,9 +645,11 @@ class TelemetryService {
         debugPrint('Telemetry websocket closed for $deviceId');
         final attempts = (_reconnectAttempts[normKey] ?? 0) + 1;
         _reconnectAttempts[normKey] = attempts;
-        if (_desiredSubscriptions.contains(normKey) && attempts <= 5) {
+        if (_desiredSubscriptions.contains(normKey)) {
+          // Cap backoff at 30 s; no attempt limit — always reconnect so
+          // lifecycle events (report_ready, status_change) are never missed.
           final delay = Duration(seconds: (1 << (attempts - 1)).clamp(1, 30));
-          debugPrint('Telemetry: reconnecting $normKey in ${delay.inSeconds}s');
+          debugPrint('Telemetry: reconnecting $normKey in ${delay.inSeconds}s (attempt $attempts)');
           Timer(delay, () {
             if (_desiredSubscriptions.contains(normKey) && !_channels.containsKey(normKey)) {
               subscribe(normKey);

@@ -18,6 +18,8 @@ class Report {
   final String? controlUnitId;
   final String? controlUnitName;
   final DateTime createdAt;
+  final DateTime? startedAt;
+  final DateTime? endedAt;
   final List<GPSPointData> trajectory;
 
   const Report({
@@ -38,6 +40,8 @@ class Report {
     this.controlUnitId,
     this.controlUnitName,
     required this.createdAt,
+    this.startedAt,
+    this.endedAt,
     this.trajectory = const [],
   });
 }

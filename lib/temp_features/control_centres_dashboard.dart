@@ -99,32 +99,6 @@ class TempDashboard extends ConsumerWidget {
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.primary.withAlpha(25),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.info_outline,
-                                        size: 14,
-                                        color: Theme.of(context).colorScheme.primary,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Quick access to control centres',
-                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                              color: Theme.of(context).colorScheme.primary,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
                                 GestureDetector(
                                   onTap: () => Navigator.of(context).push(
                                     MaterialPageRoute(
@@ -132,15 +106,28 @@ class TempDashboard extends ConsumerWidget {
                                     ),
                                   ),
                                   child: Container(
-                                    padding: const EdgeInsets.all(6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
                                       color: Theme.of(context).colorScheme.primary.withAlpha(25),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
-                                    child: Icon(
-                                      Icons.picture_as_pdf_outlined,
-                                      size: 14,
-                                      color: Theme.of(context).colorScheme.primary,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.info_outline,
+                                          size: 14,
+                                          color: Theme.of(context).colorScheme.primary,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Quick access to control centres',
+                                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                color: Theme.of(context).colorScheme.primary,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
