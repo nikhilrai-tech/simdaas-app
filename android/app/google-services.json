@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "999626498597",
+    "project_id": "krishi-d976d",
+    "storage_bucket": "krishi-d976d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:999626498597:android:8343a4023f11a8c0c855cc",
+        "android_client_info": {
+          "package_name": "com.example.simdaas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAjGBq-HUi1yJsqSv-T4GX44hfZXdx2o-g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

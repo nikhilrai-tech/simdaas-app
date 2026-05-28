@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'core/services/push_notification_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'features/auth/presentation/screens/auth_gate.dart';
@@ -40,13 +42,13 @@ import 'features/equipments/presentation/providers/equipment_providers.dart'
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  await PushNotificationService.init();
   runApp(const ProviderScope(child: MyApp()));
 }
 
-// Application-level navigator key so we can reliably show dialogs from
-// places where the local BuildContext might not be attached to the root
-// navigator (for example inside early bootstrap logic). Using this key
-// makes the exit confirmation dialog robust.
+// Application-level navigator key — shared with PushNotificationService so
+// foreground notification snackbars can be shown without a BuildContext.
 final GlobalKey<NavigatorState> appNavKey = GlobalKey<NavigatorState>();
 
 class MyApp extends StatelessWidget {
@@ -54,6 +56,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    PushNotificationService.setNavigatorKey(appNavKey);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       navigatorKey: appNavKey,
@@ -143,11 +146,16 @@ class TelemetryBootstrapper extends ConsumerWidget {
     final currentUserId = ref.read(authServiceProvider).currentUserId ?? '';
     if (currentUserId.isNotEmpty) {
       Future.microtask(() => _fetchAndSubscribe(ref, currentUserId));
+      // Register FCM token for already-logged-in user (e.g. app restart)
+      Future.microtask(() => PushNotificationService.registerToken(
+            ref.read(apiServiceProvider),
+          ));
     }
 
-    // Listen for auth state changes to detect sign-out and clear subscriptions.
+    // Listen for auth state changes to detect sign-in and sign-out.
     ref.listen<AuthService>(authServiceProvider, (previous, next) {
       final userId = next.currentUserId ?? '';
+      final wasLoggedIn = previous?.currentUserId != null;
       if (userId.isEmpty) {
         debugPrint(
             'TelemetryBootstrapper.listen: user signed out or no userId');
@@ -155,6 +163,11 @@ class TelemetryBootstrapper extends ConsumerWidget {
           final svc = ref.read(telemetryServiceProvider);
           svc.subscribeToDevices(<String>[]);
         } catch (_) {}
+      } else if (!wasLoggedIn && userId.isNotEmpty) {
+        // User just logged in — register FCM token
+        Future.microtask(() => PushNotificationService.registerToken(
+              ref.read(apiServiceProvider),
+            ));
       }
     });
 

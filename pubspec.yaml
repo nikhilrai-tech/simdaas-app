@@ -51,6 +51,8 @@ dependencies:
   intl: any
   fl_chart: ^1.1.1
   pdfrx: ^2.2.24
+  firebase_core: ^3.8.1
+  firebase_messaging: ^15.2.4
 dev_dependencies:
   flutter_test:
     sdk: flutter
