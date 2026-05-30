@@ -283,328 +283,13 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
                 shape: const RoundedRectangleBorder(
                   borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
                 ),
-                builder: (ctx) {
-                  final insets = MediaQuery.of(ctx).viewInsets.bottom;
-                  final maxHeight = MediaQuery.of(ctx).size.height * 0.9;
-                  final _formKeyLocal = GlobalKey<FormState>();
-                  // Local unit state for the modal. Use StatefulBuilder so the
-                  // dropdowns can update locally.
-                  String rowUnit = 'm';
-                  String bedUnit = 'm';
-
-                  void convertRow(String newUnit) {
-                    final currentVal = double.tryParse(rowCtrl.text) ?? 0;
-                    if (currentVal == 0) {
-                      rowUnit = newUnit;
-                      return;
-                    }
-                    double inMeters;
-                    if (rowUnit == 'in')
-                      inMeters = currentVal * 0.0254;
-                    else if (rowUnit == 'ft')
-                      inMeters = currentVal * 0.3048;
-                    else
-                      inMeters = currentVal;
-
-                    double newVal;
-                    if (newUnit == 'in')
-                      newVal = inMeters / 0.0254;
-                    else if (newUnit == 'ft')
-                      newVal = inMeters / 0.3048;
-                    else
-                      newVal = inMeters;
-
-                    rowCtrl.text = newVal.toStringAsFixed(2);
-                    rowUnit = newUnit;
-                  }
-
-                  void convertBed(String newUnit) {
-                    final currentVal = double.tryParse(bedCtrl.text) ?? 0;
-                    if (currentVal == 0) {
-                      bedUnit = newUnit;
-                      return;
-                    }
-                    double inMeters;
-                    if (bedUnit == 'in')
-                      inMeters = currentVal * 0.0254;
-                    else if (bedUnit == 'ft')
-                      inMeters = currentVal * 0.3048;
-                    else
-                      inMeters = currentVal;
-
-                    double newVal;
-                    if (newUnit == 'in')
-                      newVal = inMeters / 0.0254;
-                    else if (newUnit == 'ft')
-                      newVal = inMeters / 0.3048;
-                    else
-                      newVal = inMeters;
-
-                    bedCtrl.text = newVal.toStringAsFixed(2);
-                    bedUnit = newUnit;
-                  }
-                  return StatefulBuilder(builder: (ctx2, setState2) {
-                    return PopScope(
-                      canPop: false,
-                      onPopInvokedWithResult: (didPop, result) async {
-                        if (didPop) return;
-                        final bool shouldExit = await showDialog<bool>(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                title: const Text('Discard changes?'),
-                                content: const Text(
-                                    'Are you sure you want to exit? Your progress will be lost.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(ctx).pop(false),
-                                    child: const Text('Stay'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () => Navigator.of(ctx).pop(true),
-                                    child: const Text('Discard', style: TextStyle(color: Colors.red)),
-                                  ),
-                                ],
-                              ),
-                            ) ??
-                            false;
-                        if (shouldExit && context.mounted) {
-                          Navigator.of(context).pop();
-                        }
-                      },
-                      child: AnimatedPadding(
-                        duration: const Duration(milliseconds: 250),
-                        padding: EdgeInsets.only(bottom: insets),
-                        child: FractionallySizedBox(
-                          heightFactor: 0.75,
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(maxHeight: maxHeight),
-                            child: Material(
-                            color: Theme.of(context).scaffoldBackgroundColor,
-                            elevation: 8,
-                            shape: const RoundedRectangleBorder(
-                                borderRadius: BorderRadius.vertical(
-                                    top: Radius.circular(12))),
-                            child: SingleChildScrollView(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12.0, vertical: 12.0),
-                                child: Form(
-                                  key: _formKeyLocal,
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      // small drag handle
-                                      Center(
-                                        child: Container(
-                                          width: 36,
-                                          height: 4,
-                                          margin:
-                                              const EdgeInsets.only(bottom: 8),
-                                          decoration: BoxDecoration(
-                                              color: Colors.grey[400],
-                                              borderRadius:
-                                                  BorderRadius.circular(4)),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      TextFormField(
-                                          controller: nameCtrl,
-                                          decoration: const InputDecoration(
-                                              labelText: 'Plot Name *'),
-                                          maxLength: 200,
-                                          validator: (v) =>
-                                              (v == null || v.trim().isEmpty)
-                                                  ? 'Enter plot name'
-                                                  : null),
-                                      const SizedBox(height: 8),
-                                      TextFormField(
-                                          controller: areaCtrl,
-                                          keyboardType: const TextInputType
-                                              .numberWithOptions(decimal: true),
-                                          decoration: const InputDecoration(
-                                              labelText: 'Approx Area (ha) *'),
-                                          validator: (v) {
-                                            if (v == null || v.trim().isEmpty)
-                                              return 'Enter approx area';
-                                            final t = v.trim();
-                                            final val = double.tryParse(t);
-                                            if (val == null)
-                                              return 'Invalid number';
-                                            if (val < 0)
-                                              return 'Must be non-negative';
-                                            return null;
-                                          }),
-                                      const SizedBox(height: 8),
-                                      Row(children: [
-                                        Expanded(
-                                          child: TextFormField(
-                                              controller: rowCtrl,
-                                              keyboardType: const TextInputType
-                                                  .numberWithOptions(
-                                                  decimal: true),
-                                              decoration: const InputDecoration(
-                                                  labelText: 'Row Spacing *'),
-                                              validator: (v) {
-                                                if (v == null || v.trim().isEmpty)
-                                                  return 'Enter row spacing';
-                                                final t = v.trim();
-                                                final val = double.tryParse(t);
-                                                if (val == null)
-                                                  return 'Invalid number';
-                                                if (val <= 0)
-                                                  return 'Must be > 0';
-                                                return null;
-                                              }),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        SizedBox(
-                                          width: 110,
-                                          child:
-                                              DropdownButtonFormField<String>(
-                                            value: rowUnit,
-                                            items: const [
-                                              DropdownMenuItem(
-                                                  value: 'm', child: Text('m')),
-                                              DropdownMenuItem(
-                                                  value: 'in',
-                                                  child: Text('in')),
-                                              DropdownMenuItem(
-                                                  value: 'ft',
-                                                  child: Text('ft')),
-                                            ],
-                                            onChanged: (v) => setState2(
-                                                () => convertRow(v ?? 'm')),
-                                            decoration: const InputDecoration(
-                                                labelText: 'Unit'),
-                                          ),
-                                        )
-                                      ]),
-                                      const SizedBox(height: 8),
-                                      Row(children: [
-                                        Expanded(
-                                          child: TextFormField(
-                                              controller: bedCtrl,
-                                              keyboardType: const TextInputType
-                                                  .numberWithOptions(
-                                                  decimal: true),
-                                              decoration: const InputDecoration(
-                                                  labelText: 'Bed Height *'),
-                                              validator: (v) {
-                                                if (v == null || v.trim().isEmpty)
-                                                  return 'Enter bed height';
-                                                final t = v.trim();
-                                                final val = double.tryParse(t);
-                                                if (val == null)
-                                                  return 'Invalid number';
-                                                if (val < 0)
-                                                  return 'Must be non-negative';
-                                                return null;
-                                              }),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        SizedBox(
-                                          width: 110,
-                                          child:
-                                              DropdownButtonFormField<String>(
-                                            value: bedUnit,
-                                            items: const [
-                                              DropdownMenuItem(
-                                                  value: 'm', child: Text('m')),
-                                              DropdownMenuItem(
-                                                  value: 'in',
-                                                  child: Text('in')),
-                                              DropdownMenuItem(
-                                                  value: 'ft',
-                                                  child: Text('ft')),
-                                            ],
-                                            onChanged: (v) => setState2(
-                                                () => convertBed(v ?? 'm')),
-                                            decoration: const InputDecoration(
-                                                labelText: 'Unit'),
-                                          ),
-                                        )
-                                      ]),
-                                      const SizedBox(height: 8),
-                                      TextFormField(
-                                          controller: treeCtrl,
-                                          keyboardType: TextInputType.number,
-                                          decoration: const InputDecoration(
-                                              labelText: 'Total Trees'),
-                                          validator: (v) {
-                                            if (v == null || v.isEmpty)
-                                              return null;
-                                            final t = v.trim();
-                                            final val = int.tryParse(t);
-                                            if (val == null)
-                                              return 'Invalid integer';
-                                            if (val < 0)
-                                              return 'Must be non-negative';
-                                            return null;
-                                          }),
-                                      const SizedBox(height: 16),
-                                      ElevatedButton(
-                                        onPressed: () {
-                                          if (!(_formKeyLocal.currentState
-                                                  ?.validate() ??
-                                              true)) return;
-                                          // Convert current row/bed values to meters for saving
-                                          String rowOut = rowCtrl.text;
-                                          if (rowOut.isNotEmpty) {
-                                            final v = double.tryParse(rowOut);
-                                            if (v != null) {
-                                              if (rowUnit == 'in')
-                                                rowOut =
-                                                    (v * 0.0254).toString();
-                                              else if (rowUnit == 'ft')
-                                                rowOut =
-                                                    (v * 0.3048).toString();
-                                              else
-                                                rowOut = v.toString();
-                                            }
-                                          }
-                                          String bedOut = bedCtrl.text;
-                                          if (bedOut.isNotEmpty) {
-                                            final v = double.tryParse(bedOut);
-                                            if (v != null) {
-                                              if (bedUnit == 'in')
-                                                bedOut =
-                                                    (v * 0.0254).toString();
-                                              else if (bedUnit == 'ft')
-                                                bedOut =
-                                                    (v * 0.3048).toString();
-                                              else
-                                                bedOut = v.toString();
-                                            }
-                                          }
-                                          Navigator.of(ctx).pop({
-                                            'name': nameCtrl.text,
-                                            'area': areaCtrl.text,
-                                            'rowSpacing': rowOut,
-                                            'bedHeight': bedOut,
-                                            'treeCount': treeCtrl.text,
-                                          });
-                                        },
-                                        child: const Padding(
-                                            padding: EdgeInsets.symmetric(
-                                                vertical: 12.0),
-                                            child: Text('Save')),
-                                      ),
-                                      SizedBox(height: insets),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                  });
-                },
+                builder: (ctx) => _EditPlotSheet(
+                  nameCtrl: nameCtrl,
+                  areaCtrl: areaCtrl,
+                  rowCtrl: rowCtrl,
+                  bedCtrl: bedCtrl,
+                  treeCtrl: treeCtrl,
+                ),
               );
 
               if (res != null) {
@@ -646,7 +331,7 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
                 builder: (ctx) => AlertDialog(
                   title: const Text('Delete plot'),
                   content: const Text(
-                      'Are you sure you want to delete this plot? This action cannot be undone.\nNote: Ensure you have not connected this plot to any equipment.'),
+                      'Are you sure you want to delete this plot? This action cannot be undone. Plots linked to a control unit cannot be deleted.'),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.of(ctx).pop(false),
@@ -911,4 +596,233 @@ class _PlotSummaryHeader extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant SliverPersistentHeaderDelegate oldDelegate) =>
       true;
+}
+
+// ---------------------------------------------------------------------------
+// Extracted StatefulWidget — GlobalKey and unit state survive keyboard rebuilds
+// ---------------------------------------------------------------------------
+class _EditPlotSheet extends StatefulWidget {
+  final TextEditingController nameCtrl;
+  final TextEditingController areaCtrl;
+  final TextEditingController rowCtrl;
+  final TextEditingController bedCtrl;
+  final TextEditingController treeCtrl;
+
+  const _EditPlotSheet({
+    required this.nameCtrl,
+    required this.areaCtrl,
+    required this.rowCtrl,
+    required this.bedCtrl,
+    required this.treeCtrl,
+  });
+
+  @override
+  State<_EditPlotSheet> createState() => _EditPlotSheetState();
+}
+
+class _EditPlotSheetState extends State<_EditPlotSheet> {
+  final _formKey = GlobalKey<FormState>();
+  String _rowUnit = 'm';
+  String _bedUnit = 'm';
+
+  void _convertRow(String newUnit) {
+    final currentVal = double.tryParse(widget.rowCtrl.text) ?? 0;
+    if (currentVal == 0) { setState(() => _rowUnit = newUnit); return; }
+    double inMeters;
+    if (_rowUnit == 'in') inMeters = currentVal * 0.0254;
+    else if (_rowUnit == 'ft') inMeters = currentVal * 0.3048;
+    else inMeters = currentVal;
+    double newVal;
+    if (newUnit == 'in') newVal = inMeters / 0.0254;
+    else if (newUnit == 'ft') newVal = inMeters / 0.3048;
+    else newVal = inMeters;
+    widget.rowCtrl.text = newVal.toStringAsFixed(2);
+    setState(() => _rowUnit = newUnit);
+  }
+
+  void _convertBed(String newUnit) {
+    final currentVal = double.tryParse(widget.bedCtrl.text) ?? 0;
+    if (currentVal == 0) { setState(() => _bedUnit = newUnit); return; }
+    double inMeters;
+    if (_bedUnit == 'in') inMeters = currentVal * 0.0254;
+    else if (_bedUnit == 'ft') inMeters = currentVal * 0.3048;
+    else inMeters = currentVal;
+    double newVal;
+    if (newUnit == 'in') newVal = inMeters / 0.0254;
+    else if (newUnit == 'ft') newVal = inMeters / 0.3048;
+    else newVal = inMeters;
+    widget.bedCtrl.text = newVal.toStringAsFixed(2);
+    setState(() => _bedUnit = newUnit);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final insets = MediaQuery.of(context).viewInsets.bottom;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final bool shouldExit = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Discard changes?'),
+                content: const Text('Are you sure you want to exit? Your progress will be lost.'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Stay')),
+                  TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Discard', style: TextStyle(color: Colors.red))),
+                ],
+              ),
+            ) ?? false;
+        if (shouldExit && context.mounted) Navigator.of(context).pop();
+      },
+      child: Padding(
+        padding: EdgeInsets.only(bottom: insets),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36, height: 4,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(color: Colors.grey[400], borderRadius: BorderRadius.circular(4)),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TextFormField(
+                      controller: widget.nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Plot Name *'),
+                      maxLength: 200,
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter plot name' : null),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                      controller: widget.areaCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Approx Area (ha) *'),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Enter approx area';
+                        if (double.tryParse(v.trim()) == null) return 'Invalid number';
+                        if ((double.tryParse(v.trim()) ?? 0) < 0) return 'Must be non-negative';
+                        return null;
+                      }),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: TextFormField(
+                          controller: widget.rowCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(labelText: 'Row Spacing *'),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'Enter row spacing';
+                            final val = double.tryParse(v.trim());
+                            if (val == null) return 'Invalid number';
+                            if (val <= 0) return 'Must be > 0';
+                            return null;
+                          }),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 110,
+                      child: DropdownButtonFormField<String>(
+                        value: _rowUnit,
+                        items: const [
+                          DropdownMenuItem(value: 'm', child: Text('m')),
+                          DropdownMenuItem(value: 'in', child: Text('in')),
+                          DropdownMenuItem(value: 'ft', child: Text('ft')),
+                        ],
+                        onChanged: (v) => _convertRow(v ?? 'm'),
+                        decoration: const InputDecoration(labelText: 'Unit'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: TextFormField(
+                          controller: widget.bedCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(labelText: 'Bed Height *'),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'Enter bed height';
+                            final val = double.tryParse(v.trim());
+                            if (val == null) return 'Invalid number';
+                            if (val < 0) return 'Must be non-negative';
+                            return null;
+                          }),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 110,
+                      child: DropdownButtonFormField<String>(
+                        value: _bedUnit,
+                        items: const [
+                          DropdownMenuItem(value: 'm', child: Text('m')),
+                          DropdownMenuItem(value: 'in', child: Text('in')),
+                          DropdownMenuItem(value: 'ft', child: Text('ft')),
+                        ],
+                        onChanged: (v) => _convertBed(v ?? 'm'),
+                        decoration: const InputDecoration(labelText: 'Unit'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                      controller: widget.treeCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Total Trees'),
+                      validator: (v) {
+                        if (v == null || v.isEmpty) return null;
+                        if (int.tryParse(v.trim()) == null) return 'Invalid integer';
+                        if ((int.tryParse(v.trim()) ?? 0) < 0) return 'Must be non-negative';
+                        return null;
+                      }),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      if (!(_formKey.currentState?.validate() ?? true)) return;
+                      String rowOut = widget.rowCtrl.text;
+                      if (rowOut.isNotEmpty) {
+                        final v = double.tryParse(rowOut);
+                        if (v != null) {
+                          if (_rowUnit == 'in') rowOut = (v * 0.0254).toString();
+                          else if (_rowUnit == 'ft') rowOut = (v * 0.3048).toString();
+                          else rowOut = v.toString();
+                        }
+                      }
+                      String bedOut = widget.bedCtrl.text;
+                      if (bedOut.isNotEmpty) {
+                        final v = double.tryParse(bedOut);
+                        if (v != null) {
+                          if (_bedUnit == 'in') bedOut = (v * 0.0254).toString();
+                          else if (_bedUnit == 'ft') bedOut = (v * 0.3048).toString();
+                          else bedOut = v.toString();
+                        }
+                      }
+                      Navigator.of(context).pop({
+                        'name': widget.nameCtrl.text,
+                        'area': widget.areaCtrl.text,
+                        'rowSpacing': rowOut,
+                        'bedHeight': bedOut,
+                        'treeCount': widget.treeCtrl.text,
+                      });
+                    },
+                    child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12.0),
+                        child: Text('Save')),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

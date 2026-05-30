@@ -63,7 +63,8 @@ class ReportModel extends Report {
       areaCoveredSqm: parseDouble(json['area_covered_sqm']),
       plotAreaSqm: parseDouble(json['plot_area_sqm']),
       completionPercentage: parseDouble(json['completion_percentage']),
-      controlUnitId: json['control_unit_details']?['id']?.toString(),
+      controlUnitId: json['control_unit_details']?['id']?.toString()
+          ?? json['control_unit_id']?.toString(),
       controlUnitName: json['control_unit_details']?['name']?.toString(),
       createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
       startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at']) : null,

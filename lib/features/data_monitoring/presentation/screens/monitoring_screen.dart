@@ -48,6 +48,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   bool _showSensorOverlay = false;
   final MapController _mapController = MapController();
   bool _outOfPlotSnackVisible = false;
+  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
   // ── Cooldown state ───────────────────────────────────────────────────────
   CooldownState? _cooldownState;
@@ -539,7 +540,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     final bool rightNozzleOn = t0 != null &&
         (t0.rightSolenoidState != null && t0.rightSolenoidState == 1);
 
-    return Scaffold(
+    return ScaffoldMessenger(
+      key: _messengerKey,
+      child: Scaffold(
       appBar: AppBar(
           bottom: online
               ? null
@@ -1296,7 +1299,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               child: const Icon(Icons.my_location),
             )
           : null,
-    );
+    ),   // Scaffold
+    );   // ScaffoldMessenger
   }
 
   Widget _buildTankLevelOverlay(
@@ -1731,12 +1735,26 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       if (!isInPlot) {
         if (!_outOfPlotSnackVisible) {
           _outOfPlotSnackVisible = true;
-          showGenericErrorSnackBar(context, 'Device is outside the assigned plot');
+          _messengerKey.currentState?.showSnackBar(SnackBar(
+            content: const Row(children: [
+              Icon(Icons.error, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(child: Text('Device is outside the assigned plot')),
+            ]),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(days: 1),
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: Colors.white,
+              onPressed: () => _messengerKey.currentState?.hideCurrentSnackBar(),
+            ),
+          ));
         }
       } else {
         if (_outOfPlotSnackVisible) {
           try {
-            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            _messengerKey.currentState?.hideCurrentSnackBar();
           } catch (e, st) {
             debugPrint('MonitoringScreen._updateOutOfPlotSnack hide error: $e');
             debugPrint('stack: $st');

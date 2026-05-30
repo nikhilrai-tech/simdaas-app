@@ -15,13 +15,12 @@ Future<PlotModel?> showPlotSaveSheet(
     double Function(List<LatLng>) computeAreaHa,
     {PlotModel? existingPlot}) async {
   final nameCtrl = TextEditingController(text: existingPlot?.name);
-  final zipCtrl = TextEditingController(); // Zip not in PlotModel? Let's keep empty for now or add if needed.
+  final zipCtrl = TextEditingController();
   final bedHeightCtrl = TextEditingController(text: existingPlot?.bedHeight?.toString());
   final areaCtrl = TextEditingController(text: existingPlot?.area?.toString());
   final rowSpacingCtrl = TextEditingController(text: existingPlot?.rowSpacing?.toString());
   final obstaclesCtrl = TextEditingController();
   final treeCountCtrl = TextEditingController(text: existingPlot?.treeCount?.toString());
-  final formKey = GlobalKey<FormState>();
 
   try {
     final suggested = computeAreaHa(normalizedPoints);
@@ -35,372 +34,21 @@ Future<PlotModel?> showPlotSaveSheet(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
     ),
-    builder: (ctx) {
-      final insets = MediaQuery.of(ctx).viewInsets.bottom;
-      final maxHeight = MediaQuery.of(ctx).size.height * 0.9;
-      // Local unit state for bed, row spacing and area. Use StatefulBuilder to
-      // update unit selectors within the modal. Area defaults to hectares.
-      String bedUnit = 'm';
-      String rowUnit = 'm';
-      String areaUnit = 'ha';
-
-      void convertRow(String newUnit) {
-        final currentVal = double.tryParse(rowSpacingCtrl.text) ?? 0;
-        if (currentVal == 0) {
-          rowUnit = newUnit;
-          return;
-        }
-        double inMeters;
-        if (rowUnit == 'in') inMeters = currentVal * 0.0254;
-        else if (rowUnit == 'ft') inMeters = currentVal * 0.3048;
-        else inMeters = currentVal;
-
-        double newVal;
-        if (newUnit == 'in') newVal = inMeters / 0.0254;
-        else if (newUnit == 'ft') newVal = inMeters / 0.3048;
-        else newVal = inMeters;
-
-        rowSpacingCtrl.text = newVal.toStringAsFixed(2);
-        rowUnit = newUnit;
-      }
-
-      void convertBed(String newUnit) {
-        final currentVal = double.tryParse(bedHeightCtrl.text) ?? 0;
-        if (currentVal == 0) {
-          bedUnit = newUnit;
-          return;
-        }
-        double inMeters;
-        if (bedUnit == 'in') inMeters = currentVal * 0.0254;
-        else if (bedUnit == 'ft') inMeters = currentVal * 0.3048;
-        else inMeters = currentVal;
-
-        double newVal;
-        if (newUnit == 'in') newVal = inMeters / 0.0254;
-        else if (newUnit == 'ft') newVal = inMeters / 0.3048;
-        else newVal = inMeters;
-
-        bedHeightCtrl.text = newVal.toStringAsFixed(2);
-        bedUnit = newUnit;
-      }
-
-      void convertArea(String newUnit) {
-        final currentVal = double.tryParse(areaCtrl.text) ?? 0;
-        if (currentVal == 0) {
-          areaUnit = newUnit;
-          return;
-        }
-        double inHa;
-        if (areaUnit == 'acre') inHa = currentVal * 0.404686;
-        else inHa = currentVal;
-
-        double newVal;
-        if (newUnit == 'acre') newVal = inHa / 0.404686;
-        else newVal = inHa;
-
-        areaCtrl.text = newVal.toStringAsFixed(2);
-        areaUnit = newUnit;
-      }
-      String? nameError;
-      return StatefulBuilder(builder: (ctx2, setState2) {
-        return PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, result) async {
-            if (didPop) return;
-            final bool shouldExit = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Discard changes?'),
-                    content: const Text(
-                        'Are you sure you want to exit? Your progress will be lost.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('Stay'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        child: const Text('Discard', style: TextStyle(color: Colors.red)),
-                      ),
-                    ],
-                  ),
-                ) ??
-                false;
-
-            if (shouldExit && context.mounted) {
-              Navigator.of(context).pop();
-            }
-          },
-          child: AnimatedPadding(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut,
-            padding: EdgeInsets.only(bottom: insets),
-            child: FractionallySizedBox(
-              heightFactor: 0.75,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxHeight),
-                child: Material(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  elevation: 8,
-                  shape: const RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(12))),
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12.0, vertical: 12.0),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Form(
-                            key: formKey,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                const Text('Plot Name *'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                    controller: nameCtrl,
-                                    decoration: InputDecoration(
-                                        hintText: 'Plot Name',
-                                        errorText: nameError),
-                                    onChanged: (_) {
-                                      if (nameError != null) setState2(() => nameError = null);
-                                    },
-                                    validator: (v) => (v == null || v.trim().isEmpty)
-                                        ? 'Enter plot name'
-                                        : null),
-                                const SizedBox(height: 8),
-                                const Text('Pin / Zip Code'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                    controller: zipCtrl,
-                                    decoration: const InputDecoration(
-                                        hintText: 'Pin / Zip Code')),
-                                const SizedBox(height: 8),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text('Bed Height *'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
-                                            controller: bedHeightCtrl,
-                                            keyboardType: const TextInputType
-                                                .numberWithOptions(decimal: true),
-                                            decoration: const InputDecoration(
-                                                hintText: 'Bed Height'),
-                                            validator: (v) => (v == null || v.trim().isEmpty)
-                                                ? 'Enter bed height'
-                                                : null),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: bedUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'm', child: Text('m')),
-                                        DropdownMenuItem(
-                                            value: 'in', child: Text('in')),
-                                        DropdownMenuItem(
-                                            value: 'ft', child: Text('ft')),
-                                      ],
-                                      onChanged: (v) =>
-                                          setState2(() => convertBed(v ?? 'm')),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
-                                const SizedBox(height: 8),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text('Approx Area *'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
-                                            controller: areaCtrl,
-                                            keyboardType: const TextInputType
-                                                .numberWithOptions(decimal: true),
-                                            decoration: const InputDecoration(
-                                                hintText: 'Approx Area'),
-                                            validator: (v) => (v == null || v.trim().isEmpty)
-                                                ? 'Enter approx area'
-                                                : null),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: areaUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'ha', child: Text('ha')),
-                                        DropdownMenuItem(
-                                            value: 'acre', child: Text('acre')),
-                                      ],
-                                      onChanged: (v) =>
-                                          setState2(() => convertArea(v ?? 'ha')),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
-                                const SizedBox(height: 8),
-                                Row(children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        const Text('Row Spacing *'),
-                                        const SizedBox(height: 6),
-                                        TextFormField(
-                                            controller: rowSpacingCtrl,
-                                            keyboardType: const TextInputType
-                                                .numberWithOptions(decimal: true),
-                                            decoration: const InputDecoration(
-                                                hintText: 'Row Spacing'),
-                                            validator: (v) => (v == null || v.trim().isEmpty)
-                                                ? 'Enter row spacing'
-                                                : null),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  SizedBox(
-                                    width: 110,
-                                    child: DropdownButtonFormField<String>(
-                                      value: rowUnit,
-                                      items: const [
-                                        DropdownMenuItem(
-                                            value: 'm', child: Text('m')),
-                                        DropdownMenuItem(
-                                            value: 'in', child: Text('in')),
-                                        DropdownMenuItem(
-                                            value: 'ft', child: Text('ft')),
-                                      ],
-                                      onChanged: (v) =>
-                                          setState2(() => convertRow(v ?? 'm')),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Unit'),
-                                    ),
-                                  )
-                                ]),
-                                const SizedBox(height: 8),
-                                const Text('Obstacles (notes)'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                    controller: obstaclesCtrl,
-                                    decoration: const InputDecoration(
-                                        hintText: 'Obstacles (notes)')),
-                                const SizedBox(height: 8),
-                                const Text('Total Trees'),
-                                const SizedBox(height: 6),
-                                TextFormField(
-                                    controller: treeCountCtrl,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                        hintText: 'Total Trees')),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: () async {
-                              if (!formKey.currentState!.validate()) return;
-
-                              // Duplicate name check
-                              final enteredName = nameCtrl.text.trim().toLowerCase();
-                              final owner = ref.read(authServiceProvider).currentUserId ?? '';
-                              try {
-                                final existing = await ref.read(plotRepoProvider).getPlots(owner);
-                                final duplicate = existing.any((p) =>
-                                    p.name.trim().toLowerCase() == enteredName &&
-                                    p.id != existingPlot?.id);
-                                if (duplicate) {
-                                  setState2(() => nameError = 'A plot with this name already exists');
-                                  return;
-                                }
-                              } catch (_) {
-                                // if fetch fails, allow save to proceed
-                              }
-
-                              // Convert current values back to base units (m/ha) for result
-                              String bedOut = bedHeightCtrl.text;
-                              if (bedOut.isNotEmpty) {
-                                final v = double.tryParse(bedOut);
-                                if (v != null) {
-                                  if (bedUnit == 'in') bedOut = (v * 0.0254).toString();
-                                  else if (bedUnit == 'ft') bedOut = (v * 0.3048).toString();
-                                  else bedOut = v.toString();
-                                }
-                              }
-
-                              String rowOut = rowSpacingCtrl.text;
-                              if (rowOut.isNotEmpty) {
-                                final v = double.tryParse(rowOut);
-                                if (v != null) {
-                                  if (rowUnit == 'in') rowOut = (v * 0.0254).toString();
-                                  else if (rowUnit == 'ft') rowOut = (v * 0.3048).toString();
-                                  else rowOut = v.toString();
-                                }
-                              }
-
-                              String areaOut = areaCtrl.text;
-                              if (areaOut.isNotEmpty) {
-                                final v = double.tryParse(areaOut);
-                                if (v != null) {
-                                  if (areaUnit == 'acre') areaOut = (v * 0.404686).toString();
-                                  else areaOut = v.toString();
-                                }
-                              }
-
-                              final result = <String, String>{
-                                'name': nameCtrl.text,
-                                'zip': zipCtrl.text,
-                                'bedHeight': bedOut,
-                                'area': areaOut,
-                                'rowSpacing': rowOut,
-                                'obstacles': obstaclesCtrl.text,
-                                'treeCount': treeCountCtrl.text,
-                              };
-                              Navigator.of(ctx).pop(result);
-                            },
-                            child: const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 12.0),
-                                child: Text('Save')),
-                          ),
-                          SizedBox(height: insets),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      });
-    },
+    builder: (ctx) => _PlotSaveSheetContent(
+      ref: ref,
+      existingPlot: existingPlot,
+      nameCtrl: nameCtrl,
+      zipCtrl: zipCtrl,
+      bedHeightCtrl: bedHeightCtrl,
+      areaCtrl: areaCtrl,
+      rowSpacingCtrl: rowSpacingCtrl,
+      obstaclesCtrl: obstaclesCtrl,
+      treeCountCtrl: treeCountCtrl,
+    ),
   );
 
   if (resMap == null) return null;
-  
+
   final owner = ref.read(authServiceProvider).currentUserId;
   double? approx;
   try {
@@ -444,8 +92,6 @@ Future<PlotModel?> showPlotSaveSheet(
     if (existingPlot != null) {
       await repo.updatePlot(model);
     } else {
-      // Capture server-assigned id so downstream screens (e.g. RowLineScreen)
-      // can PATCH the correct resource.
       savedModel = await repo.addPlot(model);
     }
   } catch (e) {
@@ -459,4 +105,335 @@ Future<PlotModel?> showPlotSaveSheet(
       ref.read(authServiceProvider).currentUserId ?? 'demo_user';
   ref.invalidate(plotsListProvider(currentUserId));
   return savedModel;
+}
+
+// ---------------------------------------------------------------------------
+// Extracted StatefulWidget — state (unit selections, errors) survives
+// keyboard open/close rebuilds.
+// ---------------------------------------------------------------------------
+
+class _PlotSaveSheetContent extends StatefulWidget {
+  final WidgetRef ref;
+  final PlotModel? existingPlot;
+  final TextEditingController nameCtrl;
+  final TextEditingController zipCtrl;
+  final TextEditingController bedHeightCtrl;
+  final TextEditingController areaCtrl;
+  final TextEditingController rowSpacingCtrl;
+  final TextEditingController obstaclesCtrl;
+  final TextEditingController treeCountCtrl;
+
+  const _PlotSaveSheetContent({
+    required this.ref,
+    required this.existingPlot,
+    required this.nameCtrl,
+    required this.zipCtrl,
+    required this.bedHeightCtrl,
+    required this.areaCtrl,
+    required this.rowSpacingCtrl,
+    required this.obstaclesCtrl,
+    required this.treeCountCtrl,
+  });
+
+  @override
+  State<_PlotSaveSheetContent> createState() => _PlotSaveSheetContentState();
+}
+
+class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
+  final _formKey = GlobalKey<FormState>();
+  String _bedUnit = 'm';
+  String _rowUnit = 'm';
+  String _areaUnit = 'ha';
+  String? _nameError;
+
+  void _convertRow(String newUnit) {
+    final currentVal = double.tryParse(widget.rowSpacingCtrl.text) ?? 0;
+    if (currentVal == 0) { setState(() => _rowUnit = newUnit); return; }
+    double inMeters;
+    if (_rowUnit == 'in') inMeters = currentVal * 0.0254;
+    else if (_rowUnit == 'ft') inMeters = currentVal * 0.3048;
+    else inMeters = currentVal;
+    double newVal;
+    if (newUnit == 'in') newVal = inMeters / 0.0254;
+    else if (newUnit == 'ft') newVal = inMeters / 0.3048;
+    else newVal = inMeters;
+    widget.rowSpacingCtrl.text = newVal.toStringAsFixed(2);
+    setState(() => _rowUnit = newUnit);
+  }
+
+  void _convertBed(String newUnit) {
+    final currentVal = double.tryParse(widget.bedHeightCtrl.text) ?? 0;
+    if (currentVal == 0) { setState(() => _bedUnit = newUnit); return; }
+    double inMeters;
+    if (_bedUnit == 'in') inMeters = currentVal * 0.0254;
+    else if (_bedUnit == 'ft') inMeters = currentVal * 0.3048;
+    else inMeters = currentVal;
+    double newVal;
+    if (newUnit == 'in') newVal = inMeters / 0.0254;
+    else if (newUnit == 'ft') newVal = inMeters / 0.3048;
+    else newVal = inMeters;
+    widget.bedHeightCtrl.text = newVal.toStringAsFixed(2);
+    setState(() => _bedUnit = newUnit);
+  }
+
+  void _convertArea(String newUnit) {
+    final currentVal = double.tryParse(widget.areaCtrl.text) ?? 0;
+    if (currentVal == 0) { setState(() => _areaUnit = newUnit); return; }
+    double inHa;
+    if (_areaUnit == 'acre') inHa = currentVal * 0.404686;
+    else inHa = currentVal;
+    double newVal;
+    if (newUnit == 'acre') newVal = inHa / 0.404686;
+    else newVal = inHa;
+    widget.areaCtrl.text = newVal.toStringAsFixed(2);
+    setState(() => _areaUnit = newUnit);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Read insets here — reactive to keyboard open/close
+    final insets = MediaQuery.of(context).viewInsets.bottom;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final bool shouldExit = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Discard changes?'),
+                content: const Text(
+                    'Are you sure you want to exit? Your progress will be lost.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: const Text('Stay'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    child: const Text('Discard', style: TextStyle(color: Colors.red)),
+                  ),
+                ],
+              ),
+            ) ??
+            false;
+        if (shouldExit && context.mounted) Navigator.of(context).pop();
+      },
+      child: Padding(
+        padding: EdgeInsets.only(bottom: insets),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('Plot Name *'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                          controller: widget.nameCtrl,
+                          decoration: InputDecoration(
+                              hintText: 'Plot Name', errorText: _nameError),
+                          onChanged: (_) {
+                            if (_nameError != null) setState(() => _nameError = null);
+                          },
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'Enter plot name'
+                              : null),
+                      const SizedBox(height: 8),
+                      const Text('Pin / Zip Code'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                          controller: widget.zipCtrl,
+                          decoration: const InputDecoration(hintText: 'Pin / Zip Code')),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text('Bed Height *'),
+                              const SizedBox(height: 6),
+                              TextFormField(
+                                  controller: widget.bedHeightCtrl,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(hintText: 'Bed Height'),
+                                  validator: (v) => (v == null || v.trim().isEmpty)
+                                      ? 'Enter bed height'
+                                      : null),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 110,
+                          child: DropdownButtonFormField<String>(
+                            value: _bedUnit,
+                            items: const [
+                              DropdownMenuItem(value: 'm', child: Text('m')),
+                              DropdownMenuItem(value: 'in', child: Text('in')),
+                              DropdownMenuItem(value: 'ft', child: Text('ft')),
+                            ],
+                            onChanged: (v) => _convertBed(v ?? 'm'),
+                            decoration: const InputDecoration(labelText: 'Unit'),
+                          ),
+                        )
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text('Approx Area *'),
+                              const SizedBox(height: 6),
+                              TextFormField(
+                                  controller: widget.areaCtrl,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(hintText: 'Approx Area'),
+                                  validator: (v) => (v == null || v.trim().isEmpty)
+                                      ? 'Enter approx area'
+                                      : null),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 110,
+                          child: DropdownButtonFormField<String>(
+                            value: _areaUnit,
+                            items: const [
+                              DropdownMenuItem(value: 'ha', child: Text('ha')),
+                              DropdownMenuItem(value: 'acre', child: Text('acre')),
+                            ],
+                            onChanged: (v) => _convertArea(v ?? 'ha'),
+                            decoration: const InputDecoration(labelText: 'Unit'),
+                          ),
+                        )
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text('Row Spacing *'),
+                              const SizedBox(height: 6),
+                              TextFormField(
+                                  controller: widget.rowSpacingCtrl,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(hintText: 'Row Spacing'),
+                                  validator: (v) => (v == null || v.trim().isEmpty)
+                                      ? 'Enter row spacing'
+                                      : null),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 110,
+                          child: DropdownButtonFormField<String>(
+                            value: _rowUnit,
+                            items: const [
+                              DropdownMenuItem(value: 'm', child: Text('m')),
+                              DropdownMenuItem(value: 'in', child: Text('in')),
+                              DropdownMenuItem(value: 'ft', child: Text('ft')),
+                            ],
+                            onChanged: (v) => _convertRow(v ?? 'm'),
+                            decoration: const InputDecoration(labelText: 'Unit'),
+                          ),
+                        )
+                      ]),
+                      const SizedBox(height: 8),
+                      const Text('Obstacles (notes)'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                          controller: widget.obstaclesCtrl,
+                          decoration: const InputDecoration(hintText: 'Obstacles (notes)')),
+                      const SizedBox(height: 8),
+                      const Text('Total Trees'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                          controller: widget.treeCountCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(hintText: 'Total Trees')),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (!_formKey.currentState!.validate()) return;
+
+                    final enteredName = widget.nameCtrl.text.trim().toLowerCase();
+                    final owner = widget.ref.read(authServiceProvider).currentUserId ?? '';
+                    try {
+                      final existing = await widget.ref.read(plotRepoProvider).getPlots(owner);
+                      final duplicate = existing.any((p) =>
+                          p.name.trim().toLowerCase() == enteredName &&
+                          p.id != widget.existingPlot?.id);
+                      if (duplicate) {
+                        setState(() => _nameError = 'A plot with this name already exists');
+                        return;
+                      }
+                    } catch (_) {}
+
+                    String bedOut = widget.bedHeightCtrl.text;
+                    if (bedOut.isNotEmpty) {
+                      final v = double.tryParse(bedOut);
+                      if (v != null) {
+                        if (_bedUnit == 'in') bedOut = (v * 0.0254).toString();
+                        else if (_bedUnit == 'ft') bedOut = (v * 0.3048).toString();
+                        else bedOut = v.toString();
+                      }
+                    }
+
+                    String rowOut = widget.rowSpacingCtrl.text;
+                    if (rowOut.isNotEmpty) {
+                      final v = double.tryParse(rowOut);
+                      if (v != null) {
+                        if (_rowUnit == 'in') rowOut = (v * 0.0254).toString();
+                        else if (_rowUnit == 'ft') rowOut = (v * 0.3048).toString();
+                        else rowOut = v.toString();
+                      }
+                    }
+
+                    String areaOut = widget.areaCtrl.text;
+                    if (areaOut.isNotEmpty) {
+                      final v = double.tryParse(areaOut);
+                      if (v != null) {
+                        if (_areaUnit == 'acre') areaOut = (v * 0.404686).toString();
+                        else areaOut = v.toString();
+                      }
+                    }
+
+                    final result = <String, String>{
+                      'name': widget.nameCtrl.text,
+                      'zip': widget.zipCtrl.text,
+                      'bedHeight': bedOut,
+                      'area': areaOut,
+                      'rowSpacing': rowOut,
+                      'obstacles': widget.obstaclesCtrl.text,
+                      'treeCount': widget.treeCountCtrl.text,
+                    };
+                    Navigator.of(context).pop(result);
+                  },
+                  child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12.0),
+                      child: Text('Save')),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

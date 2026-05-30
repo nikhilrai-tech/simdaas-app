@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'core/services/push_notification_service.dart';
@@ -42,7 +43,18 @@ import 'features/equipments/presentation/providers/equipment_providers.dart'
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: kIsWeb
+        ? const FirebaseOptions(
+            apiKey: 'AIzaSyAjGBq-HUi1yJsqSv-T4GX44hfZXdx2o-g',
+            authDomain: 'krishi-d976d.firebaseapp.com',
+            projectId: 'krishi-d976d',
+            storageBucket: 'krishi-d976d.firebasestorage.app',
+            messagingSenderId: '999626498597',
+            appId: 'REPLACE_WITH_WEB_APP_ID',
+          )
+        : null,
+  );
   await PushNotificationService.init();
   runApp(const ProviderScope(child: MyApp()));
 }
