@@ -21,6 +21,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:simdaas/core/services/connectivity_service.dart';
 import '../../../reports/presentation/providers/session_providers.dart';
+import 'package:simdaas/main.dart' show appNavKey;
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   final String? plotId;
@@ -221,18 +222,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
             }
             if (state.reportId != null) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: const Text('Report generated! Tap to view.'),
-                    duration: const Duration(seconds: 6),
-                    action: SnackBarAction(
-                      label: 'View',
-                      onPressed: () {
-                        Navigator.of(context).pushNamed('/job_reports');
-                      },
-                    ),
-                  ));
-                }
+                _messengerKey.currentState?.showSnackBar(SnackBar(
+                  content: const Text('Report generated! Tap to view.'),
+                  duration: const Duration(seconds: 8),
+                  action: SnackBarAction(
+                    label: 'View',
+                    onPressed: () {
+                      appNavKey.currentState?.pushNamed('/job_reports');
+                    },
+                  ),
+                ));
               });
             }
           } else {
@@ -1038,7 +1037,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                   ],
                                 ),
                               ),
-                              if (resolvedActiveSessionId != null || latestTelemetry != null) ...[
+                              if (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0) ...[
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'end_session',
