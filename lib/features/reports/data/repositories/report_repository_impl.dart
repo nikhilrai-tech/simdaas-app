@@ -17,4 +17,9 @@ class ReportRepositoryImpl implements ReportRepository {
   Future<Report> getReport(String id) async {
     return await remoteDataSource.getReport(id);
   }
+
+  @override
+  Future<void> deleteReport(String id) async {
+    await remoteDataSource.deleteReport(id);
+  }
 }

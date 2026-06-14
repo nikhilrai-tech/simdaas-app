@@ -62,6 +62,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   bool _cooldownBannerVisible = false;
   Timer? _cooldownBannerDismissTimer;
 
+  // Last known telemetry values — persist across waiting/cooldown gaps
+  double? _lastFlowRate;
+  double? _lastTankLevel;
+  double? _lastSpeed;
+  bool? _lastPtoOn;
+
   // Set to true when the user manually ends the session on this screen.
   // Blocks incoming telemetry so the device cannot flicker back to "online"
   // before the cooldown event lands. Cleared automatically once the cooldown
@@ -101,10 +107,28 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       }
       try {
         latestTelemetry = svc.latestTelemetry[normId];
+        // Seed last-known cache from initial telemetry snapshot
+        final seed = latestTelemetry;
+        if (seed != null) {
+          if (seed.flowRate != null) _lastFlowRate = seed.flowRate;
+          if (seed.tankLevel != null) _lastTankLevel = seed.tankLevel;
+          if (seed.speed != null) _lastSpeed = seed.speed;
+          if (seed.ptoState != null) _lastPtoOn = seed.ptoState == 1;
+        }
       } catch (e, st) {
         debugPrint('MonitoringScreen: latestTelemetry seed error: $e');
         debugPrint('stack: $st');
         latestTelemetry = null;
+      }
+      // Fallback: seed from last position entry (preserved even when device offline)
+      if (_lastFlowRate == null && positions.isNotEmpty) {
+        final last = positions.last;
+        final fr = last['flow_rate'];
+        final sp = last['speed'];
+        final pt = last['pto'];
+        if (fr is num) _lastFlowRate = fr.toDouble();
+        if (sp is num) _lastSpeed = sp.toDouble();
+        if (pt is int) _lastPtoOn = pt == 1;
       }
 
       // If initial seeded telemetry indicates device is out of plot, show
@@ -133,6 +157,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
           setState(() {
             latestTelemetry = t;
+            // Cache last known values so they survive waiting/cooldown gaps
+            if (t.flowRate != null) _lastFlowRate = t.flowRate;
+            if (t.tankLevel != null) _lastTankLevel = t.tankLevel;
+            if (t.speed != null) _lastSpeed = t.speed;
+            if (t.ptoState != null) _lastPtoOn = t.ptoState == 1;
             if (t.lat != null && t.lon != null) {
               positions.add(<String, dynamic>{
                 'timestamp': t.timestamp.toIso8601String(),
@@ -189,8 +218,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           // session starts at 0% completion / 0 distance instead of briefly
           // flashing the previous session's stats.
           if (state.isInCooldown && !wasInCooldown) {
-            latestTelemetry = null;
-            positions.clear();
+            _clearSessionState();
           }
         });
         if (state.isInCooldown) {
@@ -206,17 +234,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
           if (state.status == DeviceLifecycleStatus.offline) {
             // Session ended (report_ready received).
-            // Clear positions UNLESS the device has already started a new
-            // active session (report_ready arrived late). Check the service's
-            // live snapshot: if it has the device, new telemetry is flowing.
             final offlineSvc = ref.read(telemetryServiceProvider);
             final offlineNid = canonicalizeMac(widget.deviceId ?? '');
             final newSessionActive = offlineSvc.latestTelemetry.containsKey(offlineNid);
             if (!newSessionActive) {
-              setState(() {
-                latestTelemetry = null;
-                positions.clear();
-              });
+              setState(() => _clearSessionState());
             } else {
               setState(() { latestTelemetry = null; });
             }
@@ -235,14 +257,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               });
             }
           } else {
-            // Device came back online (new session starting). Clear stale
-            // previous-session data so the new session starts with a clean UI.
-            // This fires BEFORE the first new-session telemetry via _deviceSub,
-            // so positions should already be empty at this point.
-            setState(() {
-              latestTelemetry = null;
-              positions.clear();
-            });
+            // New session starting — clear previous session's data.
+            setState(() => _clearSessionState());
           }
         }
       });
@@ -363,6 +379,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       if (mounted) {
         setState(() {
           latestTelemetry = t;
+          if (t.flowRate != null) _lastFlowRate = t.flowRate;
+          if (t.tankLevel != null) _lastTankLevel = t.tankLevel;
+          if (t.speed != null) _lastSpeed = t.speed;
+          if (t.ptoState != null) _lastPtoOn = t.ptoState == 1;
           positions.add({
             'timestamp': t.timestamp.toIso8601String(),
             'lat': t.lat,
@@ -382,6 +402,21 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   void _stopDemo() {
     _demoTimer?.cancel();
     _demoTimer = null;
+  }
+
+  // Clears all session-scoped state: live data, GPS track, cached values,
+  // and the out-of-plot snackbar flag so the next session starts clean.
+  void _clearSessionState() {
+    latestTelemetry = null;
+    positions.clear();
+    _lastFlowRate = null;
+    _lastTankLevel = null;
+    _lastSpeed = null;
+    _lastPtoOn = null;
+    if (_outOfPlotSnackVisible) {
+      _messengerKey.currentState?.hideCurrentSnackBar();
+      _outOfPlotSnackVisible = false;
+    }
   }
 
   // ── Cooldown banner widget ───────────────────────────────────────────────
@@ -939,8 +974,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                     //    and transition to cooldown immediately without waiting
                                     //    for the WS event (which may be delayed).
                                     setState(() {
-                                      latestTelemetry = null;
-                                      positions.clear();
+                                      _clearSessionState();
                                       _demoTimer?.cancel();
                                       _demoTimer = null;
                                       _isDemoMode = false;
@@ -1168,23 +1202,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                   //     : read(m['rightUltrasonic'] ?? m['ultraRight']);
                   // final coverage =
                   //     (m['coveragePercent'] ?? m['coverage'] ?? 0).toDouble();
-                  final flowRate = t != null && t.flowRate != null
-                      ? t.flowRate!.toStringAsFixed(2)
-                      : read(m['flowRate']);
-                  final speed = t != null && t.speed != null
-                      ? t.speed!.toStringAsFixed(2)
-                      : read(m['tractorSpeed'] ?? m['speed']);
-                  
-                  final flowRateLpmStr = t != null && t.flowRate != null
-                      ? t.flowRate!.toStringAsFixed(2)
-                      : flowRate;
-                  final flowInLitresStr = t != null && t.tankLevel != null
-                      ? t.tankLevel!.toStringAsFixed(2)
-                      : '-';
+                  final flowRateLpmStr = t?.flowRate?.toStringAsFixed(2)
+                      ?? _lastFlowRate?.toStringAsFixed(2)
+                      ?? read(m['flowRate'])
+                      ?? '-';
+                  final flowInLitresStr = t?.tankLevel?.toStringAsFixed(2)
+                      ?? _lastTankLevel?.toStringAsFixed(2)
+                      ?? '-';
+                  final speed = t?.speed?.toStringAsFixed(2)
+                      ?? _lastSpeed?.toStringAsFixed(2)
+                      ?? read(m['tractorSpeed'] ?? m['speed'])
+                      ?? '-';
 
-                  final ptoOn = t != null && t.ptoState != null
-                      ? (t.ptoState == 1)
-                      : ((m['ptoState'] ?? m['pto'] ?? false) == true);
+                  final ptoOn = t?.ptoState != null
+                      ? (t!.ptoState == 1)
+                      : (_lastPtoOn ??
+                          ((m['ptoState'] ?? m['pto'] ?? false) == true));
 
                   return Stack(children: [
                     // (Top overlay removed - moved metrics elsewhere)

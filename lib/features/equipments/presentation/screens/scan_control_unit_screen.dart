@@ -32,9 +32,12 @@ class _ScanControlUnitScreenState extends State<ScanControlUnitScreen> {
             '',
       };
       Navigator.of(context).pop(existing);
-    } catch (e) {
-      showInfoSnackBar(context, 'Failed to parse QR');
-      Navigator.of(context).pop();
+    } catch (_) {
+      // QR is plain text — treat the raw value as a MAC address
+      Navigator.of(context).pop(<String, dynamic>{
+        'category': 'control_unit',
+        'macAddress': value.trim(),
+      });
     }
   }
 

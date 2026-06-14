@@ -14,15 +14,7 @@ void showApiErrorSnackBar(BuildContext context, ApiError err,
     ]),
     backgroundColor: color,
     behavior: SnackBarBehavior.floating,
-    action: SnackBarAction(
-      label: 'Dismiss',
-      textColor: Colors.white,
-      onPressed: () {
-        try {
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        } catch (_) {}
-      },
-    ),
+    duration: const Duration(seconds: 4),
   );
   try {
     ScaffoldMessenger.of(context).showSnackBar(snack);
@@ -41,15 +33,7 @@ void showGenericErrorSnackBar(BuildContext context, String message,
     ]),
     backgroundColor: color,
     behavior: SnackBarBehavior.floating,
-    action: SnackBarAction(
-      label: 'Dismiss',
-      textColor: Colors.white,
-      onPressed: () {
-        try {
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        } catch (_) {}
-      },
-    ),
+    duration: const Duration(seconds: 4),
   );
   try {
     ScaffoldMessenger.of(context).showSnackBar(snack);

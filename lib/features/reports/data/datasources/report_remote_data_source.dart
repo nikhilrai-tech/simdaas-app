@@ -5,6 +5,7 @@ import '../models/report_model.dart';
 abstract class ReportRemoteDataSource {
   Future<List<ReportModel>> getReports();
   Future<ReportModel> getReport(String id);
+  Future<void> deleteReport(String id);
 }
 
 class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
@@ -38,6 +39,16 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
       return ReportModel.fromJson(response);
     } catch (e) {
       debugPrint('Error fetching report detail: $e');
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> deleteReport(String id) async {
+    try {
+      await api.delete('/jobs/api/reports/$id/');
+    } catch (e) {
+      debugPrint('Error deleting report: $e');
       rethrow;
     }
   }

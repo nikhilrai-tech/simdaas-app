@@ -135,9 +135,15 @@ class RowLineCoverage {
       final halfWidth = rowSpacing / 2;
 
       // Spray: accumulate flow rates + counts for averaging; GPS/Speed: track latest color.
+      // subBandMaxPass: highest corridor-entry number that touched each sub-band.
+      //   corridorPassCount increments each time the sprayer re-enters this corridor
+      //   (prevIdxInCorridor null → non-null transition). This detects re-passes
+      //   reliably regardless of GPS sampling rate.
       final accumulated = List<double>.filled(numSub, 0.0);
       final accumulatedCount = List<int>.filled(numSub, 0);
       final latestColor = List<Color?>.filled(numSub, null);
+      final subBandMaxPass = List<int>.filled(numSub, 0);
+      int corridorPassCount = 0;
 
       // Track last index in this corridor so we can fill the gap to the next
       // point — GPS samples are sparse and often skip 1-2 sub-bands.
@@ -148,8 +154,12 @@ class RowLineCoverage {
         final info =
             RowLineGenerator.pointToSegmentInfo(pt.position, midStart, midEnd);
         if (info.distance > halfWidth) {
-          prevIdxInCorridor = null; // gap in corridor; reset interpolation anchor
+          prevIdxInCorridor = null; // left corridor; reset interpolation anchor
           continue;
+        }
+
+        if (prevIdxInCorridor == null) {
+          corridorPassCount++; // entered (or re-entered) the corridor
         }
 
         final idx = (info.t * numSub).floor().clamp(0, numSub - 1);
@@ -164,6 +174,7 @@ class RowLineCoverage {
         final hi = prev != null ? math.max(prev, idx) : idx;
 
         for (int s = lo; s <= hi; s++) {
+          subBandMaxPass[s] = math.max(subBandMaxPass[s], corridorPassCount);
           if (heatmapType == HeatmapType.spraying) {
             accumulated[s] += pt.flowRate ?? 0.0;
             accumulatedCount[s]++;
@@ -185,21 +196,37 @@ class RowLineCoverage {
       if (perp == null) continue;
 
       for (int i = 0; i < numSub; i++) {
-        Color? bandColor;
+        final passCount = subBandMaxPass[i];
+        if (passCount == 0) continue; // sub-band never visited
+
+        Color bandColor;
+        int alpha;
+
         if (heatmapType == HeatmapType.spraying) {
           if (accumulated[i] <= 0.0 || accumulatedCount[i] == 0) continue;
-          // Average flow rate across all GPS samples in this sub-band.
-          final avgFlow = accumulated[i] / accumulatedCount[i];
+          // Per-pass average × number of corridor passes = total spray applied.
+          // On re-pass the value accumulates (e.g. 30 LPM × 2 passes = 60 LPM)
+          // so the color naturally shifts from blue toward red.
+          final avgPerSample = accumulated[i] / accumulatedCount[i];
+          final totalFlow = avgPerSample * passCount;
           debugPrint(
             '[FlowHeatmap] corridor=$ri sub=$i '
+            'passes=$passCount '
             'samples=${accumulatedCount[i]} '
-            'sum=${accumulated[i].toStringAsFixed(1)} '
-            'avg=${avgFlow.toStringAsFixed(1)} LPM',
+            'avg=${avgPerSample.toStringAsFixed(1)} '
+            'total=${totalFlow.toStringAsFixed(1)} LPM',
           );
-          bandColor = HeatmapColorUtils.getColorForSpray(avgFlow);
+          bandColor = HeatmapColorUtils.getColorForSpray(totalFlow);
+          alpha = 200;
+        } else if (passCount >= 2) {
+          // GPS / Speed re-pass: dark grey indicator.
+          bandColor = Colors.grey.shade800;
+          alpha = 220;
         } else {
-          bandColor = latestColor[i];
-          if (bandColor == null) continue;
+          final c = latestColor[i];
+          if (c == null) continue;
+          bandColor = c;
+          alpha = 200;
         }
 
         final t0 = i / numSub;
@@ -217,7 +244,7 @@ class RowLineCoverage {
             LatLng(p0.latitude - perp.latitude,
                 p0.longitude - perp.longitude),
           ],
-          color: bandColor.withAlpha(200),
+          color: bandColor.withAlpha(alpha),
           borderColor: Colors.transparent,
           borderStrokeWidth: 0,
         ));

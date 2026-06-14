@@ -17,6 +17,18 @@ class Report {
   final double completionPercentage;
   final String? controlUnitId;
   final String? controlUnitName;
+  final String? linkedSprayerName;
+  final String? linkedTractorName;
+  final double ptoDurationSeconds;
+  // Cumulative spray counter: first and last reading of the session
+  final double? initialTankLevel;
+  final double? finalTankLevel;
+  // Backend-computed flow rates (tank_spray_used / pto_min and / area_acres)
+  final double avgFlowRateLpm;
+  final double avgFlowRateLacre;
+  // Backend-computed speed (from every MQTT packet)
+  final double avgSpeedKmph;
+  final double maxSpeedKmph;
   final DateTime createdAt;
   final DateTime? startedAt;
   final DateTime? endedAt;
@@ -39,6 +51,15 @@ class Report {
     required this.completionPercentage,
     this.controlUnitId,
     this.controlUnitName,
+    this.linkedSprayerName,
+    this.linkedTractorName,
+    this.ptoDurationSeconds = 0.0,
+    this.initialTankLevel,
+    this.finalTankLevel,
+    this.avgFlowRateLpm = 0.0,
+    this.avgFlowRateLacre = 0.0,
+    this.avgSpeedKmph = 0.0,
+    this.maxSpeedKmph = 0.0,
     required this.createdAt,
     this.startedAt,
     this.endedAt,

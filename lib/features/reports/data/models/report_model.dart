@@ -19,6 +19,15 @@ class ReportModel extends Report {
     required super.completionPercentage,
     super.controlUnitId,
     super.controlUnitName,
+    super.linkedSprayerName,
+    super.linkedTractorName,
+    super.ptoDurationSeconds,
+    super.initialTankLevel,
+    super.finalTankLevel,
+    super.avgFlowRateLpm,
+    super.avgFlowRateLacre,
+    super.avgSpeedKmph,
+    super.maxSpeedKmph,
     required super.createdAt,
     super.startedAt,
     super.endedAt,
@@ -66,6 +75,19 @@ class ReportModel extends Report {
       controlUnitId: json['control_unit_details']?['id']?.toString()
           ?? json['control_unit_id']?.toString(),
       controlUnitName: json['control_unit_details']?['name']?.toString(),
+      linkedSprayerName: json['control_unit_details']?['sprayer_name']?.toString(),
+      linkedTractorName: json['control_unit_details']?['tractor_name']?.toString(),
+      ptoDurationSeconds: parseDouble(json['pto_duration_seconds']),
+      initialTankLevel: json['initial_tank_level'] != null
+          ? parseDouble(json['initial_tank_level'])
+          : null,
+      finalTankLevel: json['final_tank_level'] != null
+          ? parseDouble(json['final_tank_level'])
+          : null,
+      avgFlowRateLpm: parseDouble(json['avg_flow_rate_lpm']),
+      avgFlowRateLacre: parseDouble(json['avg_flow_rate_lacre']),
+      avgSpeedKmph: parseDouble(json['avg_speed_kmph']),
+      maxSpeedKmph: parseDouble(json['max_speed_kmph']),
       createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
       startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at']) : null,
       endedAt: json['ended_at'] != null ? DateTime.tryParse(json['ended_at']) : null,
