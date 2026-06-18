@@ -701,7 +701,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
-        ptoOn: true,
+        ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
         flowRate: p.flowRateLpm,
@@ -1063,7 +1063,7 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
-        ptoOn: true,
+        ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
         flowRate: p.flowRateLpm,

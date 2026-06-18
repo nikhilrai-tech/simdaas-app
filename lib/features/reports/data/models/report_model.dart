@@ -98,6 +98,7 @@ class ReportModel extends Report {
                     speedKmph: parseDouble(e['speed_kmph']),
                     flowRateLpm: parseDouble(e['flow_rate_lpm']),
                     sprayMode: (e['spray_mode'] as num?)?.toInt() ?? 0,
+                    ptoState: (e['pto_state'] as num?)?.toInt() ?? 0,
                     timestamp: DateTime.tryParse(e['timestamp'] ?? '') ??
                         DateTime.now(),
                   ))

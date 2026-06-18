@@ -73,6 +73,7 @@ class GPSPointData {
   final double speedKmph;
   final double flowRateLpm;
   final int sprayMode;
+  final int ptoState;
   final DateTime timestamp;
 
   const GPSPointData({
@@ -81,6 +82,7 @@ class GPSPointData {
     required this.speedKmph,
     required this.flowRateLpm,
     required this.sprayMode,
+    this.ptoState = 0,
     required this.timestamp,
   });
 }
