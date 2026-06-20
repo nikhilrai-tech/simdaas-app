@@ -973,21 +973,33 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                     // 2. Immediate UI feedback: clear local telemetry state
                                     //    and transition to cooldown immediately without waiting
                                     //    for the WS event (which may be delayed).
+                                    final optimisticCooldown = CooldownState(
+                                      deviceId: deviceMac ?? '',
+                                      status: DeviceLifecycleStatus.cooldown,
+                                      cooldownEnd: DateTime.now()
+                                          .toUtc()
+                                          .add(const Duration(minutes: 2)),
+                                      cooldownType: 'manual_end',
+                                    );
                                     setState(() {
                                       _clearSessionState();
                                       _demoTimer?.cancel();
                                       _demoTimer = null;
                                       _isDemoMode = false;
-                                      _cooldownState = CooldownState(
-                                        deviceId: deviceMac ?? '',
-                                        status: DeviceLifecycleStatus.cooldown,
-                                        cooldownEnd: DateTime.now()
-                                            .toUtc()
-                                            .add(const Duration(minutes: 2)),
-                                        cooldownType: 'manual_end',
-                                      );
+                                      _cooldownState = optimisticCooldown;
                                       _startCountdownTimer();
                                     });
+                                    // Push the same optimistic state into the
+                                    // shared service so other screens (e.g.
+                                    // Active Devices list) show the cooldown
+                                    // timer immediately too, instead of
+                                    // waiting for the backend's WS event.
+                                    if (deviceMac != null) {
+                                      ref
+                                          .read(telemetryServiceProvider)
+                                          .setCooldownStateOptimistic(
+                                              optimisticCooldown);
+                                    }
                                     _showCooldownBannerBriefly();
 
                                     // 3. Clear service cache so device is no longer "active".

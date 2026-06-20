@@ -337,8 +337,12 @@ class TelemetryService {
   Timer? _pruneTimer;
 
   // Number of seconds to consider telemetry 'fresh' and therefore "online".
-  // Set to 60s to match the session cooldown and user preference.
-  static const int _activeThresholdSeconds = 60;
+  // Device sends a packet roughly every ~2s, so 8s gives a ~4-packet buffer
+  // for normal network jitter while still flipping to WAITING almost
+  // immediately once the device actually stops sending (previously 60s,
+  // which made the Active Devices list look like it was lagging far behind
+  // the Monitoring screen, which clears its live marker on the same signal).
+  static const int _activeThresholdSeconds = 8;
 
   void _startPruner() {
     _pruneTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -672,6 +676,28 @@ class TelemetryService {
     _lastSeenAt.remove(norm);
     _lastKnownCoverage.remove(norm);
     _reconnectAttempts.remove(norm);
+  }
+
+  /// Manually push a [CooldownState] into the shared cache and broadcast it,
+  /// without waiting for the backend's WebSocket `status_change` event.
+  ///
+  /// Used for optimistic UI updates (e.g. when the user taps "End Device" on
+  /// the monitoring screen) so that OTHER screens watching this device via
+  /// [deviceCooldownStream] / [getCooldownState] (like the Active Devices
+  /// list) reflect the cooldown immediately too, instead of only updating
+  /// once the real server event arrives.
+  void setCooldownStateOptimistic(CooldownState state) {
+    final norm = canonicalizeMac(state.deviceId);
+    final normalized = CooldownState(
+      deviceId: norm,
+      status: state.status,
+      cooldownEnd: state.cooldownEnd,
+      cooldownType: state.cooldownType,
+      sessionId: state.sessionId,
+      reportId: state.reportId,
+    );
+    _cooldownStates[norm] = normalized;
+    _cooldownController.add(normalized);
   }
 
   /// Manually clear the cached telemetry for a device.

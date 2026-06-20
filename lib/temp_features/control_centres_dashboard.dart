@@ -683,8 +683,18 @@ class _DeviceListItem extends ConsumerWidget {
     final cooldownAsync = ref.watch(deviceCooldownStateProvider(lookupId));
     final cooldownState = cooldownAsync.asData?.value;
 
+    // Watch deviceOnlineProvider directly (same provider the Monitoring
+    // screen uses) instead of relying solely on the parent-computed
+    // isInActiveList snapshot. This guarantees this row reacts to the
+    // 60s active/stale transition at the exact same instant as the
+    // Monitoring screen, instead of waiting on the parent list's own
+    // rebuild/filter pass.
+    final liveIsActive = deviceId.isNotEmpty
+        ? ref.watch(deviceOnlineProvider(deviceId))
+        : isInActiveList;
+
     final isInCooldown = cooldownState?.isInCooldown ?? false;
-    final isEffectivelyActive = isInActiveList && !isInCooldown &&
+    final isEffectivelyActive = liveIsActive && !isInCooldown &&
         (cooldownState?.status != DeviceLifecycleStatus.offline);
 
     // WAITING = device recently stopped sending (< 10 min ago) but session
