@@ -117,7 +117,7 @@ class EquipmentController {
   Future<void> endSession(int sessionId, {String? deviceId}) async {
     final repo = ref.read(equipmentRepoProvider);
     await repo.endSession(sessionId);
-    
+
     if (deviceId != null) {
       ref.read(telemetryServiceProvider).clearCache(deviceId);
     }
@@ -126,5 +126,10 @@ class EquipmentController {
         ref.read(authServiceProvider).currentUserId ?? 'demo_user';
     ref.invalidate(equipmentsListProvider(currentUserId));
     ref.invalidate(controlUnitsProvider(currentUserId));
+  }
+
+  Future<void> pushDemoConfig(String id, {required bool demo}) async {
+    final repo = ref.read(equipmentRepoProvider);
+    await repo.pushDemoConfig(id, demo: demo);
   }
 }

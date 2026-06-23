@@ -49,6 +49,10 @@ class _CreateControlUnitScreenState
   String _lidarNozzleDistanceUnit = 'm';
   String _mountHeightUnit = 'm';
   String _ultrasonicDistanceUnit = 'm';
+  String _rightFrontOffsetUnit = 'm';
+  String _rightBackOffsetUnit = 'm';
+  String _leftFrontOffsetUnit = 'm';
+  String _leftBackOffsetUnit = 'm';
   final _name = TextEditingController();
   final _macAddress = TextEditingController();
   String? _linkedSprayerId;
@@ -57,6 +61,11 @@ class _CreateControlUnitScreenState
   final _lidarNozzleDistance = TextEditingController();
   final _mountHeightOfLidar = TextEditingController();
   final _ultrasonicDistance = TextEditingController();
+  final _rightFrontOffset = TextEditingController(text: '0');
+  final _rightBackOffset = TextEditingController(text: '0');
+  final _leftFrontOffset = TextEditingController(text: '0');
+  final _leftBackOffset = TextEditingController(text: '0');
+  final _flowPulseCount = TextEditingController(text: '0');
   String _sensorType = '1d_lidar';
   // cache of existing MACs for quick uniqueness check (normalized)
   Set<String> _existingMacs = {};
@@ -84,6 +93,11 @@ class _CreateControlUnitScreenState
     _lidarNozzleDistance.dispose();
     _mountHeightOfLidar.dispose();
     _ultrasonicDistance.dispose();
+    _rightFrontOffset.dispose();
+    _rightBackOffset.dispose();
+    _leftFrontOffset.dispose();
+    _leftBackOffset.dispose();
+    _flowPulseCount.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -146,15 +160,77 @@ class _CreateControlUnitScreenState
   @override
   void initState() {
     super.initState();
-    _pageKeys = List.generate(4, (_) => GlobalKey<FormState>());
+    _pageKeys = List.generate(9, (_) => GlobalKey<FormState>());
+  }
+
+  Widget _buildOffsetPage({
+    required GlobalKey<FormState> key,
+    required String image,
+    required TextEditingController controller,
+    required String hint,
+    String? unit,
+    void Function(String)? onUnitChanged,
+  }) {
+    return _KeepAlive(
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Form(
+          key: key,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 200,
+                child: Image.asset(
+                  image,
+                  fit: BoxFit.contain,
+                  errorBuilder: (ctx, err, st) => const Center(
+                    child: Icon(Icons.image_not_supported, size: 48),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: controller,
+                    decoration: InputDecoration(hintText: hint),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    validator: (v) => null,
+                  ),
+                ),
+                if (unit != null && onUnitChanged != null) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: unit,
+                      items: const [
+                        DropdownMenuItem(value: 'm', child: Text('m')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                        DropdownMenuItem(value: 'ft', child: Text('ft')),
+                      ],
+                      onChanged: (v) =>
+                          _onUnitChanged(v, unit, controller, onUnitChanged),
+                      decoration: const InputDecoration(hintText: 'Unit'),
+                    ),
+                  ),
+                ],
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // Build a multi-page wizard. Visible pages depend on selected sensor type:
   // - sensor 'lidar' -> pages [0,1,2]
   // - sensor 'ultrasonic' -> pages [0,3]
   List<int> get visible {
-    // Both 1D and 2D lidar use the same measurement pages (sensor-nozzle + mount height).
-    return [0, 1, 2];
+    // Both 1D and 2D lidar use the same measurement pages.
+    return [0, 1, 2, 3, 4, 5, 6, 7];
   }
 
   int get totalPages => visible.length;
@@ -248,6 +324,21 @@ class _CreateControlUnitScreenState
         if (m.containsKey('ultrasonicDistance') &&
             m['ultrasonicDistance'] != null) {
           _prefill(_ultrasonicDistance, m['ultrasonicDistance'], 'ultra');
+        }
+        if (m.containsKey('rightFrontOffset') && m['rightFrontOffset'] != null) {
+          _rightFrontOffset.text = m['rightFrontOffset'].toString().replaceAll(RegExp(r'\.0$'), '');
+        }
+        if (m.containsKey('rightBackOffset') && m['rightBackOffset'] != null) {
+          _rightBackOffset.text = m['rightBackOffset'].toString().replaceAll(RegExp(r'\.0$'), '');
+        }
+        if (m.containsKey('leftFrontOffset') && m['leftFrontOffset'] != null) {
+          _leftFrontOffset.text = m['leftFrontOffset'].toString().replaceAll(RegExp(r'\.0$'), '');
+        }
+        if (m.containsKey('leftBackOffset') && m['leftBackOffset'] != null) {
+          _leftBackOffset.text = m['leftBackOffset'].toString().replaceAll(RegExp(r'\.0$'), '');
+        }
+        if (m.containsKey('flowPulseCount') && m['flowPulseCount'] != null) {
+          _flowPulseCount.text = m['flowPulseCount'].toString().replaceAll(RegExp(r'\.0$'), '');
         }
       } else {
         // Not editing: treat values as QR-prefilled and lock fields that
@@ -737,12 +828,64 @@ class _CreateControlUnitScreenState
                       ),
                     ),
 
-                    // Page 3: ultrasonic distance (image + field)
+                    // Page 3: right front offset
+                    _buildOffsetPage(
+                      key: _pageKeys[3],
+                      image: 'assets/control_unit/lidar_nozzle_distance.png',
+                      controller: _rightFrontOffset,
+                      hint: 'Right Front Offset (m)',
+                      unit: _rightFrontOffsetUnit,
+                      onUnitChanged: (u) =>
+                          setState(() => _rightFrontOffsetUnit = u),
+                    ),
+
+                    // Page 4: right back offset
+                    _buildOffsetPage(
+                      key: _pageKeys[4],
+                      image: 'assets/control_unit/mount_height_lidar.png',
+                      controller: _rightBackOffset,
+                      hint: 'Right Back Offset (m)',
+                      unit: _rightBackOffsetUnit,
+                      onUnitChanged: (u) =>
+                          setState(() => _rightBackOffsetUnit = u),
+                    ),
+
+                    // Page 5: left front offset
+                    _buildOffsetPage(
+                      key: _pageKeys[5],
+                      image: 'assets/control_unit/ultrasonic_distance.png',
+                      controller: _leftFrontOffset,
+                      hint: 'Left Front Offset (m)',
+                      unit: _leftFrontOffsetUnit,
+                      onUnitChanged: (u) =>
+                          setState(() => _leftFrontOffsetUnit = u),
+                    ),
+
+                    // Page 6: left back offset
+                    _buildOffsetPage(
+                      key: _pageKeys[6],
+                      image: 'assets/control_unit/lidar_nozzle_distance.png',
+                      controller: _leftBackOffset,
+                      hint: 'Left Back Offset (m)',
+                      unit: _leftBackOffsetUnit,
+                      onUnitChanged: (u) =>
+                          setState(() => _leftBackOffsetUnit = u),
+                    ),
+
+                    // Page 7: flow pulse count (no unit — raw count)
+                    _buildOffsetPage(
+                      key: _pageKeys[7],
+                      image: 'assets/control_unit/mount_height_lidar.png',
+                      controller: _flowPulseCount,
+                      hint: 'Flow Pulse Count',
+                    ),
+
+                    // Page 8: ultrasonic distance (image + field, hidden from visible)
                     _KeepAlive(
                       child: Padding(
                         padding: const EdgeInsets.all(12.0),
                         child: Form(
-                          key: _pageKeys[3],
+                          key: _pageKeys[8],
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -918,6 +1061,46 @@ class _CreateControlUnitScreenState
                                   }
                                 }
 
+                                double parsedRightFrontOffset =
+                                    double.tryParse(_rightFrontOffset.text) ??
+                                        0.0;
+                                if (_rightFrontOffsetUnit == 'in') {
+                                  parsedRightFrontOffset *= 0.0254;
+                                } else if (_rightFrontOffsetUnit == 'ft') {
+                                  parsedRightFrontOffset *= 0.3048;
+                                }
+
+                                double parsedRightBackOffset =
+                                    double.tryParse(_rightBackOffset.text) ??
+                                        0.0;
+                                if (_rightBackOffsetUnit == 'in') {
+                                  parsedRightBackOffset *= 0.0254;
+                                } else if (_rightBackOffsetUnit == 'ft') {
+                                  parsedRightBackOffset *= 0.3048;
+                                }
+
+                                double parsedLeftFrontOffset =
+                                    double.tryParse(_leftFrontOffset.text) ??
+                                        0.0;
+                                if (_leftFrontOffsetUnit == 'in') {
+                                  parsedLeftFrontOffset *= 0.0254;
+                                } else if (_leftFrontOffsetUnit == 'ft') {
+                                  parsedLeftFrontOffset *= 0.3048;
+                                }
+
+                                double parsedLeftBackOffset =
+                                    double.tryParse(_leftBackOffset.text) ??
+                                        0.0;
+                                if (_leftBackOffsetUnit == 'in') {
+                                  parsedLeftBackOffset *= 0.0254;
+                                } else if (_leftBackOffsetUnit == 'ft') {
+                                  parsedLeftBackOffset *= 0.3048;
+                                }
+
+                                final parsedFlowPulseCount =
+                                    double.tryParse(_flowPulseCount.text) ??
+                                        0.0;
+
                                 final data = {
                                   'category': 'control_unit',
                                   'name': _name.text,
@@ -932,6 +1115,11 @@ class _CreateControlUnitScreenState
                                   'lidarNozzleDistance': parsedLidar,
                                   'mountingHeight': parsedMount,
                                   'ultrasonicDistance': parsedUltra,
+                                  'rightFrontOffset': parsedRightFrontOffset,
+                                  'rightBackOffset': parsedRightBackOffset,
+                                  'leftFrontOffset': parsedLeftFrontOffset,
+                                  'leftBackOffset': parsedLeftBackOffset,
+                                  'flowPulseCount': parsedFlowPulseCount,
                                 };
 
                                 try {

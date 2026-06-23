@@ -28,6 +28,11 @@ class EquipmentEntity {
   final String? linkedTractorId;
   final String? linkedPlotId;
   final int? activeSessionId;
+  final double? rightFrontOffset;
+  final double? rightBackOffset;
+  final double? leftFrontOffset;
+  final double? leftBackOffset;
+  final double? flowPulseCount;
   // timestamps
   final DateTime? lastSeenAt;
   final DateTime? createdAt;
@@ -56,6 +61,11 @@ class EquipmentEntity {
     this.linkedTractorId,
     this.linkedPlotId,
     this.activeSessionId,
+    this.rightFrontOffset,
+    this.rightBackOffset,
+    this.leftFrontOffset,
+    this.leftBackOffset,
+    this.flowPulseCount,
     this.lastSeenAt,
     this.createdAt,
     this.updatedAt,
@@ -110,5 +120,10 @@ class ControlUnitEntity extends EquipmentEntity {
     super.lidarNozzleDistance,
     super.mountingHeight,
     super.ultrasonicDistance,
+    super.rightFrontOffset,
+    super.rightBackOffset,
+    super.leftFrontOffset,
+    super.leftBackOffset,
+    super.flowPulseCount,
   });
 }

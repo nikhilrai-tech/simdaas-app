@@ -12,6 +12,7 @@ abstract class EquipmentRemoteDataSource {
   Future<List<EquipmentEntity>> getSprayers(String userId);
   Future<List<EquipmentEntity>> getControlUnits(String userId);
   Future<void> endSession(int sessionId);
+  Future<void> pushDemoConfig(String id, {required bool demo});
 }
 
 class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
@@ -116,6 +117,21 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
       if (data['ultrasonicDistance'] != null) {
         bodyMap['distance_of_us_sensor_from_center_line'] =
             data['ultrasonicDistance'];
+      }
+      if (data['rightFrontOffset'] != null) {
+        bodyMap['right_front_offset'] = data['rightFrontOffset'];
+      }
+      if (data['rightBackOffset'] != null) {
+        bodyMap['right_back_offset'] = data['rightBackOffset'];
+      }
+      if (data['leftFrontOffset'] != null) {
+        bodyMap['left_front_offset'] = data['leftFrontOffset'];
+      }
+      if (data['leftBackOffset'] != null) {
+        bodyMap['left_back_offset'] = data['leftBackOffset'];
+      }
+      if (data['flowPulseCount'] != null) {
+        bodyMap['flow_pulse_count'] = data['flowPulseCount'];
       }
 
       await api.postJson('/api/control-units/', jsonBody: bodyMap);
@@ -246,6 +262,21 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
         bodyMap['distance_of_us_sensor_from_center_line'] =
             data['ultrasonicDistance'];
       }
+      if (data.containsKey('rightFrontOffset')) {
+        bodyMap['right_front_offset'] = data['rightFrontOffset'];
+      }
+      if (data.containsKey('rightBackOffset')) {
+        bodyMap['right_back_offset'] = data['rightBackOffset'];
+      }
+      if (data.containsKey('leftFrontOffset')) {
+        bodyMap['left_front_offset'] = data['leftFrontOffset'];
+      }
+      if (data.containsKey('leftBackOffset')) {
+        bodyMap['left_back_offset'] = data['leftBackOffset'];
+      }
+      if (data.containsKey('flowPulseCount')) {
+        bodyMap['flow_pulse_count'] = data['flowPulseCount'];
+      }
 
       // Debug: log outgoing payload for easier troubleshooting
       debugPrint('PATCH /api/control-units/$id/ payload: $bodyMap');
@@ -368,5 +399,10 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
   @override
   Future<void> endSession(int sessionId) async {
     await api.postJson('/jobs/api/sessions/$sessionId/end/');
+  }
+
+  @override
+  Future<void> pushDemoConfig(String id, {required bool demo}) async {
+    await api.postJson('/api/control-units/$id/demo-mode/', jsonBody: {'demo': demo});
   }
 }

@@ -18,7 +18,6 @@ import 'package:simdaas/core/services/telemetry_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:simdaas/core/services/connectivity_service.dart';
 import '../../../reports/presentation/providers/session_providers.dart';
 import 'package:simdaas/main.dart' show appNavKey;
@@ -38,8 +37,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   // in case the WS event arrives late).
   final Map<String, DateTime> _ignoredUntil = {};
 
-  bool _isDemoMode = false;
-  Timer? _demoTimer;
   HeatmapType _selectedHeatmap = HeatmapType.gps;
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
@@ -325,7 +322,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
   @override
   void dispose() {
-    _demoTimer?.cancel();
     _deviceSub?.cancel();
     _cooldownSub?.cancel();
     _countdownTimer?.cancel();
@@ -333,76 +329,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     super.dispose();
   }
 
-
-  void _startDemo() {
-    _demoTimer?.cancel();
-    // Simulate a starting point if we have none
-    double lat = 18.5204;
-    double lon = 73.8567;
-    if (positions.isNotEmpty) {
-      lat = (positions.last['lat'] as num).toDouble();
-      lon = (positions.last['lon'] as num).toDouble();
-    }
-    double angle = 0.0;
-
-    _demoTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      angle += 0.1;
-      // Move in a small circle-ish path
-      lat += 0.00002 * math.cos(angle);
-      lon += 0.00003 * math.sin(angle);
-
-      final plot = ref.read(fm_providers.plotByIdProvider(widget.plotId ?? '')).valueOrNull;
-      final locallyInPlot = _isPointInPolygon(LatLng(lat, lon), plot?.polygon ?? []);
-
-      final t = TelemetryData(
-        deviceId: widget.deviceId ?? 'demo_device',
-        timestamp: DateTime.now(),
-        lat: lat,
-        lon: lon,
-        speed: 4.5 + math.sin(angle) * 2,
-        flowRate: 15.0 + math.cos(angle) * 5,
-        ptoState: (angle % 6.28) > 3.14 ? 1 : 0,
-        sprayMode: (angle % 12.56) > 6.28 ? 1 : 0,
-        deviceInPlot: locallyInPlot,
-        plot: widget.plotId,
-        leftDistance: 1.2 + math.sin(angle * 2) * 0.5,
-        rightDistance: 1.1 + math.cos(angle * 2) * 0.5,
-        leftDensity: 0.8 + math.sin(angle) * 0.2,
-        rightDensity: 0.85 + math.cos(angle) * 0.15,
-        tankLevel: (80.0 - (timer.tick / 10)).clamp(0.0, 100.0),
-        gpsSignalQuality: 3,
-        simSignalQuality: -75,
-        leftSolenoidState: (angle % 3.14) > 1.57 ? 1 : 0,
-        rightSolenoidState: (angle % 3.14) < 1.57 ? 1 : 0,
-      );
-
-      if (mounted) {
-        setState(() {
-          latestTelemetry = t;
-          if (t.flowRate != null) _lastFlowRate = t.flowRate;
-          if (t.tankLevel != null) _lastTankLevel = t.tankLevel;
-          if (t.speed != null) _lastSpeed = t.speed;
-          if (t.ptoState != null) _lastPtoOn = t.ptoState == 1;
-          positions.add({
-            'timestamp': t.timestamp.toIso8601String(),
-            'lat': t.lat,
-            'lon': t.lon,
-            'pto': t.ptoState,
-            'device_in_plot': t.deviceInPlot,
-            'speed': t.speed,
-            'flow_rate': t.flowRate,
-            'spray_mode': t.sprayMode,
-          });
-        });
-        // Update state - overlays will rebuild automatically via setState
-      }
-    });
-  }
-
-  void _stopDemo() {
-    _demoTimer?.cancel();
-    _demoTimer = null;
-  }
 
   // Clears all session-scoped state: live data, GPS track, cached values,
   // and the out-of-plot snackbar flag so the next session starts clean.
@@ -983,9 +909,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                     );
                                     setState(() {
                                       _clearSessionState();
-                                      _demoTimer?.cancel();
-                                      _demoTimer = null;
-                                      _isDemoMode = false;
                                       _cooldownState = optimisticCooldown;
                                       _startCountdownTimer();
                                     });
@@ -1060,29 +983,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                               const PopupMenuItem(
                                   value: 'spray_on_off',
                                   child: Text('Spray on/off view')),
-                              const PopupMenuDivider(),
-                              const PopupMenuItem<String>(
-                                  enabled: false,
-                                  child: Text('Demo mode',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold))),
-                              PopupMenuItem(
-                                value: 'toggle_demo',
-                                child: Row(
-                                  children: [
-                                    Text(_isDemoMode ? 'Demo Mode: ON' : 'Demo Mode: OFF'),
-                                    const Spacer(),
-                                    Switch(
-                                      value: _isDemoMode,
-                                      onChanged: (v) {
-                                        // The PopupMenuButton closes on selection, so we handle it 
-                                        // by forcing a pop with the value that matches onSelected.
-                                        Navigator.pop(context, 'toggle_demo');
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
                               if (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0) ...[
                                 const PopupMenuDivider(),
                                 PopupMenuItem(

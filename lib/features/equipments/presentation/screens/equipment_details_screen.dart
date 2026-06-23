@@ -28,6 +28,7 @@ class EquipmentDetailsScreen extends ConsumerStatefulWidget {
 class _EquipmentDetailsScreenState
     extends ConsumerState<EquipmentDetailsScreen> {
   late EquipmentEntity displayedEquipment;
+  bool _demoOn = false;
 
   String _ownerDisplay(String? userField) {
     if (userField == null) return '-';
@@ -193,7 +194,23 @@ class _EquipmentDetailsScreenState
     final sprayersAsync = ref.watch(sprayersProvider(currentUserId));
     final tractorsAsync = ref.watch(tractorsProvider(currentUserId));
     final plotsAsync = ref.watch(plotsListProvider(currentUserId));
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        // If demo is ON, restore original config before leaving.
+        if (_demoOn &&
+            displayedEquipment.category.toLowerCase() == 'control_unit') {
+          try {
+            await ref
+                .read(equipmentControllerProvider)
+                .pushDemoConfig(displayedEquipment.id, demo: false);
+          } catch (_) {}
+          if (mounted) setState(() => _demoOn = false);
+        }
+        if (context.mounted) Navigator.of(context).pop(result);
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(displayedEquipment.name),
         actions: widget.readOnly
@@ -227,6 +244,11 @@ class _EquipmentDetailsScreenState
                       'linkedSprayerId': displayedEquipment.linkedSprayerId,
                       'linkedTractorId': displayedEquipment.linkedTractorId,
                       'linkedPlotId': displayedEquipment.linkedPlotId,
+                      'rightFrontOffset': displayedEquipment.rightFrontOffset,
+                      'rightBackOffset': displayedEquipment.rightBackOffset,
+                      'leftFrontOffset': displayedEquipment.leftFrontOffset,
+                      'leftBackOffset': displayedEquipment.leftBackOffset,
+                      'flowPulseCount': displayedEquipment.flowPulseCount,
                     };
                     // Route to the appropriate editor. Use the specialized
                     // control unit editor so the control unit identifier is
@@ -360,11 +382,20 @@ class _EquipmentDetailsScreenState
             _buildMetaCard(context, currentUserId),
             const SizedBox(height: 12),
             _buildSpecsCard(context, sprayersAsync, tractorsAsync, plotsAsync),
+            if (displayedEquipment.category.toLowerCase() == 'control_unit') ...[
+              const SizedBox(height: 16),
+              _DemoModeToggle(
+                equipmentId: displayedEquipment.id,
+                value: _demoOn,
+                onChanged: (v) => setState(() => _demoOn = v),
+              ),
+            ],
             const SizedBox(height: 24),
           ],
         ),
       ),
-    );
+    ), // Scaffold
+    ); // PopScope
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -557,6 +588,16 @@ class _EquipmentDetailsScreenState
             displayedEquipment.ultrasonicDistance != null
                 ? '${_fmtNum(displayedEquipment.ultrasonicDistance)} m'
                 : '-'),
+        _specRow(context, 'Right front offset',
+            '${_fmtNum(displayedEquipment.rightFrontOffset ?? 0)} m'),
+        _specRow(context, 'Right back offset',
+            '${_fmtNum(displayedEquipment.rightBackOffset ?? 0)} m'),
+        _specRow(context, 'Left front offset',
+            '${_fmtNum(displayedEquipment.leftFrontOffset ?? 0)} m'),
+        _specRow(context, 'Left back offset',
+            '${_fmtNum(displayedEquipment.leftBackOffset ?? 0)} m'),
+        _specRow(context, 'Flow pulse count',
+            '${_fmtNum(displayedEquipment.flowPulseCount ?? 0)}'),
       ]);
     }
 
@@ -643,6 +684,81 @@ class _EquipmentDetailsScreenState
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DemoModeToggle extends ConsumerStatefulWidget {
+  final String equipmentId;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _DemoModeToggle({
+    required this.equipmentId,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  ConsumerState<_DemoModeToggle> createState() => _DemoModeToggleState();
+}
+
+class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
+  bool _loading = false;
+
+  Future<void> _toggle(bool value) async {
+    setState(() => _loading = true);
+    try {
+      await ref
+          .read(equipmentControllerProvider)
+          .pushDemoConfig(widget.equipmentId, demo: value);
+      widget.onChanged(value);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Demo config error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Theme.of(context).dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Demo Mode',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w500),
+              ),
+            ),
+            if (_loading)
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Switch(
+                value: widget.value,
+                onChanged: _toggle,
+              ),
+          ],
+        ),
       ),
     );
   }
