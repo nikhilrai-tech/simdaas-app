@@ -179,12 +179,12 @@ class RowLineCoverage {
             accumulated[s] += pt.flowRate ?? 0.0;
             accumulatedCount[s]++;
           } else {
-            latestColor[s] ??= color; // first-write wins for intermediate bands
+            // First-write wins for GPS/Speed heatmaps — a re-pass over the
+            // same sub-band (e.g. after a waiting-period gap) must NOT
+            // change the colour that was already recorded on the first
+            // pass. Only the Spray heatmap accumulates on re-pass.
+            latestColor[s] ??= color;
           }
-        }
-        // Always overwrite with the actual latest value at the current index.
-        if (heatmapType != HeatmapType.spraying) {
-          latestColor[idx] = color;
         }
 
         prevIdxInCorridor = idx;
@@ -218,11 +218,10 @@ class RowLineCoverage {
           );
           bandColor = HeatmapColorUtils.getColorForSpray(totalFlow);
           alpha = 200;
-        } else if (passCount >= 2) {
-          // GPS / Speed re-pass: dark grey indicator.
-          bandColor = Colors.grey.shade800;
-          alpha = 220;
         } else {
+          // GPS / Speed heatmaps never override on re-pass — always show
+          // the colour recorded on the first visit, regardless of how many
+          // times the sprayer has driven over this sub-band since.
           final c = latestColor[i];
           if (c == null) continue;
           bandColor = c;
