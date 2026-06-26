@@ -685,6 +685,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                       polylines:
                           _buildColoredPolylinesFromPositions(positions, plot)),
                 ],
+                if (widget.deviceId != null && positions.isNotEmpty)
+                  MarkerLayer(markers: [
+                    Marker(
+                        point: LatLng((positions.first['lat'] as num).toDouble(),
+                            (positions.first['lon'] as num).toDouble()),
+                        width: 36,
+                        height: 36,
+                        child: const Icon(Icons.flag,
+                            color: Colors.blue)),
+                  ]),
                 if (widget.deviceId != null && latestTelemetry != null)
                   MarkerLayer(markers: [
                     Marker(
@@ -693,7 +703,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                         width: 40,
                         height: 40,
                         child: Icon(Icons.location_on,
-                            color: _markerColorForTelemetry(latestTelemetry!, 
+                            color: _markerColorForTelemetry(latestTelemetry!,
                               ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull))),
                   ]),
                 _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
