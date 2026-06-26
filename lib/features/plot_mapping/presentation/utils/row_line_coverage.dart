@@ -204,18 +204,13 @@ class RowLineCoverage {
 
         if (heatmapType == HeatmapType.spraying) {
           if (accumulated[i] <= 0.0 || accumulatedCount[i] == 0) continue;
-          // Per-pass average × number of corridor passes = total spray applied.
-          // On re-pass the value accumulates (e.g. 30 LPM × 2 passes = 60 LPM)
-          // so the color naturally shifts from blue toward red.
-          final avgPerSample = accumulated[i] / accumulatedCount[i];
-          final totalFlow = avgPerSample * passCount;
-          debugPrint(
-            '[FlowHeatmap] corridor=$ri sub=$i '
-            'passes=$passCount '
-            'samples=${accumulatedCount[i]} '
-            'avg=${avgPerSample.toStringAsFixed(1)} '
-            'total=${totalFlow.toStringAsFixed(1)} LPM',
-          );
+          // Divide raw accumulated flow by the expected samples-per-sub-band at
+          // normal speed. This is equivalent to avgPerSample × passCount for a
+          // moving device (each pass contributes ~samplesPerPass samples), but
+          // also correctly darkens a sub-band when the device is stationary:
+          // many samples at the same spot accumulate a large sum which pushes
+          // the colour from light-blue all the way to black.
+          final totalFlow = accumulated[i] / samplesPerPass;
           bandColor = HeatmapColorUtils.getColorForSpray(totalFlow);
           alpha = 200;
         } else {

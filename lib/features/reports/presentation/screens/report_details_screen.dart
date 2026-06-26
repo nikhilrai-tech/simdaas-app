@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -691,21 +693,39 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
-      if (!isInPlot) continue;
+      if (!isInPlot) {
+        prev = p;
+        continue;
+      }
+      // The backend records GPS points only every ~10 s when the device is
+      // stationary and spraying (time-based fallback). Scale the flow
+      // contribution by the time delta so the heatmap accumulates the same
+      // intensity as the live monitoring screen (which sees every 1-second
+      // telemetry packet).
+      double effectiveFlow = p.flowRateLpm;
+      if (prev != null && p.flowRateLpm > 0) {
+        final dist = _gpsDistanceMeters(prev.lat, prev.lon, p.lat, p.lon);
+        if (dist < 3.0) {
+          final secs = p.timestamp.difference(prev.timestamp).inSeconds;
+          if (secs > 1) effectiveFlow = p.flowRateLpm * secs.toDouble();
+        }
+      }
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
         ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
-        flowRate: p.flowRateLpm,
+        flowRate: effectiveFlow,
       ));
+      prev = p;
     }
     return result;
   }
@@ -809,6 +829,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     }
     return LatLng(sumLat / points.length, sumLng / points.length);
   }
+}
+
+double _gpsDistanceMeters(
+    double lat1, double lon1, double lat2, double lon2) {
+  const mPerDeg = 111320.0;
+  final cosLat =
+      math.cos((lat1 + lat2) / 2.0 * math.pi / 180.0);
+  final dLat = (lat2 - lat1) * mPerDeg;
+  final dLon = (lon2 - lon1) * mPerDeg * cosLat;
+  return math.sqrt(dLat * dLat + dLon * dLon);
 }
 
 // ── Full-screen map page ────────────────────────────────────────────────────
@@ -1053,21 +1083,39 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
-      if (!isInPlot) continue;
+      if (!isInPlot) {
+        prev = p;
+        continue;
+      }
+      // The backend records GPS points only every ~10 s when the device is
+      // stationary and spraying (time-based fallback). Scale the flow
+      // contribution by the time delta so the heatmap accumulates the same
+      // intensity as the live monitoring screen (which sees every 1-second
+      // telemetry packet).
+      double effectiveFlow = p.flowRateLpm;
+      if (prev != null && p.flowRateLpm > 0) {
+        final dist = _gpsDistanceMeters(prev.lat, prev.lon, p.lat, p.lon);
+        if (dist < 3.0) {
+          final secs = p.timestamp.difference(prev.timestamp).inSeconds;
+          if (secs > 1) effectiveFlow = p.flowRateLpm * secs.toDouble();
+        }
+      }
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
         ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
-        flowRate: p.flowRateLpm,
+        flowRate: effectiveFlow,
       ));
+      prev = p;
     }
     return result;
   }

@@ -1021,6 +1021,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                 child: _buildCooldownBanner(_cooldownState!),
               ),
 
+            // ── Heatmap legend (below nozzle card, left side) ────────────
+            Positioned(
+              top: 80,
+              left: 12,
+              child: SafeArea(child: _buildLegend()),
+            ),
+
             // ── Top-left L/R nozzle indicators (left/right) ───────────────
             Positioned(
               top: 12,
@@ -1843,6 +1850,68 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
     flush();
     return result;
+  }
+
+  Widget _buildLegend() {
+    List<Widget> items;
+    switch (_selectedHeatmap) {
+      case HeatmapType.gps:
+        items = [
+          _legendItem('Auto', Colors.blue),
+          _legendItem('Manual', Colors.grey),
+          _legendItem('PTO Off', Colors.orange),
+          _legendItem('Outside', Colors.red),
+        ];
+        break;
+      case HeatmapType.speed:
+        items = [
+          _legendItem('0-3 km/h', Colors.yellow),
+          _legendItem('3-7 km/h', Colors.green),
+          _legendItem('7+ km/h', Colors.red),
+        ];
+        break;
+      case HeatmapType.spraying:
+        items = [
+          _legendItem('0-70 L/m', Colors.blue.shade400),
+          _legendItem('70-200 L/m', Colors.red.shade400),
+          _legendItem('>200 L/m', Colors.black),
+        ];
+        break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(230),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withAlpha(25), blurRadius: 4),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: items,
+      ),
+    );
+  }
+
+  Widget _legendItem(String label, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(label,
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
   }
 
   Widget _smallStat(String label, String value) {
