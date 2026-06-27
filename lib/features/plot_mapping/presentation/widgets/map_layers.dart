@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/widgets/my_location_layer.dart';
 
 /// Renders map tile, polygon and vertex markers and forwards pointer events
 /// to callers so the parent can handle selection/move logic.
@@ -51,6 +52,7 @@ class MapLayers extends StatelessWidget {
         TileLayer(
             urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
             subdomains: const ['a', 'b', 'c']),
+        const MyLocationLayer(),
         if (points.isNotEmpty) ...[
           PolygonLayer(polygons: [
             Polygon(

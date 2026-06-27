@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:simdaas/core/services/api_exception.dart';
+import 'package:simdaas/core/services/location_service.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 
 String _stripExceptionPrefix(String s) {
@@ -108,6 +110,14 @@ String extractErrorMessage(Object? error) {
 
 void showPolishedError(BuildContext context, Object? error,
     {String? fallback}) {
+  // Location errors get a dedicated SnackBar with an actionable button
+  // (open location settings / app settings) instead of a plain message.
+  if (error is LocationServiceDisabledError ||
+      error is LocationPermissionDeniedError) {
+    showLocationError(context, error);
+    return;
+  }
+
   final msg = extractErrorMessage(error);
   // Replace separator with newlines for SnackBar display so each field/error
   // appears on its own line.
@@ -115,4 +125,42 @@ void showPolishedError(BuildContext context, Object? error,
       ? msg.replaceAll('; ', '\n')
       : (fallback ?? 'An error occurred');
   showGenericErrorSnackBar(context, display);
+}
+
+/// Shows a SnackBar for location errors with a button that takes the user
+/// straight to the relevant settings screen, instead of a dead-end message.
+void showLocationError(BuildContext context, Object? error) {
+  String message;
+  String actionLabel;
+  Future<void> Function() onPressed;
+
+  if (error is LocationServiceDisabledError) {
+    message = 'GPS is turned off. Enable location to see your position.';
+    actionLabel = 'Enable';
+    onPressed = Geolocator.openLocationSettings;
+  } else if (error is LocationPermissionDeniedError && error.permanently) {
+    message = 'Location permission denied. Allow it from app settings.';
+    actionLabel = 'Settings';
+    onPressed = Geolocator.openAppSettings;
+  } else {
+    message = 'Location permission denied.';
+    actionLabel = 'Settings';
+    onPressed = Geolocator.openAppSettings;
+  }
+
+  try {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: actionLabel,
+          textColor: Colors.white,
+          onPressed: () => onPressed(),
+        ),
+      ),
+    );
+  } catch (_) {}
 }

@@ -7,6 +7,7 @@ import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 
 import 'package:simdaas/core/services/location_service.dart';
+import 'package:simdaas/core/widgets/my_location_layer.dart';
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
 import '../utils/row_line_generator.dart';
@@ -152,7 +153,6 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   Future<void> _centerOnLocation() async {
     try {
       final loc = await LocationService().getCurrentLocation();
-      if (loc.latitude == 0 && loc.longitude == 0) return;
       _mapController.move(loc, 18.0);
     } catch (e) {
       if (mounted) showPolishedError(context, e, fallback: 'Location error');
@@ -339,6 +339,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                 subdomains: const ['a', 'b', 'c'],
               ),
+              const MyLocationLayer(),
               // Plot polygon
               if (widget.plot.polygon.isNotEmpty)
                 PolygonLayer(polygons: [

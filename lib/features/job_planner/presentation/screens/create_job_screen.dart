@@ -10,6 +10,7 @@ import '../providers/create_job_form_provider.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/widgets/my_location_layer.dart';
 import '../../../auth/presentation/providers/users_providers.dart'
     as users_provs;
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
@@ -970,6 +971,7 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                               urlTemplate:
                                   'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                               subdomains: const ['a', 'b', 'c']),
+                          const MyLocationLayer(),
                           for (final f in (fields
                               .cast<fm_models.PlotModel>()
                               .where((fm) => fm.id == formState.plotId)))

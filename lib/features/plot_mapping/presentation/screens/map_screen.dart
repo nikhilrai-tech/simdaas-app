@@ -431,18 +431,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   Future<void> _centerOnCurrentLocation() async {
     try {
       final loc = await LocationService().getCurrentLocation();
-      // Keep a sensible zoom level when centering on device
-      const double zoom = 18.0;
-      // If LocationService returned an invalid fallback (0,0) because
-      // permissions were denied, use a sensible default in India instead
-      // of moving to (0,0).
-      if ((loc.latitude == 0 && loc.longitude == 0)) {
-        final indiaCenter =
-            LatLng(22.3511148, 78.6677428); // geographic center of India
-        _mapController.move(indiaCenter, zoom);
-      } else {
-        _mapController.move(loc, zoom);
-      }
+      _mapController.move(loc, 18.0);
     } catch (e) {
       if (mounted) {
         showPolishedError(context, e, fallback: 'Location error');
