@@ -13,6 +13,7 @@ class MapLayers extends StatelessWidget {
   final double minZoom;
   final double maxZoom;
   final void Function(TapPosition, LatLng)? onTap;
+  final void Function(LatLng position)? onMyLocation;
 
   // Pointer event forwards for markers
   final void Function(int index, PointerEvent event) onMarkerPointerDown;
@@ -29,6 +30,7 @@ class MapLayers extends StatelessWidget {
     required this.minZoom,
     required this.maxZoom,
     this.onTap,
+    this.onMyLocation,
     required this.onMarkerPointerDown,
     required this.onMarkerPointerMove,
     required this.onMarkerPointerUp,
@@ -52,7 +54,7 @@ class MapLayers extends StatelessWidget {
         TileLayer(
             urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
             subdomains: const ['a', 'b', 'c']),
-        const MyLocationLayer(),
+        MyLocationLayer(onPosition: onMyLocation),
         if (points.isNotEmpty) ...[
           PolygonLayer(polygons: [
             Polygon(
