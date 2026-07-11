@@ -1,12 +1,81 @@
-name: Test Minimal
+name: Release
 
+# Pushing a version tag (e.g. `v1.0.0`) builds the release APK, publishes a
+# GitHub Release with that APK attached and the matching CHANGELOG.md
+# section as the release notes, and — once TEAMS_WEBHOOK_URL is configured
+# (see "Teams setup" below) — posts the same notes + a download link to the
+# team's Teams channel.
 on:
   push:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 jobs:
-  hello:
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "hello"
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - run: flutter pub get
+      - run: flutter build apk --release
+
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk "krishi-spray-${{ steps.ver.outputs.tag }}.apk"
+
+      - name: Extract this version's CHANGELOG.md section
+        run: python3 .github/scripts/extract_changelog.py "${{ steps.ver.outputs.version }}" > release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: "Krishi Spray ${{ steps.ver.outputs.tag }}"
+          body_path: release_notes.md
+          files: krishi-spray-${{ steps.ver.outputs.tag }}.apk
+
+      # Skips cleanly if the secret isn't set yet — see "Teams setup" below.
+      - name: Notify Teams
+        if: ${{ secrets.TEAMS_WEBHOOK_URL != '' }}
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.tag }}"
+          python3 .github/scripts/notify_teams.py "$TEAMS_WEBHOOK_URL" "${{ steps.ver.outputs.tag }}" "$RELEASE_URL" release_notes.md
+
+# ---------------------------------------------------------------------------
+# Teams setup (one-time, done in the Teams UI — not in this file):
+#
+# 1. Open the "release channel - Krishi apk" channel.
+# 2. "..." (more options) on the channel > Workflows.
+# 3. Search for and select the template "Post to a channel when a webhook
+#    request is received". Point it at this channel, name it (e.g. "Krishi
+#    Spray release notifier"), and finish creating it.
+# 4. Teams will show you a webhook URL at the end — copy it.
+# 5. In this GitHub repo: Settings > Secrets and variables > Actions >
+#    New repository secret. Name: TEAMS_WEBHOOK_URL. Value: the URL from
+#    step 4.
+# 6. Repeat in the other repo too if releases are cut from both.
+#
+# That's it — the next tag push will post to the channel automatically.
+# Note: this posts release notes + a *link* to download the APK from the
+# GitHub Release, not the raw APK file itself — Teams webhooks don't support
+# arbitrary file uploads without a more involved SharePoint/Graph API flow.
+# ---------------------------------------------------------------------------
