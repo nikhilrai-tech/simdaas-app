@@ -21,6 +21,8 @@ import '../../../auth/presentation/screens/operator_list_screen.dart'
     show OperatorListScreen;
 import 'dart:async';
 import '../../../equipments/presentation/providers/equipment_providers.dart';
+import '../../../firmware_update/presentation/screens/firmware_alerts_screen.dart';
+import 'all_users_screen.dart';
 
 enum _SortBy { time, status, supervisor }
 
@@ -477,6 +479,18 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                                   )),
                           icon: const Icon(Icons.help_outline),
                           label: const Text('Help')),
+                      ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (c) => const FirmwareAlertsScreen())),
+                          icon: const Icon(Icons.system_update_alt),
+                          label: const Text('Alerts')),
+                      ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (c) => const AllUsersScreen())),
+                          icon: const Icon(Icons.people_outline),
+                          label: const Text('Users')),
                     ];
 
                     // Use GridView for denser layout. On narrow screens use 1 column, otherwise 2.

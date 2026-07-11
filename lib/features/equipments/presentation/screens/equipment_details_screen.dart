@@ -13,6 +13,7 @@ import 'create_equipment_screen.dart';
 import 'create_control_unit_screen.dart';
 import 'create_sprayer_screen.dart';
 import 'create_tractor_screen.dart';
+import 'package:simdaas/features/firmware_update/presentation/screens/firmware_update_workspace_screen.dart';
 
 class EquipmentDetailsScreen extends ConsumerStatefulWidget {
   final EquipmentEntity equipment;
@@ -539,8 +540,60 @@ class _EquipmentDetailsScreenState
               _iconRow(context, Icons.update_outlined, 'Updated',
                   _fmtDate(displayedEquipment.updatedAt), muted),
             ],
+            if (displayedEquipment.category.toLowerCase() == 'control_unit') ...[
+              const Divider(height: 1),
+              _buildFirmwareRow(context, muted),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// OTA firmware update (RFC-004) — Firmware Version row + "Check Update"
+  /// button, additive to the existing meta card above.
+  Widget _buildFirmwareRow(BuildContext context, Color muted) {
+    final dbVersion = displayedEquipment.firmwareVersion ?? '1.0.0';
+    final availableVersion = displayedEquipment.firmwareAvailableVersion;
+    final updateAvailable =
+        availableVersion != null && availableVersion != dbVersion;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          Icon(Icons.memory_outlined, size: 18, color: muted),
+          const SizedBox(width: 10),
+          Text('Firmware Version  ', style: TextStyle(color: muted, fontSize: 13)),
+          Expanded(
+            child: Text(
+              dbVersion,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (updateAvailable) ...[
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: () {
+                final mac = displayedEquipment.macAddress;
+                if (mac == null || mac.isEmpty) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FirmwareUpdateWorkspaceScreen(
+                      controlUnitId: displayedEquipment.id,
+                      macAddress: mac,
+                      deviceName: displayedEquipment.name,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Check Update'),
+            ),
+          ],
+        ],
       ),
     );
   }

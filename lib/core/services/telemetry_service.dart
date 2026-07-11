@@ -82,6 +82,50 @@ class CooldownState {
       'CooldownState($deviceId, $status, end=$cooldownEnd, type=$cooldownType)';
 }
 
+/// OTA firmware update progress/terminal status (RFC-004), emitted via
+/// [TelemetryService.deviceOtaStatusStream]. Mirrors the states published on
+/// the device's /<id>/ota/status MQTT topic 1:1 — see
+/// smart-spray-backend/docs/RFC-004-OTA-Firmware-Update.md §6 for the full
+/// state machine this drives.
+class OtaStatusEvent {
+  final String deviceId;
+  final String state; // WIFI_CONNECTING | IN_PROGRESS | DOWNLOAD_OK | SUCCESS | FAILED | ROLLBACK
+  final int? code;
+  // IN_PROGRESS: percent (int, 0-100). SUCCESS/ROLLBACK: version (String).
+  // FAILED: human-readable reason (String).
+  final dynamic detail;
+
+  const OtaStatusEvent({
+    required this.deviceId,
+    required this.state,
+    this.code,
+    this.detail,
+  });
+
+  int? get progressPercent => state == 'IN_PROGRESS' && detail is num
+      ? (detail as num).toInt()
+      : null;
+
+  String? get reason => state == 'FAILED' && detail is String ? detail as String : null;
+
+  String? get resultingVersion =>
+      (state == 'SUCCESS' || state == 'ROLLBACK') && detail != null
+          ? detail.toString()
+          : null;
+
+  @override
+  String toString() => 'OtaStatusEvent($deviceId, $state, code=$code, detail=$detail)';
+}
+
+/// Reply to a ["GET"] version query on /<id>/ota/version, emitted via
+/// [TelemetryService.deviceOtaVersionStatusStream].
+class OtaVersionStatusEvent {
+  final String deviceId;
+  final String? liveVersion;
+
+  const OtaVersionStatusEvent({required this.deviceId, this.liveVersion});
+}
+
 class TelemetryData {
   final String deviceId;
   final DateTime timestamp;
@@ -317,6 +361,31 @@ class TelemetryService {
     return _cooldownStates[canonicalizeMac(deviceId)];
   }
 
+  // ── OTA firmware update (RFC-004) ───────────────────────────────────────
+  final _otaStatusController = StreamController<OtaStatusEvent>.broadcast();
+  final _otaVersionStatusController =
+      StreamController<OtaVersionStatusEvent>.broadcast();
+
+  /// Stream of OTA progress/terminal status events for [deviceId]. The
+  /// Firmware Update Workspace screen drives its whole state machine off
+  /// this — same demux pattern as [deviceCooldownStream], just a third
+  /// branch on the WebSocket's `type` field (see telemetry/consumers.py's
+  /// `ota_status` handler on the backend).
+  Stream<OtaStatusEvent> deviceOtaStatusStream(String deviceId) {
+    final norm = canonicalizeMac(deviceId);
+    return _otaStatusController.stream
+        .where((e) => canonicalizeMac(e.deviceId) == norm);
+  }
+
+  /// Stream of version-query replies for [deviceId] (backend's
+  /// `ota_version_status` WS event) — used by the Firmware Update
+  /// Workspace's initial handshake to show the live hardware version.
+  Stream<OtaVersionStatusEvent> deviceOtaVersionStatusStream(String deviceId) {
+    final norm = canonicalizeMac(deviceId);
+    return _otaVersionStatusController.stream
+        .where((e) => canonicalizeMac(e.deviceId) == norm);
+  }
+
   /// Last time telemetry was received from [deviceId].
   /// Returns null if no telemetry has been received or the session has ended.
   DateTime? getLastSeenAt(String deviceId) =>
@@ -525,6 +594,32 @@ class TelemetryService {
             }
             debugPrint('Telemetry: report_ready for $normId — '
                 '${alreadyActive ? "new session already active, positions preserved" : "device fully offline"}');
+            return;
+          }
+
+          // ── OTA firmware update events (RFC-004) ──────────────────────────
+          // Same top-level, no-envelope shape as status_change/report_ready
+          // above — see telemetry/consumers.py's ota_status/ota_version_status
+          // handlers on the backend.
+          if (msgType == 'ota_status') {
+            final rawId = data['device_id']?.toString() ?? deviceId;
+            _otaStatusController.add(OtaStatusEvent(
+              deviceId: rawId,
+              state: data['state']?.toString() ?? '',
+              code: data['code'] is int
+                  ? data['code'] as int
+                  : int.tryParse(data['code']?.toString() ?? ''),
+              detail: data['detail'],
+            ));
+            return;
+          }
+
+          if (msgType == 'ota_version_status') {
+            final rawId = data['device_id']?.toString() ?? deviceId;
+            _otaVersionStatusController.add(OtaVersionStatusEvent(
+              deviceId: rawId,
+              liveVersion: data['live_version']?.toString(),
+            ));
             return;
           }
 
@@ -798,6 +893,12 @@ class TelemetryService {
     } catch (_) {}
     try {
       _cooldownController.close();
+    } catch (_) {}
+    try {
+      _otaStatusController.close();
+    } catch (_) {}
+    try {
+      _otaVersionStatusController.close();
     } catch (_) {}
   }
 }
