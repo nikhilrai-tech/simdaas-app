@@ -39,6 +39,13 @@ def main():
         sys.exit(1)
 
     webhook_url, tag, release_url, notes_path = sys.argv[1:5]
+    if not webhook_url:
+        # TEAMS_WEBHOOK_URL secret isn't set yet — skip quietly rather than
+        # gating this step on `if: secrets.X != ''` in the workflow, which
+        # GitHub Actions rejected as an invalid workflow file in testing.
+        print("TEAMS_WEBHOOK_URL not set — skipping Teams notification.")
+        return
+
     notes = open(notes_path, encoding="utf-8").read().strip()
     body_html = markdown_to_teams_html(notes)
 
