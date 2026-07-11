@@ -10,6 +10,8 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-11
+
 ### Added
 - **OTA Firmware Update** — new Firmware Update Workspace screen (RFC-004):
   version handshake (DB / S3-available / live-hardware version), WiFi
@@ -19,10 +21,16 @@ already written — see "Release process" at the bottom.
   device WebSocket connection.
   - Device Detail screen: new "Firmware Version" row with a "Check Update"
     button that appears when a newer version is available.
-  - Admin Dashboard: new "Alerts" tab listing critical OTA failures/rollbacks
-    across all devices.
-  - Dashboard app bar: new Admin Dashboard shortcut (shown only to Super
-    Admin accounts) — previously unreachable from the real login flow.
+- **Admin Dashboard** — was previously unreachable from the real login flow;
+  now surfaced via a shortcut in the main dashboard's app bar (Super Admin
+  accounts only).
+  - New "Alerts" tab listing critical OTA failures/rollbacks across all
+    devices.
+  - New "All Users" screen — directory of every registered user (Super
+    Admin only).
+- **CHANGELOG.md** introduced to track release notes going forward, plus an
+  automated release pipeline (see Release process below) that builds the
+  APK, publishes a GitHub Release, and posts to the team's Teams channel.
 
 ### Fixed
 - Firmware "Live Hardware Version" check no longer spins forever if the
@@ -43,15 +51,23 @@ _See git history._
 
 ---
 
-## Release process
+## Release process (automated)
+
+A push of a `v*.*.*` tag triggers `.github/workflows/release.yml`, which:
+builds the release APK, extracts this file's section for that version,
+creates a GitHub Release with the APK attached and that section as the
+release notes, and (once `TEAMS_WEBHOOK_URL` is configured as a repo
+secret — see the workflow file for setup instructions) posts the same
+notes + a download link to the team's Teams channel.
+
+To cut a release:
 
 1. Decide the next version (semver-ish: `MAJOR.MINOR.PATCH+BUILD`).
 2. Move the `[Unreleased]` section's contents under a new `## [X.Y.Z] - YYYY-MM-DD`
-   heading; leave `[Unreleased]` empty (or delete it) above.
-3. Bump `version:` in `pubspec.yaml` to match.
-4. Build the release APK (`flutter build apk --release`).
-5. Tag the commit: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-6. Attach this version's CHANGELOG section as the release notes wherever the
-   APK is distributed (GitHub Release description, Firebase App Distribution
-   release notes, etc.) — the APK and its changelog entry should always ship
-   together.
+   heading; leave `[Unreleased]` empty above.
+3. Bump `version:` in `pubspec.yaml` to match (the `X.Y.Z` part; bump the
+   `+BUILD` too).
+4. Commit, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
+   (and to `neworigin` if that remote is in use).
+5. Watch the Actions tab — the release (APK + notes) appears automatically
+   once the workflow finishes.
