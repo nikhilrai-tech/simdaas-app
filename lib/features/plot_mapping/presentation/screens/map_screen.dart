@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
@@ -41,6 +42,11 @@ class MapScreen extends ConsumerStatefulWidget {
 
 class _MapScreenState extends ConsumerState<MapScreen> {
   final MapController _mapController = MapController();
+  bool _locatingDevice = false;
+  // Latest fix from MapLayers' own live MyLocationLayer stream. Reused by
+  // the "center on me" button instead of starting a second, competing
+  // GPS request (see _centerOnCurrentLocation).
+  LatLng? _liveStreamPosition;
   Offset? _lastPointerPosition;
   final TextEditingController _searchCtrl = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
@@ -429,12 +435,53 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   }
 
   Future<void> _centerOnCurrentLocation() async {
+    if (_locatingDevice) return;
+
+    // Prefer the fix already flowing in from MapLayers' own MyLocationLayer
+    // stream -- no new GPS request needed, so there's nothing to hang or
+    // contend with. This is also why it's instant after the first fix.
+    final live = _liveStreamPosition;
+    if (live != null) {
+      _mapController.move(live, 18.0);
+      return;
+    }
+
+    // Stream hasn't emitted anything yet (just opened the screen / no
+    // permission yet) -- fall back to a one-off request to get the map
+    // moving for the first time only.
+    setState(() => _locatingDevice = true);
+    final service = LocationService();
+    bool movedOnce = false;
     try {
-      final loc = await LocationService().getCurrentLocation();
-      _mapController.move(loc, 18.0);
-    } catch (e) {
+      final lastKnown = await service.getLastKnownLocation();
+      if (lastKnown != null && mounted) {
+        _mapController.move(lastKnown, 18.0);
+        movedOnce = true;
+      }
+    } catch (_) {
+      // Best-effort only; the fresh fix below is the source of truth.
+    }
+
+    try {
+      // The geolocator plugin's own `timeLimit` doesn't reliably fire on
+      // every Android device/version (observed: request hangs forever on
+      // some devices instead of throwing TimeoutException). This outer
+      // timeout guarantees the spinner stops regardless of plugin behavior.
+      final loc = await service
+          .getCurrentLocation()
+          .timeout(const Duration(seconds: 15));
       if (mounted) {
+        _mapController.move(loc, 18.0);
+      }
+    } catch (e) {
+      // If we already moved to a last-known fix, a failed fresh fix isn't
+      // worth surfacing as an error -- the map is already roughly correct.
+      if (mounted && !movedOnce) {
         showPolishedError(context, e, fallback: 'Location error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _locatingDevice = false);
       }
     }
   }
@@ -531,6 +578,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             minZoom: widget.minZoom,
             maxZoom: widget.maxZoom,
             onTap: _onTapTap,
+            onMyLocation: (pos) => _liveStreamPosition = pos,
             onMarkerPointerDown: (i, event) {
               final mapNotifier = ref.read(mapStateProvider.notifier);
               mapNotifier.selectVertex(i);
@@ -761,8 +809,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: 'locate_device',
-            onPressed: _centerOnCurrentLocation,
-            child: const Icon(Icons.my_location),
+            onPressed: _locatingDevice ? null : _centerOnCurrentLocation,
+            child: _locatingDevice
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.my_location),
           ),
         ],
       ),

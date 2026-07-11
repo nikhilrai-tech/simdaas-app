@@ -26,12 +26,26 @@ class TempDashboard extends ConsumerWidget {
     final userId = ref.read(authServiceProvider).currentUserId ?? '';
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
     final activeDevices = ref.watch(activeDevicesProvider).asData?.value ?? [];
+    // Admin Dashboard (Plots/Jobs/Operators/Equipments/Reports/Alerts) was
+    // previously only reachable via /role_select, which nothing in the real
+    // login flow ever navigates to — Super Admins had no way to actually
+    // reach it. Surface it here instead, gated on the login response's
+    // is_superadmin flag (same authorization the backend's
+    // /api/admin/firmware-alerts/ endpoint already enforces).
+    final isSuperAdmin =
+        ref.read(authServiceProvider).currentUserMap?['is_superadmin'] == true;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),
         elevation: 0,
         actions: [
+          if (isSuperAdmin)
+            IconButton(
+              tooltip: 'Admin Dashboard',
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              onPressed: () => Navigator.of(context).pushNamed('/admin_dashboard'),
+            ),
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),

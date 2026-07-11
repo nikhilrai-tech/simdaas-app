@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Simdaas needs your location to show your position on the field map and center the map on you.</string>
 </dict>
 </plist>

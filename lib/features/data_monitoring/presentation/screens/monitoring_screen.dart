@@ -5,7 +5,6 @@ import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:simdaas/core/widgets/my_location_layer.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
@@ -649,7 +648,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                     urlTemplate:
                         'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                     subdomains: const ['a', 'b', 'c']),
-                const MyLocationLayer(),
                 if (plot.polygon.isNotEmpty)
                   PolygonLayer(polygons: [
                     Polygon(

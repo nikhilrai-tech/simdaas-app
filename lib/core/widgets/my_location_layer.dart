@@ -10,7 +10,14 @@ import 'package:latlong2/latlong.dart';
 /// explicit "center on me" actions on each screen surface a proper error
 /// via [LocationService] separately, this layer is just the passive dot.
 class MyLocationLayer extends StatefulWidget {
-  const MyLocationLayer({super.key});
+  /// Called with every position emitted by this layer's own GPS stream, so
+  /// callers (e.g. a "center on me" button) can reuse the live fix instead
+  /// of starting a second, competing one-shot location request -- running
+  /// two concurrent location requests on the same screen has been observed
+  /// to make Android starve one of them indefinitely on some OEM devices.
+  final void Function(LatLng position)? onPosition;
+
+  const MyLocationLayer({super.key, this.onPosition});
 
   @override
   State<MyLocationLayer> createState() => _MyLocationLayerState();
@@ -44,8 +51,10 @@ class _MyLocationLayerState extends State<MyLocationLayer> {
           distanceFilter: 2,
         ),
       ).listen((pos) {
+        final latLng = LatLng(pos.latitude, pos.longitude);
+        widget.onPosition?.call(latLng);
         if (mounted) {
-          setState(() => _position = LatLng(pos.latitude, pos.longitude));
+          setState(() => _position = latLng);
         }
       });
     } catch (_) {
