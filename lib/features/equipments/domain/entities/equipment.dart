@@ -28,6 +28,9 @@ class EquipmentEntity {
   final String? linkedTractorId;
   final String? linkedPlotId;
   final int? activeSessionId;
+  // OTA firmware update (RFC-004) — control-unit only
+  final String? firmwareVersion;
+  final String? firmwareAvailableVersion;
   final double? rightFrontOffset;
   final double? rightBackOffset;
   final double? leftFrontOffset;
@@ -61,6 +64,8 @@ class EquipmentEntity {
     this.linkedTractorId,
     this.linkedPlotId,
     this.activeSessionId,
+    this.firmwareVersion,
+    this.firmwareAvailableVersion,
     this.rightFrontOffset,
     this.rightBackOffset,
     this.leftFrontOffset,
@@ -117,6 +122,8 @@ class ControlUnitEntity extends EquipmentEntity {
     super.linkedPlotId,
     super.activeSessionId,
     super.lastSeenAt,
+    super.firmwareVersion,
+    super.firmwareAvailableVersion,
     super.lidarNozzleDistance,
     super.mountingHeight,
     super.ultrasonicDistance,
