@@ -51,15 +51,6 @@ jobs:
           body_path: release_notes.md
           files: krishi-spray-${{ steps.ver.outputs.tag }}.apk
 
-      # Skips cleanly if the secret isn't set yet — see "Teams setup" below.
-      - name: Notify Teams
-        if: ${{ secrets.TEAMS_WEBHOOK_URL != '' }}
-        env:
-          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-        run: |
-          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.tag }}"
-          python3 .github/scripts/notify_teams.py "$TEAMS_WEBHOOK_URL" "${{ steps.ver.outputs.tag }}" "$RELEASE_URL" release_notes.md
-
 # ---------------------------------------------------------------------------
 # Teams setup (one-time, done in the Teams UI — not in this file):
 #
