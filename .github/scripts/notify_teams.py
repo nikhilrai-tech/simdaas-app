@@ -1,33 +1,89 @@
 #!/usr/bin/env python3
-"""Post a release notification to a Teams channel via a "Post to a channel
-when a webhook request is received" Workflow (Teams > channel > ... >
-Workflows). That template's trigger expects a JSON body shaped
-{"text": "<html>"} and posts `text` as the message.
+"""Post a release notification to a Teams channel via the "Send webhook
+alerts to a channel" Workflow (Teams > channel > ... > Workflows).
+
+That template's trigger expects a Teams "Adaptive Card via webhook" body
+shaped like:
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": { "$schema": ..., "type": "AdaptiveCard", "version": "1.4", "body": [...] }
+    }
+  ]
+}
+A plain {"text": "..."} body (the older, simpler Incoming Webhook /
+MessageCard shape) is NOT accepted by this trigger — confirmed via a
+failed run: the flow's "Attachments is null" check went down the branch
+that tries to post an (empty) card and got a Teams BadRequest.
 
 This only posts a *link* to the APK (GitHub Release asset), not the raw
 file — Teams webhooks/Workflows don't support arbitrary file uploads
-without a more involved Graph API / SharePoint flow. See
-docs in the release workflow for how to set the webhook URL up.
+without a more involved Graph API / SharePoint flow.
 
 Usage: notify_teams.py <webhook_url> <tag> <release_url> <notes_file>
 """
-import html
 import json
 import sys
 import urllib.request
 
 
-def markdown_to_teams_html(notes: str) -> str:
-    lines = []
+def changelog_to_card_body(notes: str) -> list:
+    """Turns a CHANGELOG.md section into Adaptive Card TextBlock elements."""
+    elements = []
     for line in notes.splitlines():
         stripped = line.strip()
+        if not stripped:
+            continue
         if stripped.startswith("### "):
-            lines.append(f"<b>{html.escape(stripped[4:])}</b>")
+            elements.append({
+                "type": "TextBlock",
+                "text": stripped[4:],
+                "weight": "Bolder",
+                "wrap": True,
+                "spacing": "Medium",
+            })
         elif stripped.startswith("- "):
-            lines.append(f"&nbsp;&nbsp;&bull; {html.escape(stripped[2:])}")
-        elif stripped:
-            lines.append(html.escape(stripped))
-    return "<br>".join(lines)
+            elements.append({
+                "type": "TextBlock",
+                "text": f"• {stripped[2:]}",
+                "wrap": True,
+            })
+        else:
+            elements.append({"type": "TextBlock", "text": stripped, "wrap": True})
+    return elements
+
+
+def build_payload(tag: str, notes: str, release_url: str) -> dict:
+    card = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": [
+            {
+                "type": "TextBlock",
+                "text": f"Krishi Spray {tag} released",
+                "weight": "Bolder",
+                "size": "Medium",
+                "wrap": True,
+            },
+            *changelog_to_card_body(notes),
+        ],
+        "actions": [
+            {
+                "type": "Action.OpenUrl",
+                "title": "View release & download APK",
+                "url": release_url,
+            }
+        ],
+    }
+    return {
+        "type": "message",
+        "attachments": [
+            {"contentType": "application/vnd.microsoft.card.adaptive", "content": card}
+        ],
+    }
 
 
 def main():
@@ -47,14 +103,8 @@ def main():
         return
 
     notes = open(notes_path, encoding="utf-8").read().strip()
-    body_html = markdown_to_teams_html(notes)
+    payload = json.dumps(build_payload(tag, notes, release_url)).encode("utf-8")
 
-    text = (
-        f"<b>Krishi Spray {html.escape(tag)} released</b><br>{body_html}"
-        f'<br><br><a href="{release_url}">View release &amp; download APK</a>'
-    )
-
-    payload = json.dumps({"text": text}).encode("utf-8")
     req = urllib.request.Request(
         webhook_url, data=payload, headers={"Content-Type": "application/json"}
     )
