@@ -10,6 +10,14 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-24
+
+### Changed
+- Report Details screen's "Chemical Saved" card now shows a real,
+  backend-computed percentage instead of a hardcoded `40%`. Calculated as
+  the share of potential spray distance (both solenoids, while PTO was on)
+  where a solenoid was off — i.e. spraying was skipped.
+
 ## [1.0.0] - 2026-07-11
 
 ### Added

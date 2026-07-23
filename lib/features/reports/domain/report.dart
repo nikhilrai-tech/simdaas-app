@@ -15,6 +15,7 @@ class Report {
   final double areaCoveredSqm;
   final double plotAreaSqm;
   final double completionPercentage;
+  final double chemicalSavedPercentage;
   final String? controlUnitId;
   final String? controlUnitName;
   final String? linkedSprayerName;
@@ -49,6 +50,7 @@ class Report {
     required this.areaCoveredSqm,
     required this.plotAreaSqm,
     required this.completionPercentage,
+    this.chemicalSavedPercentage = 0.0,
     this.controlUnitId,
     this.controlUnitName,
     this.linkedSprayerName,

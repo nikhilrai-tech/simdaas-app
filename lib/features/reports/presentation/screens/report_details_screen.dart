@@ -121,9 +121,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '40%',
-                        style: TextStyle(
+                      Text(
+                        '${report.chemicalSavedPercentage.toStringAsFixed(0)}%',
+                        style: const TextStyle(
                           fontSize: 36,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
