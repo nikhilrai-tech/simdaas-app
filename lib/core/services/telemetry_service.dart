@@ -8,6 +8,8 @@ import 'ws_channel_stub.dart'
     if (dart.library.html) 'ws_channel_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/mac_utils.dart';
+import 'api_service.dart';
+import 'auth_service.dart' show apiServiceProvider;
 
 /// Possible device lifecycle states driven by backend WebSocket events.
 enum DeviceLifecycleStatus {
@@ -304,11 +306,18 @@ class TelemetryData {
 }
 
 class TelemetryService {
-  TelemetryService({required this.baseUrl}) {
+  TelemetryService({required this.baseUrl, ApiService? apiService})
+      : _apiService = apiService {
     _startPruner();
   }
 
   final String baseUrl;
+
+  // Used only by [reconcileCooldownState] to fetch backend truth as a
+  // fallback when a WebSocket status_change/report_ready event is missed.
+  // Nullable so existing callers/tests that construct TelemetryService
+  // without an ApiService keep working unchanged (reconcile just no-ops).
+  final ApiService? _apiService;
 
   // Map deviceId -> last telemetry
   final Map<String, TelemetryData> _latest = {};
@@ -795,6 +804,83 @@ class TelemetryService {
     _cooldownController.add(normalized);
   }
 
+  /// Reconcile the cached [CooldownState] for [rawMac] against the backend's
+  /// live Redis state (`GET /jobs/api/devices/<mac>/status/`).
+  ///
+  /// The cooldown badge/timer is normally driven purely by pushed WebSocket
+  /// events (`status_change`, `report_ready`). Pub/sub delivery is
+  /// fire-and-forget — if the app is backgrounded or the socket drops for a
+  /// few seconds at the exact moment one of those events fires, it's gone
+  /// for good and the cached state is stuck showing a stale cooldown
+  /// forever (seen in production: badge frozen on "Cooldown" with a dead
+  /// timer, while a brand new session was already active in the DB).
+  ///
+  /// Call this whenever a screen that shows device status mounts/resumes.
+  /// It only *corrects* an out-of-date cache — it never fights a WS event
+  /// that already agrees, and any failure (offline, 404, auth) is swallowed
+  /// silently so a flaky network never disrupts the live WS-driven UI this
+  /// sits alongside.
+  Future<void> reconcileCooldownState(String rawMac) async {
+    final api = _apiService;
+    if (api == null || rawMac.trim().isEmpty) return;
+    final norm = canonicalizeMac(rawMac);
+
+    try {
+      final path = '/jobs/api/devices/${Uri.encodeComponent(rawMac)}/status/';
+      final data = await api.getJson(path);
+      if (data is! Map) return;
+
+      final statusStr = data['status']?.toString() ?? 'offline';
+      final DeviceLifecycleStatus backendStatus;
+      switch (statusStr) {
+        case 'online':
+          backendStatus = DeviceLifecycleStatus.online;
+          break;
+        case 'offline_pending_report':
+          backendStatus = DeviceLifecycleStatus.cooldown;
+          break;
+        default:
+          backendStatus = DeviceLifecycleStatus.offline;
+      }
+
+      DateTime? cooldownEnd;
+      final endTs = data['cooldown_end_ts'];
+      if (endTs != null) {
+        final asNum =
+            endTs is num ? endTs.toDouble() : double.tryParse(endTs.toString());
+        if (asNum != null && asNum > 0) {
+          final ms = asNum > 1e12 ? asNum.toInt() : (asNum * 1000).toInt();
+          cooldownEnd = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+        }
+      }
+
+      final cached = _cooldownStates[norm];
+      // Cache already agrees with the backend — nothing to correct, and
+      // skipping avoids a redundant stream event on every screen mount.
+      if (cached != null &&
+          cached.status == backendStatus &&
+          cached.cooldownEnd == cooldownEnd) {
+        return;
+      }
+
+      final reconciled = CooldownState(
+        deviceId: rawMac,
+        status: backendStatus,
+        cooldownEnd: cooldownEnd,
+        cooldownType: data['cooldown_type']?.toString(),
+        sessionId: data['session_id'] is int
+            ? data['session_id'] as int
+            : int.tryParse(data['session_id']?.toString() ?? ''),
+      );
+      _cooldownStates[norm] = reconciled;
+      _cooldownController.add(reconciled);
+      debugPrint(
+          'Telemetry: reconciled $norm from status endpoint (was ${cached?.status}) → $backendStatus');
+    } catch (e) {
+      debugPrint('Telemetry: reconcileCooldownState failed for $rawMac: $e');
+    }
+  }
+
   /// Manually clear the cached telemetry for a device.
   void clearCache(String deviceId) {
     final norm = canonicalizeMac(deviceId);
@@ -927,7 +1013,10 @@ class _LatLonEntry {
 
 final telemetryServiceProvider = Provider<TelemetryService>((ref) {
   // Use provided base URL; default to ws://13.201.0.34:8001
-  final svc = TelemetryService(baseUrl: 'ws://3.108.218.140:8001');
+  final svc = TelemetryService(
+    baseUrl: 'ws://3.108.218.140:8001',
+    apiService: ref.watch(apiServiceProvider),
+  );
   ref.onDispose(() => svc.dispose());
   return svc;
 });

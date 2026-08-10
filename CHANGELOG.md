@@ -10,6 +10,19 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-06
+
+### Fixed
+- GPS coverage heatmap on the live Monitoring screen no longer gets stuck
+  showing orange (PTO off) at a sub-band once the sprayer returns to that
+  spot with PTO back on — the band now always reflects the most recently
+  recorded PTO state instead of only the first pass ever recorded there.
+- Device status (Active Devices list and Monitoring screen) no longer gets
+  stuck showing a "Cooldown" badge with a dead timer if a status WebSocket
+  update is missed — the app now resyncs every device's status against the
+  backend on app start, login, and network reconnect, so a missed event
+  self-corrects instead of leaving the badge stuck indefinitely.
+
 ## [1.1.0] - 2026-07-24
 
 ### Changed

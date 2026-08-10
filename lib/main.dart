@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -214,6 +215,7 @@ class TelemetryBootstrapper extends ConsumerWidget {
             }
             final svc = ref.read(telemetryServiceProvider);
             svc.subscribeToDevices(ids);
+            _reconcileAll(svc, ids);
           },
           loading: () {
             debugPrint(
@@ -276,9 +278,28 @@ class TelemetryBootstrapper extends ConsumerWidget {
       }
       debugPrint('TelemetryBootstrapper: subscribing to devices: $ids');
       svc.subscribeToDevices(ids);
+      _reconcileAll(svc, ids);
     } catch (e, st) {
       debugPrint('TelemetryBootstrapper: failed fetching control units: $e');
       debugPrint('TelemetryBootstrapper stack: ${safeStringify(st)}');
+    }
+  }
+
+  /// Correct every device's cached cooldown state against the backend's
+  /// live Redis status. Runs whenever devices are (re-)subscribed: app
+  /// start, login, control-unit list changes, and connectivity restore.
+  ///
+  /// This is the single place that guards every screen sharing
+  /// [TelemetryService]'s cache (Active Devices list, Monitoring screen,
+  /// etc.) against a missed status_change/report_ready WebSocket event —
+  /// without it, a device can be stuck showing a stale "Cooldown" badge
+  /// with a dead timer indefinitely, on every screen, even though the
+  /// backend already resolved it (observed in production for akshat_1).
+  /// Fire-and-forget: reconcileCooldownState never throws and each call
+  /// is independent, so one device's failed lookup can't block the rest.
+  static void _reconcileAll(TelemetryService svc, List<String> ids) {
+    for (final id in ids) {
+      unawaited(svc.reconcileCooldownState(id));
     }
   }
 }

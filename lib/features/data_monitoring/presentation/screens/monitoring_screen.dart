@@ -94,6 +94,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         debugPrint('stack: $st');
       }
 
+      // Correct the cached cooldown state against the backend's live Redis
+      // status, in case a status_change/report_ready WebSocket event was
+      // missed while this screen wasn't mounted (app backgrounded, socket
+      // drop, etc). Fire-and-forget: never blocks initState, and any
+      // failure is swallowed inside reconcileCooldownState itself.
+      unawaited(svc.reconcileCooldownState(widget.deviceId!));
+
       // Seed positions and latest telemetry from the service snapshot if available.
       try {
         positions = svc.getPositions(normId);

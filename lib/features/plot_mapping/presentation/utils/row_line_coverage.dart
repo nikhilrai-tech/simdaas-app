@@ -179,11 +179,11 @@ class RowLineCoverage {
             accumulated[s] += pt.flowRate ?? 0.0;
             accumulatedCount[s]++;
           } else {
-            // First-write wins for GPS/Speed heatmaps — a re-pass over the
-            // same sub-band (e.g. after a waiting-period gap) must NOT
-            // change the colour that was already recorded on the first
-            // pass. Only the Spray heatmap accumulates on re-pass.
-            latestColor[s] ??= color;
+            // Latest-write wins for GPS/Speed heatmaps — a re-pass over the
+            // same sub-band must reflect the sprayer's current state there
+            // (e.g. PTO turned back on after being off). Only the Spray
+            // heatmap accumulates on re-pass.
+            latestColor[s] = color;
           }
         }
 
@@ -214,9 +214,8 @@ class RowLineCoverage {
           bandColor = HeatmapColorUtils.getColorForSpray(totalFlow);
           alpha = 200;
         } else {
-          // GPS / Speed heatmaps never override on re-pass — always show
-          // the colour recorded on the first visit, regardless of how many
-          // times the sprayer has driven over this sub-band since.
+          // GPS / Speed heatmaps show the most recent state recorded for
+          // this sub-band (updated on every re-pass).
           final c = latestColor[i];
           if (c == null) continue;
           bandColor = c;
