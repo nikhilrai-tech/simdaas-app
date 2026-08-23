@@ -33,6 +33,7 @@ class ReportModel extends Report {
     super.startedAt,
     super.endedAt,
     super.trajectory = const [],
+    super.gpsUnavailableNote,
   });
 
   factory ReportModel.fromJson(Map<String, dynamic> json) {
@@ -106,6 +107,7 @@ class ReportModel extends Report {
                   ))
               .toList() ??
           [],
+      gpsUnavailableNote: json['gps_unavailable_note']?.toString(),
     );
   }
 

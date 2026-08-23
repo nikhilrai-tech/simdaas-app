@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -43,10 +41,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     final avgSpeed = report.avgSpeedKmph;
     final maxSpeed = report.maxSpeedKmph;
     final areaCoveredAcres = report.areaCoveredSqm / 4046.86;
-    // spray used = final - initial (accumulated flow meter, session delta)
-    final initialTank = report.initialTankLevel ?? 0.0;
-    final finalTank = report.finalTankLevel ?? 0.0;
-    final sprayLitres = (finalTank - initialTank).clamp(0.0, double.infinity);
+    // Same source as the "Applied" stat on the reports list (backend prefers
+    // the flow-sensor total over the tank-level delta) — recomputing from
+    // initial/final tank level here would drift from that value and show a
+    // different number for the same report.
+    final sprayLitres = report.sprayUsedLitres;
     // Use backend-computed flow rates directly (tank_spray_used / pto_min and / area_acres)
     final avgFlowRateLperMin = report.avgFlowRateLpm;
     final avgFlowRatePerAcre = report.avgFlowRateLacre;
@@ -141,6 +140,34 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             ),
 
             const SizedBox(height: 24),
+
+            if (report.gpsUnavailableNote != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.amber.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        report.gpsUnavailableNote!,
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.amber.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // ── Performance Overview ──────────────────────────────────────
             _sectionHeader('Performance Overview'),
@@ -693,39 +720,25 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
-    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
-      if (!isInPlot) {
-        prev = p;
-        continue;
-      }
-      // The backend records GPS points only every ~10 s when the device is
-      // stationary and spraying (time-based fallback). Scale the flow
-      // contribution by the time delta so the heatmap accumulates the same
-      // intensity as the live monitoring screen (which sees every 1-second
-      // telemetry packet).
-      double effectiveFlow = p.flowRateLpm;
-      if (prev != null && p.flowRateLpm > 0) {
-        final dist = _gpsDistanceMeters(prev.lat, prev.lon, p.lat, p.lon);
-        if (dist < 3.0) {
-          final secs = p.timestamp.difference(prev.timestamp).inSeconds;
-          if (secs > 1) effectiveFlow = p.flowRateLpm * secs.toDouble();
-        }
-      }
+      if (!isInPlot) continue;
+      // The backend now records a GPS point on every telemetry packet while
+      // spraying (see session_service.py's should_record), so trajectory is
+      // as dense as what the live Monitoring screen draws from — no need to
+      // scale the flow value to compensate for sparse sampling anymore.
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
         ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
-        flowRate: effectiveFlow,
+        flowRate: p.flowRateLpm,
       ));
-      prev = p;
     }
     return result;
   }
@@ -829,16 +842,6 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     }
     return LatLng(sumLat / points.length, sumLng / points.length);
   }
-}
-
-double _gpsDistanceMeters(
-    double lat1, double lon1, double lat2, double lon2) {
-  const mPerDeg = 111320.0;
-  final cosLat =
-      math.cos((lat1 + lat2) / 2.0 * math.pi / 180.0);
-  final dLat = (lat2 - lat1) * mPerDeg;
-  final dLon = (lon2 - lon1) * mPerDeg * cosLat;
-  return math.sqrt(dLat * dLat + dLon * dLon);
 }
 
 // ── Full-screen map page ────────────────────────────────────────────────────
@@ -1083,39 +1086,25 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
-    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
-      if (!isInPlot) {
-        prev = p;
-        continue;
-      }
-      // The backend records GPS points only every ~10 s when the device is
-      // stationary and spraying (time-based fallback). Scale the flow
-      // contribution by the time delta so the heatmap accumulates the same
-      // intensity as the live monitoring screen (which sees every 1-second
-      // telemetry packet).
-      double effectiveFlow = p.flowRateLpm;
-      if (prev != null && p.flowRateLpm > 0) {
-        final dist = _gpsDistanceMeters(prev.lat, prev.lon, p.lat, p.lon);
-        if (dist < 3.0) {
-          final secs = p.timestamp.difference(prev.timestamp).inSeconds;
-          if (secs > 1) effectiveFlow = p.flowRateLpm * secs.toDouble();
-        }
-      }
+      if (!isInPlot) continue;
+      // The backend now records a GPS point on every telemetry packet while
+      // spraying (see session_service.py's should_record), so trajectory is
+      // as dense as what the live Monitoring screen draws from — no need to
+      // scale the flow value to compensate for sparse sampling anymore.
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
         ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
-        flowRate: effectiveFlow,
+        flowRate: p.flowRateLpm,
       ));
-      prev = p;
     }
     return result;
   }

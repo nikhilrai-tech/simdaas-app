@@ -34,6 +34,10 @@ class Report {
   final DateTime? startedAt;
   final DateTime? endedAt;
   final List<GPSPointData> trajectory;
+  // Set by the backend when the session never got a real GPS fix (device
+  // sent lat=lon=0.0 throughout) — distanceTravelledKm/areaCoveredSqm are
+  // 0 because there was no usable position data, not because nothing happened.
+  final String? gpsUnavailableNote;
 
   const Report({
     this.plotId,
@@ -66,6 +70,7 @@ class Report {
     this.startedAt,
     this.endedAt,
     this.trajectory = const [],
+    this.gpsUnavailableNote,
   });
 }
 
