@@ -235,12 +235,12 @@ class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text('Plot Name *'),
-                      const SizedBox(height: 6),
                       TextFormField(
                           controller: widget.nameCtrl,
                           decoration: InputDecoration(
-                              hintText: 'Plot Name', errorText: _nameError),
+                              labelText: 'Plot Name',
+                              hintText: 'Plot Name',
+                              errorText: _nameError),
                           onChanged: (_) {
                             if (_nameError != null) setState(() => _nameError = null);
                           },
@@ -248,28 +248,23 @@ class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
                               ? 'Enter plot name'
                               : null),
                       const SizedBox(height: 8),
-                      const Text('Pin / Zip Code'),
-                      const SizedBox(height: 6),
                       TextFormField(
                           controller: widget.zipCtrl,
-                          decoration: const InputDecoration(hintText: 'Pin / Zip Code')),
+                          decoration: const InputDecoration(
+                              labelText: 'Pin / Zip Code',
+                              hintText: 'Pin / Zip Code')),
                       const SizedBox(height: 8),
                       Row(children: [
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Text('Bed Height *'),
-                              const SizedBox(height: 6),
-                              TextFormField(
-                                  controller: widget.bedHeightCtrl,
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(hintText: 'Bed Height'),
-                                  validator: (v) => (v == null || v.trim().isEmpty)
-                                      ? 'Enter bed height'
-                                      : null),
-                            ],
-                          ),
+                          child: TextFormField(
+                              controller: widget.bedHeightCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: const InputDecoration(
+                                  labelText: 'Bed Height',
+                                  hintText: 'Bed Height'),
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Enter bed height'
+                                  : null),
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
@@ -289,20 +284,15 @@ class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
                       const SizedBox(height: 8),
                       Row(children: [
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Text('Approx Area *'),
-                              const SizedBox(height: 6),
-                              TextFormField(
-                                  controller: widget.areaCtrl,
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(hintText: 'Approx Area'),
-                                  validator: (v) => (v == null || v.trim().isEmpty)
-                                      ? 'Enter approx area'
-                                      : null),
-                            ],
-                          ),
+                          child: TextFormField(
+                              controller: widget.areaCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: const InputDecoration(
+                                  labelText: 'Approx Area',
+                                  hintText: 'Approx Area'),
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Enter approx area'
+                                  : null),
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
@@ -321,20 +311,15 @@ class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
                       const SizedBox(height: 8),
                       Row(children: [
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Text('Row Spacing *'),
-                              const SizedBox(height: 6),
-                              TextFormField(
-                                  controller: widget.rowSpacingCtrl,
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(hintText: 'Row Spacing'),
-                                  validator: (v) => (v == null || v.trim().isEmpty)
-                                      ? 'Enter row spacing'
-                                      : null),
-                            ],
-                          ),
+                          child: TextFormField(
+                              controller: widget.rowSpacingCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              decoration: const InputDecoration(
+                                  labelText: 'Row Spacing',
+                                  hintText: 'Row Spacing'),
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Enter row spacing'
+                                  : null),
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
@@ -352,18 +337,18 @@ class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
                         )
                       ]),
                       const SizedBox(height: 8),
-                      const Text('Obstacles (notes)'),
-                      const SizedBox(height: 6),
                       TextFormField(
                           controller: widget.obstaclesCtrl,
-                          decoration: const InputDecoration(hintText: 'Obstacles (notes)')),
+                          decoration: const InputDecoration(
+                              labelText: 'Obstacles (notes)',
+                              hintText: 'Obstacles (notes)')),
                       const SizedBox(height: 8),
-                      const Text('Total Trees'),
-                      const SizedBox(height: 6),
                       TextFormField(
                           controller: widget.treeCountCtrl,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(hintText: 'Total Trees')),
+                          decoration: const InputDecoration(
+                              labelText: 'Total Trees',
+                              hintText: 'Total Trees')),
                     ],
                   ),
                 ),

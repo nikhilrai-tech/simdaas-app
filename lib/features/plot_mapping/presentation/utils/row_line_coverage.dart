@@ -16,7 +16,7 @@ import 'row_line_generator.dart';
 ///    is split into ~2 m sub-bands along its length. A sub-band is colored when
 ///    the sprayer GPS track passes through it. Revisited sub-bands go darker.
 ///
-/// 2. **Row lines** — plain yellow polylines drawn on top of the bands.
+/// 2. **Row lines** — plain white polylines drawn on top of the bands.
 ///    These never change color; they are the tree row reference lines.
 ///
 /// Color scheme (single corridor = space between two tree rows):
@@ -247,16 +247,16 @@ class RowLineCoverage {
     return bands;
   }
 
-  /// Build the planned row line polylines (always yellow — tree rows).
+  /// Build the planned row line polylines (tree rows).
   static List<Polyline> buildRowLines({
     required List<List<LatLng>> rowLines,
-    double strokeWidth = 2.5,
+    double strokeWidth = 2.0,
   }) {
     return rowLines
         .where((seg) => seg.length >= 2)
         .map((seg) => Polyline(
               points: seg,
-              color: Colors.yellow.withAlpha(220),
+              color: Colors.white.withAlpha(200),
               strokeWidth: strokeWidth,
             ))
         .toList();

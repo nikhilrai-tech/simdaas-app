@@ -558,39 +558,54 @@ class _EquipmentDetailsScreenState
     final updateAvailable =
         availableVersion != null && availableVersion != dbVersion;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        children: [
-          Icon(Icons.memory_outlined, size: 18, color: muted),
-          const SizedBox(width: 10),
-          Text('Firmware Version  ', style: TextStyle(color: muted, fontSize: 13)),
-          Expanded(
-            child: Text(
-              dbVersion,
-              style: const TextStyle(fontWeight: FontWeight.w500),
-              textAlign: TextAlign.end,
-              overflow: TextOverflow.ellipsis,
+    final checkUpdateButton = OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: () {
+        final mac = displayedEquipment.macAddress;
+        if (mac == null || mac.isEmpty) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FirmwareUpdateWorkspaceScreen(
+              controlUnitId: displayedEquipment.id,
+              macAddress: mac,
+              deviceName: displayedEquipment.name,
             ),
           ),
+        );
+      },
+      child: const Text('Check Update'),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.memory_outlined, size: 18, color: muted),
+              const SizedBox(width: 10),
+              Text('Firmware Version  ', style: TextStyle(color: muted, fontSize: 13)),
+              Expanded(
+                child: Text(
+                  dbVersion,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
           if (updateAvailable) ...[
-            const SizedBox(width: 12),
-            OutlinedButton(
-              onPressed: () {
-                final mac = displayedEquipment.macAddress;
-                if (mac == null || mac.isEmpty) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FirmwareUpdateWorkspaceScreen(
-                      controlUnitId: displayedEquipment.id,
-                      macAddress: mac,
-                      deviceName: displayedEquipment.name,
-                    ),
-                  ),
-                );
-              },
-              child: const Text('Check Update'),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: checkUpdateButton,
             ),
           ],
         ],

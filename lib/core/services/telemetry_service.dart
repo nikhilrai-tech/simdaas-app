@@ -343,7 +343,8 @@ class TelemetryService {
   // Last time telemetry was received per device. Not cleared by the pruner —
   // only cleared when the session actually ends (status_change / report_ready)
   // or on unsubscribe/clearCache. Used to show a "waiting" countdown on the UI
-  // during the 10-minute backend idle window before session auto-timeout.
+  // during the backend idle window (sessionTimeoutMinutes) before session
+  // auto-timeout.
   final Map<String, DateTime> _lastSeenAt = {};
 
   // Last known job_completion_percent per device. Not cleared by the pruner so
@@ -351,8 +352,9 @@ class TelemetryService {
   // is temporarily offline (latestTelemetry is null). Cleared on session end.
   final Map<String, double> _lastKnownCoverage = {};
 
-  /// Idle minutes before the backend auto-ends a session (mirrors SESSION_TIMEOUT_MINUTES).
-  static const int sessionTimeoutMinutes = 10;
+  /// Idle minutes before the backend auto-ends a session
+  /// (mirrors jobs/session_service.py's WATCHDOG_TIMEOUT_MINUTES — keep in sync).
+  static const int sessionTimeoutMinutes = 60;
 
   // Broadcast stream that emits a CooldownState whenever any device's
   // lifecycle status changes (status_change or report_ready events).

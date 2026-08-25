@@ -179,7 +179,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                             children: [
                               _buildMiniStat(
                                   Icons.scatter_plot,
-                                  '${(r.areaCoveredSqm / 10000).toStringAsFixed(2)} ha',
+                                  '${(r.areaCoveredSqm / 4046.86).toStringAsFixed(2)} ac',
                                   'Area'),
                               _buildMiniStat(
                                   Icons.water_drop,

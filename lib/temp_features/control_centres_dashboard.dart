@@ -307,7 +307,7 @@ class _ControlUnitsListScreen extends ConsumerStatefulWidget {
 
 class _ControlUnitsListScreenState
     extends ConsumerState<_ControlUnitsListScreen> {
-  String _deviceFilter = 'all'; // 'all', 'active', 'inactive'
+  String _deviceFilter = 'all'; // 'all', 'online', 'waiting', 'cooldown'
 
   // NOTE: this screen does NOT manage telemetry subscriptions itself.
   // TelemetryBootstrapper at app root subscribes to every control unit owned
@@ -315,6 +315,29 @@ class _ControlUnitsListScreenState
   // here and unsubscribe in dispose(), navigating away from this screen
   // closes the WebSocket channels and breaks the dashboard's
   // `activeDevicesProvider` (it goes empty → "All Offline").
+
+  @override
+  void initState() {
+    super.initState();
+    // Cooldown/report badges are otherwise driven purely by WebSocket
+    // events. If a status_change/report_ready event was missed while this
+    // screen wasn't open (app backgrounded, socket drop), a device can be
+    // stuck showing "COOLDOWN"/"WAITING" forever even though its report
+    // already finished on the backend. Reconcile every row against the
+    // backend's live status on mount, same fire-and-forget correction the
+    // Monitoring screen already does — silently a no-op when the cache is
+    // already correct.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final svc = ref.read(telemetryServiceProvider);
+      for (final cu in widget.items) {
+        final deviceId = extractDeviceId(cu);
+        if (deviceId.isNotEmpty) {
+          unawaited(svc.reconcileCooldownState(deviceId));
+        }
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -364,7 +387,9 @@ class _ControlUnitsListScreenState
                       ),
                 ),
                 const SizedBox(height: 8),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     FilterChip(
                       label: const Text('All'),
@@ -373,24 +398,35 @@ class _ControlUnitsListScreenState
                           Theme.of(context).colorScheme.primary.withAlpha(50),
                       onSelected: (s) => setState(() => _deviceFilter = 'all'),
                     ),
-                    const SizedBox(width: 8),
                     FilterChip(
-                      label: const Text('Active'),
-                      avatar: _deviceFilter == 'active'
+                      label: const Text('Online'),
+                      avatar: _deviceFilter == 'online'
                           ? const Icon(Icons.check_circle, size: 16)
                           : null,
-                      selected: _deviceFilter == 'active',
+                      selected: _deviceFilter == 'online',
                       selectedColor: Colors.green.withAlpha(50),
                       onSelected: (s) =>
-                          setState(() => _deviceFilter = 'active'),
+                          setState(() => _deviceFilter = 'online'),
                     ),
-                    const SizedBox(width: 8),
                     FilterChip(
-                      label: const Text('Non-active'),
-                      selected: _deviceFilter == 'inactive',
-                      selectedColor: Colors.orange.withAlpha(50),
+                      label: const Text('Waiting'),
+                      avatar: _deviceFilter == 'waiting'
+                          ? const Icon(Icons.check_circle, size: 16)
+                          : null,
+                      selected: _deviceFilter == 'waiting',
+                      selectedColor: Colors.amber.withAlpha(50),
                       onSelected: (s) =>
-                          setState(() => _deviceFilter = 'inactive'),
+                          setState(() => _deviceFilter = 'waiting'),
+                    ),
+                    FilterChip(
+                      label: const Text('Cooldown'),
+                      avatar: _deviceFilter == 'cooldown'
+                          ? const Icon(Icons.check_circle, size: 16)
+                          : null,
+                      selected: _deviceFilter == 'cooldown',
+                      selectedColor: Colors.blue.withAlpha(50),
+                      onSelected: (s) =>
+                          setState(() => _deviceFilter = 'cooldown'),
                     ),
                   ],
                 ),
@@ -399,18 +435,18 @@ class _ControlUnitsListScreenState
           ),
           Expanded(
             child: activeAsync.when(
-              data: (activeList) {
-                final activeKeys = activeList
-                    .map((t) => canonicalizeMac(t.deviceId))
-                    .toSet();
-
-                 final filteredItems = widget.items.where((cu) {
-                  final deviceId = extractDeviceId(cu);
-                  final isActive = deviceId.isNotEmpty &&
-                      activeKeys.contains(canonicalizeMac(deviceId));
-                  
-                  if (_deviceFilter == 'active' && !isActive) return false;
-                  if (_deviceFilter == 'inactive' && isActive) return false;
+              data: (_) {
+                final filteredItems = widget.items.where((cu) {
+                  if (_deviceFilter == 'all') return true;
+                  final kind = computeDeviceStatus(ref, cu).kind;
+                  switch (_deviceFilter) {
+                    case 'online':
+                      return kind == DeviceStatusKind.online;
+                    case 'waiting':
+                      return kind == DeviceStatusKind.waiting;
+                    case 'cooldown':
+                      return kind == DeviceStatusKind.cooldown;
+                  }
                   return true;
                 }).toList();
 
@@ -424,9 +460,6 @@ class _ControlUnitsListScreenState
                   separatorBuilder: (_, __) => const Divider(),
                   itemBuilder: (context, i) {
                     final cu = filteredItems[i];
-                    final deviceId = extractDeviceId(cu);
-                    final isInActiveList = deviceId.isNotEmpty &&
-                        activeKeys.contains(canonicalizeMac(deviceId));
                     final linkedPlotId = (cu.linkedPlotId ?? '').toString();
                     final linkedPlotName =
                         _extractPlotNameFromLinked(linkedPlotId, plotMap);
@@ -436,7 +469,6 @@ class _ControlUnitsListScreenState
                         : null;
                     return _DeviceListItem(
                       cu: cu,
-                      isInActiveList: isInActiveList,
                       linkedPlotName: linkedPlotName,
                       linkedSprayerName: linkedSprayerName,
                     );
@@ -674,18 +706,105 @@ class _ControlUnitsListScreenState
   // wifi/wifi_off icons and explicit colors.
 }
 
+/// Coarse device status used by both the filter chips and each list row,
+/// so the two never disagree about what "Waiting" / "Cooldown" mean.
+enum DeviceStatusKind { online, waiting, cooldown, offline }
+
+class DeviceStatusInfo {
+  final DeviceStatusKind kind;
+  final String label;
+  final Color color;
+  final bool isInCooldown;
+  final DateTime? lastSeenAt;
+  final CooldownState? cooldownState;
+
+  const DeviceStatusInfo({
+    required this.kind,
+    required this.label,
+    required this.color,
+    required this.isInCooldown,
+    this.lastSeenAt,
+    this.cooldownState,
+  });
+}
+
+/// Same status computation the Monitoring screen uses (online/waiting/
+/// cooldown/offline), shared here so the filter chips and each row always
+/// agree on a device's state.
+DeviceStatusInfo computeDeviceStatus(WidgetRef ref, dynamic cu) {
+  final deviceId = extractDeviceId(cu);
+  final lookupId = deviceId.isNotEmpty ? deviceId : '__none__';
+  final cooldownAsync = ref.watch(deviceCooldownStateProvider(lookupId));
+  final cooldownState = cooldownAsync.asData?.value;
+
+  final liveIsActive =
+      deviceId.isNotEmpty ? ref.watch(deviceOnlineProvider(deviceId)) : false;
+
+  final isInCooldown = cooldownState?.isInCooldown ?? false;
+  final isEffectivelyActive = liveIsActive &&
+      !isInCooldown &&
+      (cooldownState?.status != DeviceLifecycleStatus.offline);
+
+  DateTime? lastSeenAt;
+  if (deviceId.isNotEmpty) {
+    lastSeenAt = ref.read(telemetryServiceProvider).getLastSeenAt(deviceId);
+  }
+  lastSeenAt ??= (cu.lastSeenAt as DateTime?);
+
+  bool isWaiting = false;
+  if (!isEffectivelyActive &&
+      !isInCooldown &&
+      cooldownState?.status != DeviceLifecycleStatus.offline &&
+      lastSeenAt != null) {
+    final elapsed = DateTime.now().toUtc().difference(lastSeenAt).inMinutes;
+    isWaiting = elapsed < TelemetryService.sessionTimeoutMinutes;
+  }
+
+  if (isInCooldown) {
+    return DeviceStatusInfo(
+        kind: DeviceStatusKind.cooldown,
+        label: 'COOLDOWN',
+        color: Colors.blue,
+        isInCooldown: true,
+        lastSeenAt: lastSeenAt,
+        cooldownState: cooldownState);
+  } else if (isEffectivelyActive) {
+    return DeviceStatusInfo(
+        kind: DeviceStatusKind.online,
+        label: 'ONLINE',
+        color: Colors.green,
+        isInCooldown: false,
+        lastSeenAt: lastSeenAt,
+        cooldownState: cooldownState);
+  } else if (isWaiting) {
+    return DeviceStatusInfo(
+        kind: DeviceStatusKind.waiting,
+        label: 'WAITING',
+        color: Colors.amber,
+        isInCooldown: false,
+        lastSeenAt: lastSeenAt,
+        cooldownState: cooldownState);
+  } else {
+    return DeviceStatusInfo(
+        kind: DeviceStatusKind.offline,
+        label: 'OFFLINE',
+        color: Colors.orange,
+        isInCooldown: false,
+        lastSeenAt: lastSeenAt,
+        cooldownState: cooldownState);
+  }
+}
+
 /// Single row in the Active Devices list.
 /// Watches the device's cooldown stream so the status dot and label
 /// update immediately when a session is ended (no screen reload needed).
 class _DeviceListItem extends ConsumerWidget {
   final dynamic cu;
-  final bool isInActiveList;
   final String? linkedPlotName;
   final String? linkedSprayerName;
 
   const _DeviceListItem({
     required this.cu,
-    required this.isInActiveList,
     this.linkedPlotName,
     this.linkedSprayerName,
   });
@@ -693,58 +812,14 @@ class _DeviceListItem extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final deviceId = extractDeviceId(cu);
-    final lookupId = deviceId.isNotEmpty ? deviceId : '__none__';
-    final cooldownAsync = ref.watch(deviceCooldownStateProvider(lookupId));
-    final cooldownState = cooldownAsync.asData?.value;
-
-    // Watch deviceOnlineProvider directly (same provider the Monitoring
-    // screen uses) instead of relying solely on the parent-computed
-    // isInActiveList snapshot. This guarantees this row reacts to the
-    // 60s active/stale transition at the exact same instant as the
-    // Monitoring screen, instead of waiting on the parent list's own
-    // rebuild/filter pass.
-    final liveIsActive = deviceId.isNotEmpty
-        ? ref.watch(deviceOnlineProvider(deviceId))
-        : isInActiveList;
-
-    final isInCooldown = cooldownState?.isInCooldown ?? false;
-    final isEffectivelyActive = liveIsActive && !isInCooldown &&
-        (cooldownState?.status != DeviceLifecycleStatus.offline);
-
-    // WAITING = device recently stopped sending (< 10 min ago) but session
-    // is not yet ended on the backend. Track remains visible in monitoring.
-    // Always prefer the in-memory last-seen (actual last MQTT receive time)
-    // over cu.lastSeenAt — the DB field gets updated when a new session is
-    // created on the backend, which would show the wrong "offline since" time.
-    DateTime? lastSeenAt;
-    if (deviceId.isNotEmpty) {
-      lastSeenAt = ref.read(telemetryServiceProvider).getLastSeenAt(deviceId);
-    }
-    lastSeenAt ??= (cu.lastSeenAt as DateTime?);
-
-    bool isWaiting = false;
-    if (!isEffectivelyActive && !isInCooldown &&
-        cooldownState?.status != DeviceLifecycleStatus.offline &&
-        lastSeenAt != null) {
-      final elapsed = DateTime.now().toUtc().difference(lastSeenAt).inMinutes;
-      isWaiting = elapsed < TelemetryService.sessionTimeoutMinutes;
-    }
-
-    final String statusText;
-    final Color statusColor;
-    if (isInCooldown) {
-      statusText = 'COOLDOWN';
-      statusColor = Colors.blue;
-    } else if (isEffectivelyActive) {
-      statusText = 'ONLINE';
-      statusColor = Colors.green;
-    } else if (isWaiting) {
-      statusText = 'WAITING';
-      statusColor = Colors.amber;
-    } else {
-      statusText = 'OFFLINE';
-      statusColor = Colors.orange;
-    }
+    final status = computeDeviceStatus(ref, cu);
+    final isInCooldown = status.isInCooldown;
+    final isEffectivelyActive = status.kind == DeviceStatusKind.online;
+    final isWaiting = status.kind == DeviceStatusKind.waiting;
+    final lastSeenAt = status.lastSeenAt;
+    final cooldownState = status.cooldownState;
+    final statusText = status.label;
+    final statusColor = status.color;
 
     final linkedPlotId = (cu.linkedPlotId ?? '').toString();
     final displayId = deviceId.isNotEmpty

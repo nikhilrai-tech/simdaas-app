@@ -65,6 +65,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   double? _lastSpeed;
   bool? _lastPtoOn;
 
+  // Backend-reported last-seen time for this device (from the control unit
+  // list), used as a fallback in _waitingSecondsRemaining() when this app
+  // session hasn't received a live telemetry packet yet — e.g. navigating
+  // straight into a device that was already in WAITING before this screen
+  // mounted. Without it, the WAITING countdown (and the "End active device"
+  // menu item, which is gated on it) never appears until a packet arrives.
+  DateTime? _backendLastSeenAt;
+
   // Set to true when the user manually ends the session on this screen.
   // Blocks incoming telemetry so the device cannot flicker back to "online"
   // before the cooldown event lands. Cleared automatically once the cooldown
@@ -286,9 +294,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       final cooldownDone = (_cooldownState?.secondsRemaining ?? 0) <= 0;
       final waitingSecsLeft = _waitingSecondsRemaining();
 
-      // Fallback: if the 10-min session timeout has expired and no report_ready
-      // WebSocket event was received (Celery Beat may be down or WS missed it),
-      // clear stale GPS track proactively so the UI doesn't keep showing old data.
+      // Fallback: if the session timeout (TelemetryService.sessionTimeoutMinutes)
+      // has expired and no report_ready WebSocket event was received (Celery
+      // Beat may be down or WS missed it), clear stale GPS track proactively
+      // so the UI doesn't keep showing old data.
       if (waitingSecsLeft == 0 &&
           _cooldownState == null &&
           positions.isNotEmpty) {
@@ -315,7 +324,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     if (_cooldownState?.status == DeviceLifecycleStatus.offline) return 0;
     final svc = ref.read(telemetryServiceProvider);
     final nid = canonicalizeMac(widget.deviceId!);
-    final lastSeen = svc.getLastSeenAt(nid);
+    // Prefer the in-memory last-seen (actual last MQTT receive time this
+    // app session observed); fall back to the backend-reported value when
+    // this screen hasn't seen a live packet yet (e.g. opened directly onto
+    // a device that was already waiting).
+    final lastSeen = svc.getLastSeenAt(nid) ?? _backendLastSeenAt;
     if (lastSeen == null) return 0;
     final elapsed = DateTime.now().toUtc().difference(lastSeen).inSeconds;
     final remaining = TelemetryService.sessionTimeoutMinutes * 60 - elapsed;
@@ -471,6 +484,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           if (candidate.isNotEmpty && canonicalizeMac(candidate) == normId) {
             resolvedControlUnitName = cu.name;
             resolvedActiveSessionId = cu.activeSessionId;
+            _backendLastSeenAt = cu.lastSeenAt;
             break;
           }
         }
@@ -531,7 +545,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(resolvedControlUnitName ?? 'Data Monitoring', style: const TextStyle(fontSize: 18)),
-                if (latestTelemetry != null &&
+                if (_cooldownState?.isInCooldown ?? false)
+                  Builder(builder: (_) {
+                    final cd = _cooldownState!;
+                    final label = cd.cooldownEnd != null
+                        ? '❄️ ${cd.countdownLabel}'
+                        : '❄️ COOLDOWN';
+                    return Text(
+                      label,
+                      style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 10, fontWeight: FontWeight.bold),
+                    );
+                  })
+                else if (latestTelemetry != null &&
                     DateTime.now().difference(latestTelemetry!.timestamp.toLocal()).inSeconds < 10)
                   const Text('● LIVE', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold))
                 else if (_waitingSecondsRemaining() > 0)
@@ -713,12 +738,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                             color: _markerColorForTelemetry(latestTelemetry!,
                               ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull))),
                   ]),
-                _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
-                    sprayersAsync.asData?.value, userId),
-                _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
-                    sprayersAsync.asData?.value, userId),
-                _buildSensorOverlay(controlUnitsAsync.asData?.value,
-                    sprayersAsync.asData?.value, userId),
               ],
             ),
             // Top-right map overlay for PTO and Auto/Manual indicators.
@@ -1038,11 +1057,41 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                 child: _buildCooldownBanner(_cooldownState!),
               ),
 
-            // ── Heatmap legend (below nozzle card, left side) ────────────
+            // ── Heatmap legend + active info card (left side, stacked) ───
+            // The info card (tank/spray/sensor) always renders directly
+            // below the legend instead of floating over the top-right area,
+            // so the two never overlap on small screens. Only one of the
+            // three overlays can be visible at a time (see the _toggle*
+            // methods), so at most one extra card appears here.
             Positioned(
               top: 80,
               left: 12,
-              child: SafeArea(child: _buildLegend()),
+              child: SafeArea(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width - 24,
+                  ),
+                  child: IntrinsicWidth(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildLegend(),
+                        if (_showTankOverlay ||
+                            _showSolenoidOverlay ||
+                            _showSensorOverlay)
+                          const SizedBox(height: 8),
+                        _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
+                            sprayersAsync.asData?.value, userId),
+                        _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
+                            sprayersAsync.asData?.value, userId),
+                        _buildSensorOverlay(controlUnitsAsync.asData?.value,
+                            sprayersAsync.asData?.value, userId),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
 
             // ── Top-left L/R nozzle indicators (left/right) ───────────────
@@ -1310,56 +1359,45 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     const imgHeight = 220.0;
     final fillHeight = imgHeight * (percent / 100.0);
 
-    return Positioned(
-      top: 120,
-      right: 12,
-      child: SafeArea(
-        child: Card(
-          color: Colors.white.withAlpha(230),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8)),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: imgWidth,
-                  height: imgHeight,
-                  child: Stack(alignment: Alignment.center, children: [
-                    Image.asset('assets/monitoring/tank_level.png',
-                        width: imgWidth,
-                        height: imgHeight,
-                        fit: BoxFit.contain),
-                    Positioned(
-                      bottom: 0,
-                      child: Container(
-                        width: imgWidth,
-                        height: fillHeight,
-                        color: Colors.blue.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    Text(pctLabel,
-                        style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color:
-                                percent < 30 ? Colors.red : Colors.black)),
-                  ]),
+    return Card(
+      color: Colors.white.withAlpha(230),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: imgWidth,
+              height: imgHeight,
+              child: Stack(alignment: Alignment.center, children: [
+                Image.asset('assets/monitoring/tank_level.png',
+                    width: imgWidth, height: imgHeight, fit: BoxFit.contain),
+                Positioned(
+                  bottom: 0,
+                  child: Container(
+                    width: imgWidth,
+                    height: fillHeight,
+                    color: Colors.blue.withValues(alpha: 0.45),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                    'Cap: ${tankCapacity != null ? '${tankCapacity.toString()} L' : '-'}'),
-                const SizedBox(height: 6),
-                Text(
-                    'Now: ${liters != null ? '${liters.toStringAsFixed(2)} L' : pctLabel}'),
-                const SizedBox(height: 8),
-                TextButton(
-                    onPressed: _hideTankLevelOverlay,
-                    child: const Text('Close'))
-              ],
+                Text(pctLabel,
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: percent < 30 ? Colors.red : Colors.black)),
+              ]),
             ),
-          ),
+            const SizedBox(height: 8),
+            Text(
+                'Cap: ${tankCapacity != null ? '${tankCapacity.toString()} L' : '-'}'),
+            const SizedBox(height: 6),
+            Text(
+                'Now: ${liters != null ? '${liters.toStringAsFixed(2)} L' : pctLabel}'),
+            const SizedBox(height: 8),
+            TextButton(
+                onPressed: _hideTankLevelOverlay, child: const Text('Close'))
+          ],
         ),
       ),
     );
@@ -1375,7 +1413,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
     setState(() {
-      _showTankOverlay = !_showTankOverlay;
+      final next = !_showTankOverlay;
+      _showTankOverlay = next;
+      if (next) {
+        _showSolenoidOverlay = false;
+        _showSensorOverlay = false;
+      }
     });
     } catch (e, st) {
       debugPrint('Error toggling tank overlay: $e');
@@ -1394,80 +1437,70 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     const imgWidth = 260.0;
     const imgHeight = 140.0;
 
-    return Positioned(
-      top: 120,
-      right: 12,
-      child: SafeArea(
-        child: Card(
-          color: Colors.white.withAlpha(230),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+    return Card(
+      color: Colors.white.withAlpha(230),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: imgWidth,
+              height: imgHeight,
+              child: Stack(alignment: Alignment.center, children: [
+                Image.asset('assets/monitoring/solenoid.png',
+                    width: imgWidth, height: imgHeight, fit: BoxFit.contain),
+                // Left indicator
+                Positioned(
+                  left: 90,
+                  top: imgHeight * 0.40,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                        color: leftOn ? Colors.green : Colors.grey,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2)),
+                  ),
+                ),
+                // Right indicator
+                Positioned(
+                  right: 90,
+                  top: imgHeight * 0.40,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                        color: rightOn ? Colors.green : Colors.grey,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2)),
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 8),
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                SizedBox(
-                  width: imgWidth,
-                  height: imgHeight,
-                  child: Stack(alignment: Alignment.center, children: [
-                    Image.asset('assets/monitoring/solenoid.png',
-                        width: imgWidth,
-                        height: imgHeight,
-                        fit: BoxFit.contain),
-                    // Left indicator
-                    Positioned(
-                      left: 90,
-                      top: imgHeight * 0.40,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                            color: leftOn ? Colors.green : Colors.grey,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2)),
-                      ),
-                    ),
-                    // Right indicator
-                    Positioned(
-                      right: 90,
-                      top: imgHeight * 0.40,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                            color: rightOn ? Colors.green : Colors.grey,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2)),
-                      ),
-                    ),
-                  ]),
-                ),
-                const SizedBox(height: 8),
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Text('LEFT',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 12)),
-                    Text('RIGHT',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 12)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text('L: ${leftOn ? 'ON' : 'OFF'}'),
-                  const SizedBox(width: 12),
-                  Text('R: ${rightOn ? 'ON' : 'OFF'}'),
-                ]),
-                const SizedBox(height: 8),
-                TextButton(
-                    onPressed: _hideSolenoidOverlay,
-                    child: const Text('Close'))
+                Text('LEFT',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                Text('RIGHT',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
               ],
             ),
-          ),
+            const SizedBox(height: 8),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('L: ${leftOn ? 'ON' : 'OFF'}'),
+              const SizedBox(width: 12),
+              Text('R: ${rightOn ? 'ON' : 'OFF'}'),
+            ]),
+            const SizedBox(height: 8),
+            TextButton(
+                onPressed: _hideSolenoidOverlay, child: const Text('Close'))
+          ],
         ),
       ),
     );
@@ -1483,7 +1516,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
     setState(() {
-      _showSolenoidOverlay = !_showSolenoidOverlay;
+      final next = !_showSolenoidOverlay;
+      _showSolenoidOverlay = next;
+      if (next) {
+        _showTankOverlay = false;
+        _showSensorOverlay = false;
+      }
     });
     } catch (e, st) {
       debugPrint('Error toggling solenoid overlay: $e');
@@ -1509,92 +1547,82 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         ? t.rightDensity!.toStringAsFixed(2)
         : '-';
 
-    return Positioned(
-      top: 100,
-      right: 12,
-      child: SafeArea(
-        child: Card(
-          color: Colors.white.withAlpha(240),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
-            child: SizedBox(
-              width: 340,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Card(
+      color: Colors.white.withAlpha(240),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+        child: SizedBox(
+          width: 340,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sensor Data',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).primaryColor)),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Sensor Data',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor)),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Expanded(
-                          flex: 2,
-                          child: Text('Distance',
-                              style: TextStyle(fontWeight: FontWeight.w600))),
-                      Expanded(
-                        flex: 3,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            SizedBox(
-                                width: 60,
-                                child:
-                                    Text(leftDist, textAlign: TextAlign.right)),
-                            const SizedBox(width: 20),
-                            SizedBox(
-                                width: 60,
-                                child: Text(rightDist,
-                                    textAlign: TextAlign.right)),
-                          ],
-                        ),
-                      ),
-                    ],
+                  const Expanded(
+                      flex: 2,
+                      child: Text('Distance',
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  Expanded(
+                    flex: 3,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        SizedBox(
+                            width: 60,
+                            child: Text(leftDist, textAlign: TextAlign.right)),
+                        const SizedBox(width: 20),
+                        SizedBox(
+                            width: 60,
+                            child:
+                                Text(rightDist, textAlign: TextAlign.right)),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Expanded(
-                          flex: 2,
-                          child: Text('Strength',
-                              style: TextStyle(fontWeight: FontWeight.w600))),
-                      Expanded(
-                        flex: 3,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            SizedBox(
-                                width: 60,
-                                child:
-                                    Text(leftStr, textAlign: TextAlign.right)),
-                            const SizedBox(width: 20),
-                            SizedBox(
-                                width: 60,
-                                child:
-                                    Text(rightStr, textAlign: TextAlign.right)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                        onPressed: _hideSensorOverlay,
-                        child: const Text('Close')),
-                  )
                 ],
               ),
-            ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                      flex: 2,
+                      child: Text('Strength',
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  Expanded(
+                    flex: 3,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        SizedBox(
+                            width: 60,
+                            child: Text(leftStr, textAlign: TextAlign.right)),
+                        const SizedBox(width: 20),
+                        SizedBox(
+                            width: 60,
+                            child:
+                                Text(rightStr, textAlign: TextAlign.right)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                    onPressed: _hideSensorOverlay,
+                    child: const Text('Close')),
+              )
+            ],
           ),
         ),
       ),
@@ -1611,7 +1639,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
     setState(() {
-      _showSensorOverlay = !_showSensorOverlay;
+      final next = !_showSensorOverlay;
+      _showSensorOverlay = next;
+      if (next) {
+        _showTankOverlay = false;
+        _showSolenoidOverlay = false;
+      }
     });
     } catch (e, st) {
       debugPrint('Error toggling sensor overlay: $e');

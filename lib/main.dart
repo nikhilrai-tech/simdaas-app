@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'core/services/push_notification_service.dart';
+import 'core/services/battery_optimization_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'features/auth/presentation/screens/auth_gate.dart';
@@ -73,8 +74,21 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       navigatorKey: appNavKey,
-      title: 'Smart Sprayer',
+      title: 'Agrios',
       theme: AppTheme.lightTheme,
+      // Clamp the system font-size / display-size setting so a user with
+      // "Large" text or display size enabled on their phone doesn't end up
+      // with overlapping cards on the monitoring screen — Android/iOS have
+      // no app-requestable permission for this (unlike background-run),
+      // so we cap it in-app instead of prompting.
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        final clampedScale = mq.textScaler.scale(1.0).clamp(0.9, 1.15);
+        return MediaQuery(
+          data: mq.copyWith(textScaler: TextScaler.linear(clampedScale)),
+          child: child!,
+        );
+      },
       // Use AuthGate as home so we can wait for persisted tokens to load
       // Wrap with WillPopScope to confirm app exit when at the root.
       // Deprecated replacement 'PopScope' requires API changes; keep
@@ -163,6 +177,9 @@ class TelemetryBootstrapper extends ConsumerWidget {
       Future.microtask(() => PushNotificationService.registerToken(
             ref.read(apiServiceProvider),
           ));
+      // Ask (once ever) to be exempted from battery optimizations, so
+      // background telemetry/cooldown timers aren't frozen by Doze.
+      Future.microtask(() => BatteryOptimizationService.requestOnceAfterLogin());
     }
 
     // Listen for auth state changes to detect sign-in and sign-out.
@@ -181,6 +198,7 @@ class TelemetryBootstrapper extends ConsumerWidget {
         Future.microtask(() => PushNotificationService.registerToken(
               ref.read(apiServiceProvider),
             ));
+        Future.microtask(() => BatteryOptimizationService.requestOnceAfterLogin());
       }
     });
 
