@@ -899,6 +899,14 @@ class TelemetryService {
   /// Call this whenever a screen showing the live track mounts/resumes.
   /// Fire-and-forget safe: any failure (offline, 404, auth) is swallowed
   /// silently so a flaky network never disrupts the live WS-driven UI.
+  ///
+  /// The backend endpoint returns the device's most recent session even if
+  /// it already ended (up to 2h ago) — that's by design for other callers,
+  /// but here it would resurrect a finished job's track and show it as if
+  /// it were live for a device that's now off. Only `session_status ==
+  /// "active"` is applied; anything else (completed, or no session at all)
+  /// is a no-op, leaving the screen's existing "no active session" state
+  /// (already cleared by report_ready — see _clearSessionState) untouched.
   Future<void> restoreTrackFromBackend(String rawMac) async {
     final api = _apiService;
     if (api == null || rawMac.trim().isEmpty) return;
@@ -908,6 +916,12 @@ class TelemetryService {
       final path = '/jobs/api/devices/${Uri.encodeComponent(rawMac)}/gps_points/';
       final data = await api.getJson(path);
       if (data is! Map) return;
+
+      if (data['session_status']?.toString() != 'active') {
+        debugPrint(
+            'Telemetry: restoreTrackFromBackend skipped for $norm — session_status=${data['session_status']} (not active)');
+        return;
+      }
 
       final rawPoints = data['points'];
       if (rawPoints is! List || rawPoints.isEmpty) return;
