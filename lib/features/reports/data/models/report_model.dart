@@ -91,9 +91,9 @@ class ReportModel extends Report {
       avgFlowRateLacre: parseDouble(json['avg_flow_rate_lacre']),
       avgSpeedKmph: parseDouble(json['avg_speed_kmph']),
       maxSpeedKmph: parseDouble(json['max_speed_kmph']),
-      createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
-      startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at']) : null,
-      endedAt: json['ended_at'] != null ? DateTime.tryParse(json['ended_at']) : null,
+      createdAt: DateTime.tryParse(json['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
+      startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at'])?.toLocal() : null,
+      endedAt: json['ended_at'] != null ? DateTime.tryParse(json['ended_at'])?.toLocal() : null,
       trajectory: (json['trajectory'] as List<dynamic>?)
               ?.map((e) => GPSPointData(
                     lat: parseDouble(e['lat']),
@@ -102,7 +102,7 @@ class ReportModel extends Report {
                     flowRateLpm: parseDouble(e['flow_rate_lpm']),
                     sprayMode: (e['spray_mode'] as num?)?.toInt() ?? 0,
                     ptoState: (e['pto_state'] as num?)?.toInt() ?? 0,
-                    timestamp: DateTime.tryParse(e['timestamp'] ?? '') ??
+                    timestamp: DateTime.tryParse(e['timestamp'] ?? '')?.toLocal() ??
                         DateTime.now(),
                   ))
               .toList() ??

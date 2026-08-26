@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/app_info_provider.dart';
+import 'package:simdaas/core/session_cleanup.dart';
 import '../providers/users_providers.dart' as users_provs;
 
 class ProfileScreen extends ConsumerWidget {
@@ -257,6 +258,7 @@ class ProfileScreen extends ConsumerWidget {
               title: const Text('Sign out'),
               onTap: () async {
                 await ref.read(authServiceProvider.notifier).signOut();
+                clearUserScopedCaches(ref);
                 if (context.mounted) {
                   Navigator.of(context).pushReplacementNamed('/login');
                 }

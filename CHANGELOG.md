@@ -21,6 +21,11 @@ already written — see "Release process" at the bottom.
   the Active Devices list now reflect the same longer window. *(backend)*
 
 ### Fixed
+- Logging out and signing in as a different user (without fully closing the
+  app) no longer shows the previous user's Reports, Active Sessions, Jobs,
+  Admin Users, or Firmware Alerts — these were cached in memory and never
+  cleared on sign out, so they kept displaying stale data until the app was
+  fully restarted. Signing out now clears all of it immediately.
 - Report Details screen's Start/End session times now display in the
   phone's local time instead of raw UTC clock digits (was showing up to
   5.5 hours off from the actual time).

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/session_cleanup.dart';
 import '../../../job_planner/presentation/providers/job_providers.dart';
 import '../../../data_monitoring/presentation/screens/monitoring_screen.dart';
 
@@ -122,6 +123,7 @@ class AdminDashboardScreen extends ConsumerWidget {
               ElevatedButton.icon(
                   onPressed: () async {
                     await ref.read(authServiceProvider).signOut();
+                    clearUserScopedCaches(ref);
                     Navigator.of(context).pushReplacementNamed('/login');
                   },
                   icon: const Icon(Icons.logout),
