@@ -883,6 +883,66 @@ class TelemetryService {
     }
   }
 
+  /// Restore this device's GPS track from the backend's persisted history
+  /// (`GET /jobs/api/devices/<mac>/gps_points/`), replacing whatever partial
+  /// or empty local `_positions` list we currently have.
+  ///
+  /// The live track is normally built up purely from WebSocket pushes held
+  /// in memory — nothing is persisted on the phone. If the app is
+  /// backgrounded, Android can either kill the process outright (wiping the
+  /// in-memory track entirely) or just drop the WebSocket for a while
+  /// (leaving a gap that shows up as the track "jumping" once it
+  /// reconnects). The backend keeps every point for the active session in
+  /// Postgres regardless of whether the app is open, so re-fetching it here
+  /// makes the track whole again instead of missing or jumping.
+  ///
+  /// Call this whenever a screen showing the live track mounts/resumes.
+  /// Fire-and-forget safe: any failure (offline, 404, auth) is swallowed
+  /// silently so a flaky network never disrupts the live WS-driven UI.
+  Future<void> restoreTrackFromBackend(String rawMac) async {
+    final api = _apiService;
+    if (api == null || rawMac.trim().isEmpty) return;
+    final norm = canonicalizeMac(rawMac);
+
+    try {
+      final path = '/jobs/api/devices/${Uri.encodeComponent(rawMac)}/gps_points/';
+      final data = await api.getJson(path);
+      if (data is! Map) return;
+
+      final rawPoints = data['points'];
+      if (rawPoints is! List || rawPoints.isEmpty) return;
+
+      final restored = <_LatLonEntry>[];
+      for (final p in rawPoints) {
+        if (p is! Map) continue;
+        final lat = (p['lat'] as num?)?.toDouble();
+        final lon = (p['lon'] as num?)?.toDouble();
+        final ts = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+        if (lat == null || lon == null || ts == null) continue;
+        restored.add(_LatLonEntry(
+          timestamp: ts.toUtc(),
+          lat: lat,
+          lon: lon,
+          speed: (p['speed_kmph'] as num?)?.toDouble(),
+          flowRate: (p['flow_rate_lpm'] as num?)?.toDouble(),
+          sprayMode: (p['spray_mode'] as num?)?.toInt(),
+          ptoState: (p['pto_state'] as num?)?.toInt(),
+          deviceInPlot: p['device_in_plot'] as bool?,
+        ));
+      }
+      if (restored.isEmpty) return;
+
+      // Backend is authoritative for this session's track — replace rather
+      // than merge/append, so a killed-and-restarted app doesn't end up with
+      // duplicate points once live WS updates resume.
+      _positions[norm] = restored;
+      debugPrint(
+          'Telemetry: restored ${restored.length} GPS points for $norm from backend');
+    } catch (e) {
+      debugPrint('Telemetry: restoreTrackFromBackend failed for $rawMac: $e');
+    }
+  }
+
   /// Manually clear the cached telemetry for a device.
   void clearCache(String deviceId) {
     final norm = canonicalizeMac(deviceId);

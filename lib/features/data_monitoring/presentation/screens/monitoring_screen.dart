@@ -32,7 +32,8 @@ class MonitoringScreen extends ConsumerStatefulWidget {
   ConsumerState<MonitoringScreen> createState() => _MonitoringScreenState();
 }
 
-class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
+class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
+    with WidgetsBindingObserver {
   // Ignore telemetry for N minutes after a manual end (belt-and-suspenders
   // in case the WS event arrives late).
   final Map<String, DateTime> _ignoredUntil = {};
@@ -82,6 +83,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     debugPrint('MonitoringScreen: Initializing. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
     
     // Refresh providers to ensure we have the latest session state
@@ -108,6 +110,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       // drop, etc). Fire-and-forget: never blocks initState, and any
       // failure is swallowed inside reconcileCooldownState itself.
       unawaited(svc.reconcileCooldownState(widget.deviceId!));
+
+      // Re-fetch this session's GPS track from the backend in case the app
+      // was killed or the WebSocket dropped while this screen wasn't
+      // mounted — see restoreTrackFromBackend's doc comment. Fire-and-forget;
+      // updates `positions` via setState once it resolves.
+      unawaited(_restoreGpsTrack(normId));
 
       // Seed positions and latest telemetry from the service snapshot if available.
       try {
@@ -342,11 +350,41 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _deviceSub?.cancel();
     _cooldownSub?.cancel();
     _countdownTimer?.cancel();
     _cooldownBannerDismissTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed) return;
+    if (widget.deviceId == null || widget.deviceId!.isEmpty) return;
+
+    final normId = canonicalizeMac(widget.deviceId!);
+    final svc = ref.read(telemetryServiceProvider);
+    // Same "resync on resume" fix as reconcileCooldownState (status badge)
+    // and _restoreGpsTrack (GPS track): the app may have been backgrounded
+    // long enough for Android to kill it or drop the WebSocket, so both are
+    // re-checked against the backend every time this screen comes back to
+    // the foreground, not just on first mount.
+    unawaited(svc.reconcileCooldownState(widget.deviceId!));
+    unawaited(_restoreGpsTrack(normId));
+  }
+
+  /// Re-fetch this device's GPS track from the backend and merge it into
+  /// the local `positions` list shown on the map. See
+  /// [TelemetryService.restoreTrackFromBackend] for why this is needed.
+  Future<void> _restoreGpsTrack(String normId) async {
+    final svc = ref.read(telemetryServiceProvider);
+    await svc.restoreTrackFromBackend(normId);
+    if (!mounted) return;
+    setState(() {
+      positions = svc.getPositions(normId);
+    });
   }
 
 
