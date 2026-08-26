@@ -10,6 +10,43 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-08-26
+
+### Changed
+- Session auto-timeout (grace period after a device stops sending data
+  before its session is closed and a report generated) increased from 10
+  minutes to 60 minutes, so a temporary network drop in the field no longer
+  prematurely ends an active spray session while the sprayer is still
+  physically running. The "waiting" countdown on the Monitoring screen and
+  the Active Devices list now reflect the same longer window. *(backend)*
+
+### Fixed
+- Report Details screen's Start/End session times now display in the
+  phone's local time instead of raw UTC clock digits (was showing up to
+  5.5 hours off from the actual time).
+- Report's Average Speed could show higher than Max Speed when the sprayer
+  device was rebooted mid-session (e.g. farmer power-cycles it and resumes
+  spraying ~20 minutes later) — device uptime now correctly accumulates
+  across reboots so Average Speed reflects the true session duration
+  instead of only the time since the most recent reboot. *(backend)*
+- Device config pushed to the sprayer (row spacing, wheel diameter, etc.)
+  now reads wheel diameter from the sprayer instead of the tractor, both on
+  config save and when toggling Demo Mode. *(backend)*
+- A device whose sensor reported a bare `inf` value (e.g. an unconnected
+  water-level sensor) had every single heartbeat silently dropped — the
+  nan/Infinity sanitizer only recognized the word "Infinity", not `inf`, so
+  the packet failed to parse and never reached the app, leaving the device
+  stuck showing "Waiting" indefinitely even while actively transmitting.
+  *(backend)*
+- Report's Distance Travelled and Area Covered could be wildly inflated
+  when the device's GPS briefly lost its fix (device reports lat/lon as
+  0.0, 0.0 while unlocked) — a single dropped fix added a false
+  multi-thousand-km jump to the session's running distance. Distance is no
+  longer accumulated from an invalid (0, 0) fix, and a session that never
+  gets a real GPS fix now shows a "GPS data unavailable for this session"
+  note on the Report Details screen instead of a misleading 0 km / 0%
+  coverage.
+
 ## [1.1.1] - 2026-08-06
 
 ### Fixed
