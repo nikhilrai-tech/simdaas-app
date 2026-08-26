@@ -51,6 +51,13 @@ already written — see "Release process" at the bottom.
   gets a real GPS fix now shows a "GPS data unavailable for this session"
   note on the Report Details screen instead of a misleading 0 km / 0%
   coverage.
+- Monitoring screen's live GPS track could disappear entirely or show a
+  straight-line "jump" after minimizing the app — the track was held only
+  in phone memory, so backgrounding long enough for Android to kill the
+  app (or just drop the WebSocket for a while) lost it or left a gap. The
+  screen now re-fetches the active session's track from the backend (which
+  always has it, MQTT-side, independent of the app) on open and every time
+  the app resumes from background.
 
 ## [1.1.1] - 2026-08-06
 
