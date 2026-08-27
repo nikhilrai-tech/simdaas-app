@@ -18,6 +18,7 @@ class ReportModel extends Report {
     required super.plotAreaSqm,
     required super.completionPercentage,
     super.chemicalSavedPercentage,
+    super.chemicalSavedNote,
     super.controlUnitId,
     super.controlUnitName,
     super.linkedSprayerName,
@@ -75,6 +76,7 @@ class ReportModel extends Report {
       plotAreaSqm: parseDouble(json['plot_area_sqm']),
       completionPercentage: parseDouble(json['completion_percentage']),
       chemicalSavedPercentage: parseDouble(json['chemical_saved_percentage']),
+      chemicalSavedNote: json['chemical_saved_note']?.toString(),
       controlUnitId: json['control_unit_details']?['id']?.toString()
           ?? json['control_unit_id']?.toString(),
       controlUnitName: json['control_unit_details']?['name']?.toString(),

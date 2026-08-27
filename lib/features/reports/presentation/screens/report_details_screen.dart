@@ -117,23 +117,29 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     child: const Icon(Icons.eco_outlined, color: Colors.white, size: 28),
                   ),
                   const SizedBox(width: 20),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${report.chemicalSavedPercentage.toStringAsFixed(0)}%',
-                        style: const TextStyle(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          height: 1.1,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          report.chemicalSavedNote != null
+                              ? '—'
+                              : '${report.chemicalSavedPercentage.toStringAsFixed(0)}%',
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            height: 1.1,
+                          ),
                         ),
-                      ),
-                      const Text(
-                        'Chemical Saved',
-                        style: TextStyle(fontSize: 13, color: Colors.white70),
-                      ),
-                    ],
+                        Text(
+                          report.chemicalSavedNote ??
+                              'Chemical Saved (Auto mode)',
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.white70),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),

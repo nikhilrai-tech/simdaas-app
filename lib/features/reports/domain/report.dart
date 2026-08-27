@@ -16,6 +16,10 @@ class Report {
   final double plotAreaSqm;
   final double completionPercentage;
   final double chemicalSavedPercentage;
+  // Set by the backend when the session had no Auto-mode PTO-on distance at
+  // all (e.g. sprayed entirely in Manual mode) — chemicalSavedPercentage is
+  // 0 because there's nothing to measure, not because 0% was saved.
+  final String? chemicalSavedNote;
   final String? controlUnitId;
   final String? controlUnitName;
   final String? linkedSprayerName;
@@ -55,6 +59,7 @@ class Report {
     required this.plotAreaSqm,
     required this.completionPercentage,
     this.chemicalSavedPercentage = 0.0,
+    this.chemicalSavedNote,
     this.controlUnitId,
     this.controlUnitName,
     this.linkedSprayerName,
