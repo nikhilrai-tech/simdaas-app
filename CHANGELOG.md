@@ -58,6 +58,12 @@ already written — see "Release process" at the bottom.
   screen now re-fetches the active session's track from the backend (which
   always has it, MQTT-side, independent of the app) on open and every time
   the app resumes from background.
+- Report Details' "Chemical Saved" percentage was mixing Manual-mode
+  distance into a metric meant to measure Auto-mode spray efficiency
+  (solenoid toggled off manually was counted the same as Auto skipping a
+  gap). Now computed from Auto-mode distance only; a session sprayed
+  entirely in Manual mode shows a note explaining why instead of a
+  misleading 0%. *(backend)*
 
 ## [1.1.1] - 2026-08-06
 
