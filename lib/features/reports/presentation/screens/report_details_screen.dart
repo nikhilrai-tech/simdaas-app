@@ -12,6 +12,33 @@ import '../providers/report_providers.dart';
 import '../widgets/plot_snapshot.dart';
 import '../widgets/saved_donut_chart.dart';
 
+const String _kSatelliteTileUrl =
+    'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+const String _kNormalTileUrl =
+    'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+
+/// Small floating icon button toggling satellite/normal map view, styled to
+/// match the existing fullscreen/close buttons on these map cards. Shared by
+/// the inline report map header and its fullscreen page.
+Widget _mapViewToggleButton(
+    {required bool isSatellite, required VoidCallback onTap}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 4),
+        ],
+      ),
+      child: Icon(isSatellite ? Icons.map : Icons.satellite_alt,
+          size: 22, color: Colors.black87),
+    ),
+  );
+}
+
 class ReportDetailsScreen extends ConsumerStatefulWidget {
   final Report report;
 
@@ -23,6 +50,7 @@ class ReportDetailsScreen extends ConsumerStatefulWidget {
 
 class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   HeatmapType _heatmapType = HeatmapType.gps;
+  bool _isSatelliteView = true;
 
   @override
   Widget build(BuildContext context) {
@@ -372,7 +400,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               children: [
                 TileLayer(
                   urlTemplate:
-                      'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                      _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
                   subdomains: const ['a', 'b', 'c'],
                 ),
                 if (report.plot != null)
@@ -430,6 +458,15 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             ),
           ),
         ),
+        // Satellite/Normal toggle (top-left)
+        Positioned(
+          top: 12,
+          left: 12,
+          child: _mapViewToggleButton(
+            isSatellite: _isSatelliteView,
+            onTap: () => setState(() => _isSatelliteView = !_isSatelliteView),
+          ),
+        ),
         // Legend (top-right)
         Positioned(
           top: 12,
@@ -445,6 +482,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               builder: (_) => _FullScreenMapPage(
                 report: report,
                 initialHeatmapType: _heatmapType,
+                initialIsSatelliteView: _isSatelliteView,
               ),
             )),
             child: Container(
@@ -860,10 +898,12 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 class _FullScreenMapPage extends StatefulWidget {
   final Report report;
   final HeatmapType initialHeatmapType;
+  final bool initialIsSatelliteView;
 
   const _FullScreenMapPage({
     required this.report,
     required this.initialHeatmapType,
+    this.initialIsSatelliteView = true,
   });
 
   @override
@@ -872,11 +912,13 @@ class _FullScreenMapPage extends StatefulWidget {
 
 class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   late HeatmapType _heatmapType;
+  late bool _isSatelliteView;
 
   @override
   void initState() {
     super.initState();
     _heatmapType = widget.initialHeatmapType;
+    _isSatelliteView = widget.initialIsSatelliteView;
   }
 
   @override
@@ -898,7 +940,7 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
             children: [
               TileLayer(
                 urlTemplate:
-                    'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                    _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
                 subdomains: const ['a', 'b', 'c'],
               ),
               if (report.plot != null)
@@ -973,6 +1015,17 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                 child: const Icon(Icons.fullscreen_exit,
                     size: 24, color: Colors.black87),
               ),
+            ),
+          ),
+
+          // Satellite/Normal toggle (top-left, below close)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8 + 44,
+            left: 12,
+            child: _mapViewToggleButton(
+              isSatellite: _isSatelliteView,
+              onTap: () =>
+                  setState(() => _isSatelliteView = !_isSatelliteView),
             ),
           ),
 

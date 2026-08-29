@@ -43,6 +43,7 @@ class MapScreen extends ConsumerStatefulWidget {
 class _MapScreenState extends ConsumerState<MapScreen> {
   final MapController _mapController = MapController();
   bool _locatingDevice = false;
+  bool _isSatelliteView = true;
   // Latest fix from MapLayers' own live MyLocationLayer stream. Reused by
   // the "center on me" button instead of starting a second, competing
   // GPS request (see _centerOnCurrentLocation).
@@ -579,6 +580,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             maxZoom: widget.maxZoom,
             onTap: _onTapTap,
             onMyLocation: (pos) => _liveStreamPosition = pos,
+            isSatellite: _isSatelliteView,
             onMarkerPointerDown: (i, event) {
               final mapNotifier = ref.read(mapStateProvider.notifier);
               mapNotifier.selectVertex(i);
@@ -793,6 +795,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             child: const Icon(Icons.save),
           ),
           const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'toggle_map_view',
+            onPressed: () =>
+                setState(() => _isSatelliteView = !_isSatelliteView),
+            mini: true,
+            child: Icon(_isSatelliteView ? Icons.map : Icons.satellite_alt),
+          ),
+          const SizedBox(height: 8),
           FloatingActionButton(
             heroTag: 'zoom_in',
             onPressed: _zoomIn,
