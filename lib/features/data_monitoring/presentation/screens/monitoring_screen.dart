@@ -39,6 +39,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   final Map<String, DateTime> _ignoredUntil = {};
 
   HeatmapType _selectedHeatmap = HeatmapType.gps;
+  bool _isSatelliteView = true;
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
   StreamSubscription<TelemetryData>? _deviceSub;
@@ -736,8 +737,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               ),
               children: [
                 TileLayer(
-                    urlTemplate:
-                        'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                    urlTemplate: _isSatelliteView
+                        ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+                        : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                     subdomains: const ['a', 'b', 'c']),
                 if (plot.polygon.isNotEmpty)
                   PolygonLayer(polygons: [
@@ -1368,11 +1370,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         error: (e, st) => Center(child: Text(extractErrorMessage(e))),
       ),
       floatingActionButton: widget.deviceId != null
-          ? FloatingActionButton(
-              heroTag: 'center_current',
-              mini: true,
-              onPressed: _goToCurrentPosition,
-              child: const Icon(Icons.my_location),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'toggle_map_view',
+                  mini: true,
+                  onPressed: () =>
+                      setState(() => _isSatelliteView = !_isSatelliteView),
+                  child: Icon(
+                      _isSatelliteView ? Icons.map : Icons.satellite_alt),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: 'center_current',
+                  mini: true,
+                  onPressed: _goToCurrentPosition,
+                  child: const Icon(Icons.my_location),
+                ),
+              ],
             )
           : null,
     ),   // Scaffold
