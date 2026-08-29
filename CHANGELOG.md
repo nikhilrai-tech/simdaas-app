@@ -64,6 +64,11 @@ already written — see "Release process" at the bottom.
   gap). Now computed from Auto-mode distance only; a session sprayed
   entirely in Manual mode shows a note explaining why instead of a
   misleading 0%. *(backend)*
+- Spray heatmap (Monitoring and Report Details) showed 0 L/min flow as
+  nearly the same light blue as a very low nonzero flow, making "no spray"
+  hard to distinguish on the track. 0 L/min now renders white, and the
+  1-70 L/min gradient runs dark blue throughout instead of starting light.
+  Legend updated to match.
 
 ## [1.1.1] - 2026-08-06
 
