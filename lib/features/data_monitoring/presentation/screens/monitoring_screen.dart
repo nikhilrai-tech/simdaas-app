@@ -66,6 +66,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   double? _lastSpeed;
   bool? _lastPtoOn;
 
+  // Device's uptime from the previous packet, used to detect a reboot
+  // (uptime resets to ~0) so the four cached values above get dropped right
+  // then instead of lingering on-screen as stale pre-reboot numbers until a
+  // fresh packet happens to overwrite each one individually.
+  double? _lastUptimeSec;
+
   // Backend-reported last-seen time for this device (from the control unit
   // list), used as a fallback in _waitingSecondsRemaining() when this app
   // session hasn't received a live telemetry packet yet — e.g. navigating
@@ -134,6 +140,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           if (seed.tankLevel != null) _lastTankLevel = seed.tankLevel;
           if (seed.speed != null) _lastSpeed = seed.speed;
           if (seed.ptoState != null) _lastPtoOn = seed.ptoState == 1;
+          if (seed.uptimeSec != null) _lastUptimeSec = seed.uptimeSec;
         }
       } catch (e, st) {
         debugPrint('MonitoringScreen: latestTelemetry seed error: $e');
@@ -176,6 +183,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           if (!mounted) return;
 
           setState(() {
+            // Device reboot detected (uptime_sec resets to ~0) — drop the
+            // cached last-known values instead of letting them linger as
+            // stale pre-reboot numbers; they get replaced by this same
+            // packet's fresh values immediately below.
+            if (t.uptimeSec != null &&
+                _lastUptimeSec != null &&
+                t.uptimeSec! < _lastUptimeSec!) {
+              _lastFlowRate = null;
+              _lastTankLevel = null;
+              _lastSpeed = null;
+              _lastPtoOn = null;
+            }
+            if (t.uptimeSec != null) _lastUptimeSec = t.uptimeSec;
+
             latestTelemetry = t;
             // Cache last known values so they survive waiting/cooldown gaps
             if (t.flowRate != null) _lastFlowRate = t.flowRate;

@@ -151,6 +151,11 @@ class TelemetryData {
   final bool? deviceInPlot;
   final double? flowRateLpm;
   final double? flowInLitres;
+  // Device's own uptime counter (resets to ~0 on every reboot). Used to
+  // detect a reboot client-side (uptimeSec dropping below the previous
+  // packet's value) so cached "last known" stats aren't shown stale across
+  // the boundary — see monitoring_screen.dart's telemetry listener.
+  final double? uptimeSec;
 
   TelemetryData({
     required this.deviceId,
@@ -175,6 +180,7 @@ class TelemetryData {
     this.deviceInPlot,
     this.flowRateLpm,
     this.flowInLitres,
+    this.uptimeSec,
   });
 
   /// Parse telemetry JSON. Returns null when required fields (device_id
@@ -300,6 +306,9 @@ class TelemetryData {
           : null,
       flowInLitres: json['flow_in_litres'] is num
           ? (json['flow_in_litres'] as num).toDouble()
+          : null,
+      uptimeSec: json['uptime_sec'] is num
+          ? (json['uptime_sec'] as num).toDouble()
           : null,
     );
   }
@@ -707,6 +716,7 @@ class TelemetryService {
             deviceInPlot: t.deviceInPlot,
             flowRateLpm: t.flowRateLpm,
             flowInLitres: t.flowInLitres,
+            uptimeSec: t.uptimeSec,
           );
 
           _latest[normId] = stored;
