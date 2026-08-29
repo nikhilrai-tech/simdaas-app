@@ -20,6 +20,11 @@ already written — see "Release process" at the bottom.
 - Report Details now has an editable "Additional Details" card for Driver
   Name and Fertilizers Used — free-text fields you fill in per report,
   defaulting to "N/A" until set. *(backend)*
+- New "Left/Right" spray heatmap on Monitoring and Report Details —
+  colors the track by which solenoid(s) sprayed (orange = left only,
+  purple = right only, teal = both, white = neither), since the existing
+  Spray heatmap's combined flow rate couldn't show which side sprayed.
+  *(backend)*
 
 ### Changed
 - Session auto-timeout (grace period after a device stops sending data
@@ -81,8 +86,8 @@ already written — see "Release process" at the bottom.
 - Spray heatmap (Monitoring and Report Details) showed 0 L/min flow as
   nearly the same light blue as a very low nonzero flow, making "no spray"
   hard to distinguish on the track. 0 L/min now renders white, and the
-  1-70 L/min gradient runs dark blue throughout instead of starting light.
-  Legend updated to match.
+  1-70 L/min gradient spans light-to-dark blue so variation within that
+  range is easy to read at a glance. Legend updated to match.
 
 ## [1.1.1] - 2026-08-06
 
