@@ -17,6 +17,9 @@ already written — see "Release process" at the bottom.
   every map on Report Details (inline header, fullscreen view, and the
   no-GPS-data fallback). Defaults to satellite, matching current behavior
   until toggled.
+- Report Details now has an editable "Additional Details" card for Driver
+  Name and Fertilizers Used — free-text fields you fill in per report,
+  defaulting to "N/A" until set. *(backend)*
 
 ### Changed
 - Session auto-timeout (grace period after a device stops sending data
