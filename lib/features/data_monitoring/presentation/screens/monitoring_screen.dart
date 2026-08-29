@@ -214,6 +214,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                 'speed': t.speed,
                 'flow_rate': t.flowRate,
                 'spray_mode': t.sprayMode,
+                'left_solenoid': t.leftSolenoidState,
+                'right_solenoid': t.rightSolenoidState,
               });
             }
           });
@@ -903,6 +905,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 setState(() {
                                   _selectedHeatmap = HeatmapType.gps;
                                 });
+                              } else if (v == 'left_right_heatmap') {
+                                setState(() {
+                                  _selectedHeatmap = HeatmapType.leftRight;
+                                });
                               } else if (v == 'end_session') {
                                 debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
                                 int? sessionIdToEnd = resolvedActiveSessionId;
@@ -1066,6 +1072,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                       style: TextStyle(
                                           color: _selectedHeatmap ==
                                                   HeatmapType.gps
+                                              ? Theme.of(context).primaryColor
+                                              : Colors.black))),
+                              PopupMenuItem(
+                                  value: 'left_right_heatmap',
+                                  child: Text('Left/Right spray heat map',
+                                      style: TextStyle(
+                                          color: _selectedHeatmap ==
+                                                  HeatmapType.leftRight
                                               ? Theme.of(context).primaryColor
                                               : Colors.black))),
                               const PopupMenuDivider(),
@@ -1759,6 +1773,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
         case HeatmapType.spraying:
           return HeatmapColorUtils.getColorForSpray(t.flowRate);
+
+        case HeatmapType.leftRight:
+          return HeatmapColorUtils.getColorForLeftRight(
+            leftOn: t.leftSolenoidState == 1,
+            rightOn: t.rightSolenoidState == 1,
+          );
       }
     } catch (e, st) {
       debugPrint('MonitoringScreen._markerColorForTelemetry error: $e');
@@ -1871,6 +1891,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       final spray = p['spray_mode'];
       final isAuto =
           spray != null && (spray is int ? spray == 1 : spray.toString() == '1');
+      final leftSol = p['left_solenoid'];
+      final leftOn = leftSol != null &&
+          (leftSol is int ? leftSol == 1 : leftSol.toString() == '1');
+      final rightSol = p['right_solenoid'];
+      final rightOn = rightSol != null &&
+          (rightSol is int ? rightSol == 1 : rightSol.toString() == '1');
 
       result.add(HeatmapTrackPoint(
         position: LatLng(lat, lon),
@@ -1879,6 +1905,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         isAuto: isAuto,
         speed: (p['speed'] as num?)?.toDouble(),
         flowRate: (p['flow_rate'] as num?)?.toDouble(),
+        leftSolenoidOn: leftOn,
+        rightSolenoidOn: rightOn,
       ));
     }
     return result;
@@ -1958,6 +1986,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           color = HeatmapColorUtils.getColorForSpray(
               (p['flow_rate'] as num?)?.toDouble());
           break;
+        case HeatmapType.leftRight:
+          color = Colors.red;
+          break;
       }
 
       if (currentColor == null) {
@@ -2001,6 +2032,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           _legendItem('1-70 L/m', Colors.blue.shade800),
           _legendItem('70-200 L/m', Colors.red.shade400),
           _legendItem('>200 L/m', Colors.black),
+        ];
+        break;
+      case HeatmapType.leftRight:
+        items = [
+          _legendItem('Left only', Colors.orange.shade700),
+          _legendItem('Right only', Colors.purple.shade700),
+          _legendItem('Both', Colors.teal.shade700),
+          _legendItem('Neither', Colors.white),
         ];
         break;
     }

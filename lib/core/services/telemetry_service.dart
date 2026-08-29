@@ -749,6 +749,8 @@ class TelemetryService {
                 sprayMode: stored.sprayMode,
                 ptoState: stored.ptoState,
                 deviceInPlot: stored.deviceInPlot,
+                leftSolenoidState: stored.leftSolenoidState,
+                rightSolenoidState: stored.rightSolenoidState,
               ));
             }
           }
@@ -952,6 +954,8 @@ class TelemetryService {
           sprayMode: (p['spray_mode'] as num?)?.toInt(),
           ptoState: (p['pto_state'] as num?)?.toInt(),
           deviceInPlot: p['device_in_plot'] as bool?,
+          leftSolenoidState: (p['left_solenoid_state'] as num?)?.toInt(),
+          rightSolenoidState: (p['right_solenoid_state'] as num?)?.toInt(),
         ));
       }
       if (restored.isEmpty) return;
@@ -1035,6 +1039,8 @@ class TelemetryService {
               'spray_mode': e.sprayMode,
               'pto': e.ptoState,
               'device_in_plot': e.deviceInPlot,
+              'left_solenoid': e.leftSolenoidState,
+              'right_solenoid': e.rightSolenoidState,
             })
         .toList();
   }
@@ -1085,6 +1091,8 @@ class _LatLonEntry {
   final int? sprayMode;
   final int? ptoState;
   final bool? deviceInPlot;
+  final int? leftSolenoidState;
+  final int? rightSolenoidState;
   _LatLonEntry({
     required this.timestamp,
     required this.lat,
@@ -1094,6 +1102,8 @@ class _LatLonEntry {
     this.sprayMode,
     this.ptoState,
     this.deviceInPlot,
+    this.leftSolenoidState,
+    this.rightSolenoidState,
   });
 }
 
