@@ -12,6 +12,12 @@ already written — see "Release process" at the bottom.
 
 ## [1.1.2] - 2026-08-26
 
+### Added
+- Satellite/Normal map view toggle on the Map Plot create/edit screen and
+  every map on Report Details (inline header, fullscreen view, and the
+  no-GPS-data fallback). Defaults to satellite, matching current behavior
+  until toggled.
+
 ### Changed
 - Session auto-timeout (grace period after a device stops sending data
   before its session is closed and a report generated) increased from 10
