@@ -22,4 +22,11 @@ class ReportRepositoryImpl implements ReportRepository {
   Future<void> deleteReport(String id) async {
     await remoteDataSource.deleteReport(id);
   }
+
+  @override
+  Future<Report> updateReportDetails(String id,
+      {String? driverName, String? fertilizersUsed}) async {
+    return await remoteDataSource.updateReportDetails(id,
+        driverName: driverName, fertilizersUsed: fertilizersUsed);
+  }
 }

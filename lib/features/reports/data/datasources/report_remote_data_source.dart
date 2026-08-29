@@ -6,6 +6,8 @@ abstract class ReportRemoteDataSource {
   Future<List<ReportModel>> getReports();
   Future<ReportModel> getReport(String id);
   Future<void> deleteReport(String id);
+  Future<ReportModel> updateReportDetails(String id,
+      {String? driverName, String? fertilizersUsed});
 }
 
 class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
@@ -49,6 +51,21 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
       await api.delete('/jobs/api/reports/$id/');
     } catch (e) {
       debugPrint('Error deleting report: $e');
+      rethrow;
+    }
+  }
+
+  @override
+  Future<ReportModel> updateReportDetails(String id,
+      {String? driverName, String? fertilizersUsed}) async {
+    try {
+      final response = await api.patchJson('/jobs/api/reports/$id/', jsonBody: {
+        if (driverName != null) 'driver_name': driverName,
+        if (fertilizersUsed != null) 'fertilizers_used': fertilizersUsed,
+      });
+      return ReportModel.fromJson(response);
+    } catch (e) {
+      debugPrint('Error updating report details: $e');
       rethrow;
     }
   }

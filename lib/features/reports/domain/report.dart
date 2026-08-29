@@ -20,6 +20,10 @@ class Report {
   // all (e.g. sprayed entirely in Manual mode) — chemicalSavedPercentage is
   // 0 because there's nothing to measure, not because 0% was saved.
   final String? chemicalSavedNote;
+  // User-entered, editable from Report Details after the report is
+  // generated — not computed from telemetry. Null/blank shows as "N/A".
+  final String? driverName;
+  final String? fertilizersUsed;
   final String? controlUnitId;
   final String? controlUnitName;
   final String? linkedSprayerName;
@@ -76,6 +80,8 @@ class Report {
     this.endedAt,
     this.trajectory = const [],
     this.gpsUnavailableNote,
+    this.driverName,
+    this.fertilizersUsed,
   });
 }
 

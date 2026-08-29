@@ -329,6 +329,46 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             ),
 
             const SizedBox(height: 24),
+
+            // ── Additional Details (user-editable, per report) ─────────────
+            _sectionHeader('Additional Details'),
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: [
+                  _editableRow(
+                    Icons.person_outline,
+                    'Driver Name',
+                    report.driverName,
+                    const Color(0xFF00695C),
+                    onTap: () => _editReportField(
+                      context: context,
+                      title: 'Driver Name',
+                      currentValue: report.driverName,
+                      onSave: (value) => _saveReportField(driverName: value),
+                    ),
+                  ),
+                  _editableRow(
+                    Icons.eco_outlined,
+                    'Fertilizers Used',
+                    report.fertilizersUsed,
+                    const Color(0xFF558B2F),
+                    isLast: true,
+                    onTap: () => _editReportField(
+                      context: context,
+                      title: 'Fertilizers Used',
+                      currentValue: report.fertilizersUsed,
+                      multiline: true,
+                      onSave: (value) =>
+                          _saveReportField(fertilizersUsed: value),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
           ],
         ),
       ),
@@ -659,6 +699,111 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         ],
       ),
     );
+  }
+
+  // Same visual style as _equipRow, but tappable — used for the
+  // user-editable Driver Name / Fertilizers Used fields. Shows "N/A" until
+  // the user fills a value in.
+  Widget _editableRow(
+      IconData icon, String label, String? value, Color accentColor,
+      {required VoidCallback onTap, bool isLast = false}) {
+    final displayValue =
+        (value == null || value.trim().isEmpty) ? 'N/A' : value;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          border: isLast
+              ? null
+              : Border(bottom: BorderSide(color: Colors.grey[100]!, width: 1)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 18, color: accentColor),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label,
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(displayValue,
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87)),
+            ),
+            const SizedBox(width: 6),
+            Icon(Icons.edit, size: 15, color: Colors.grey[400]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editReportField({
+    required BuildContext context,
+    required String title,
+    required String? currentValue,
+    required Future<void> Function(String value) onSave,
+    bool multiline = false,
+  }) async {
+    final controller = TextEditingController(
+        text: (currentValue ?? '').trim() == 'N/A' ? '' : (currentValue ?? ''));
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Edit $title'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: multiline ? 3 : 1,
+          decoration: InputDecoration(
+            hintText: 'Enter $title',
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return; // cancelled
+    await onSave(result);
+  }
+
+  Future<void> _saveReportField({String? driverName, String? fertilizersUsed}) async {
+    try {
+      await ref.read(reportRepoProvider).updateReportDetails(
+            widget.report.id,
+            driverName: driverName,
+            fertilizersUsed: fertilizersUsed,
+          );
+      ref.invalidate(reportDetailProvider(widget.report.id));
+      if (context.mounted) showSuccessSnackBar(context, 'Saved');
+    } catch (e) {
+      if (context.mounted) {
+        showGenericErrorSnackBar(context, 'Failed to save — try again');
+      }
+    }
   }
 
   Widget _buildLegend() {
