@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
-enum HeatmapType { spraying, speed, gps }
+enum HeatmapType { spraying, speed, gps, leftRight }
 
 class HeatmapTrackPoint {
   final LatLng position;
@@ -10,6 +10,8 @@ class HeatmapTrackPoint {
   final bool isAuto;
   final double? speed;
   final double? flowRate;
+  final bool leftSolenoidOn;
+  final bool rightSolenoidOn;
 
   const HeatmapTrackPoint({
     required this.position,
@@ -18,6 +20,8 @@ class HeatmapTrackPoint {
     required this.isAuto,
     this.speed,
     this.flowRate,
+    this.leftSolenoidOn = false,
+    this.rightSolenoidOn = false,
   });
 }
 
@@ -30,15 +34,16 @@ class HeatmapColorUtils {
     return Colors.red;
   }
 
-  // Spray: 0 → white (no spray), 1-70 → dark blue scale, 70.1-200 → red
-  // scale, <0 or >200 → black
+  // Spray: 0 → white (no spray), 1-70 → light-to-dark blue scale (wide
+  // range so low vs high flow is easy to tell apart at a glance),
+  // 70.1-200 → red scale, <0 or >200 → black
   static Color getColorForSpray(double? flow) {
     if (flow == null) return Colors.grey;
     if (flow == 0) return Colors.white;
     if (flow < 0 || flow > 200) return Colors.black;
     if (flow <= 70) {
       final ratio = (flow / 70.0).clamp(0.0, 1.0);
-      return Color.lerp(Colors.blue.shade700, Colors.blue.shade900, ratio) ??
+      return Color.lerp(Colors.blue.shade200, Colors.blue.shade900, ratio) ??
           Colors.blue;
     }
     final ratio = ((flow - 70.0) / 130.0).clamp(0.0, 1.0);
@@ -57,6 +62,20 @@ class HeatmapColorUtils {
     return isAuto ? Colors.blue : Colors.grey;
   }
 
+  // Left/Right: which solenoid(s) sprayed at this point — orange = left
+  // only, purple = right only, teal = both, white = neither (PTO on but
+  // not spraying). Four clearly distinct hues so a farmer can tell at a
+  // glance which side needs attention if one keeps showing solo.
+  static Color getColorForLeftRight({
+    required bool leftOn,
+    required bool rightOn,
+  }) {
+    if (leftOn && rightOn) return Colors.teal.shade700;
+    if (leftOn) return Colors.orange.shade700;
+    if (rightOn) return Colors.purple.shade700;
+    return Colors.white;
+  }
+
   // Color for inside-plot band fill
   static Color getColorForInsidePoint(HeatmapTrackPoint p, HeatmapType type) {
     switch (type) {
@@ -66,6 +85,9 @@ class HeatmapColorUtils {
         return getColorForSpray(p.flowRate);
       case HeatmapType.gps:
         return getColorForGPS(isInPlot: true, ptoOn: p.ptoOn, isAuto: p.isAuto);
+      case HeatmapType.leftRight:
+        return getColorForLeftRight(
+            leftOn: p.leftSolenoidOn, rightOn: p.rightSolenoidOn);
     }
   }
 
@@ -78,6 +100,8 @@ class HeatmapColorUtils {
         return getColorForSpeed(p.speed);
       case HeatmapType.spraying:
         return getColorForSpray(p.flowRate);
+      case HeatmapType.leftRight:
+        return Colors.red;
     }
   }
 }

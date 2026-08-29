@@ -92,6 +92,8 @@ class GPSPointData {
   final double flowRateLpm;
   final int sprayMode;
   final int ptoState;
+  final int leftSolenoidState;
+  final int rightSolenoidState;
   final DateTime timestamp;
 
   const GPSPointData({
@@ -101,6 +103,8 @@ class GPSPointData {
     required this.flowRateLpm,
     required this.sprayMode,
     this.ptoState = 0,
+    this.leftSolenoidState = 0,
+    this.rightSolenoidState = 0,
     required this.timestamp,
   });
 }

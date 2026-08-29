@@ -106,6 +106,10 @@ class ReportModel extends Report {
                     flowRateLpm: parseDouble(e['flow_rate_lpm']),
                     sprayMode: (e['spray_mode'] as num?)?.toInt() ?? 0,
                     ptoState: (e['pto_state'] as num?)?.toInt() ?? 0,
+                    leftSolenoidState:
+                        (e['left_solenoid_state'] as num?)?.toInt() ?? 0,
+                    rightSolenoidState:
+                        (e['right_solenoid_state'] as num?)?.toInt() ?? 0,
                     timestamp: DateTime.tryParse(e['timestamp'] ?? '')?.toLocal() ??
                         DateTime.now(),
                   ))

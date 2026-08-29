@@ -832,6 +832,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           _legendItem('>200 L/m', Colors.black),
         ];
         break;
+      case HeatmapType.leftRight:
+        items = [
+          _legendItem('Left only', Colors.orange.shade700),
+          _legendItem('Right only', Colors.purple.shade700),
+          _legendItem('Both', Colors.teal.shade700),
+          _legendItem('Neither', Colors.white),
+        ];
+        break;
     }
 
     return Container(
@@ -884,6 +892,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         _heatmapButton(HeatmapType.speed, 'Speed'),
         const SizedBox(width: 8),
         _heatmapButton(HeatmapType.spraying, 'Spray'),
+        const SizedBox(width: 8),
+        _heatmapButton(HeatmapType.leftRight, 'L/R'),
       ],
     );
   }
@@ -932,6 +942,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
         flowRate: p.flowRateLpm,
+        leftSolenoidOn: p.leftSolenoidState == 1,
+        rightSolenoidOn: p.rightSolenoidState == 1,
       ));
     }
     return result;
@@ -988,6 +1000,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           break;
         case HeatmapType.spraying:
           color = HeatmapColorUtils.getColorForSpray(p.flowRateLpm);
+          break;
+        case HeatmapType.leftRight:
+          color = Colors.red;
           break;
       }
 
@@ -1194,6 +1209,8 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                 _heatmapButton(HeatmapType.speed, 'Speed'),
                 const SizedBox(width: 8),
                 _heatmapButton(HeatmapType.spraying, 'Spray'),
+                const SizedBox(width: 8),
+                _heatmapButton(HeatmapType.leftRight, 'L/R'),
               ],
             ),
           ),
@@ -1226,6 +1243,14 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
           _legendItem('1-70 L/m', Colors.blue.shade800),
           _legendItem('70-200 L/m', Colors.red.shade400),
           _legendItem('>200 L/m', Colors.black),
+        ];
+        break;
+      case HeatmapType.leftRight:
+        items = [
+          _legendItem('Left only', Colors.orange.shade700),
+          _legendItem('Right only', Colors.purple.shade700),
+          _legendItem('Both', Colors.teal.shade700),
+          _legendItem('Neither', Colors.white),
         ];
         break;
     }
@@ -1318,6 +1343,8 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
         flowRate: p.flowRateLpm,
+        leftSolenoidOn: p.leftSolenoidState == 1,
+        rightSolenoidOn: p.rightSolenoidState == 1,
       ));
     }
     return result;
@@ -1374,6 +1401,9 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
           break;
         case HeatmapType.spraying:
           color = HeatmapColorUtils.getColorForSpray(p.flowRateLpm);
+          break;
+        case HeatmapType.leftRight:
+          color = Colors.red;
           break;
       }
 
