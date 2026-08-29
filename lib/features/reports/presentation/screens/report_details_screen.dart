@@ -643,7 +643,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         break;
       case HeatmapType.spraying:
         items = [
-          _legendItem('0-70 L/m', Colors.blue.shade400),
+          _legendItem('0 L/m (No Spray)', Colors.white),
+          _legendItem('1-70 L/m', Colors.blue.shade800),
           _legendItem('70-200 L/m', Colors.red.shade400),
           _legendItem('>200 L/m', Colors.black),
         ];
@@ -676,7 +677,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           Container(
             width: 12,
             height: 12,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade400, width: 0.5),
+            ),
           ),
           const SizedBox(width: 6),
           Text(label,
@@ -1019,7 +1024,8 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         break;
       case HeatmapType.spraying:
         items = [
-          _legendItem('0-70 L/m', Colors.blue.shade400),
+          _legendItem('0 L/m (No Spray)', Colors.white),
+          _legendItem('1-70 L/m', Colors.blue.shade800),
           _legendItem('70-200 L/m', Colors.red.shade400),
           _legendItem('>200 L/m', Colors.black),
         ];
@@ -1051,7 +1057,11 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
           Container(
             width: 12,
             height: 12,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade400, width: 0.5),
+            ),
           ),
           const SizedBox(width: 6),
           Text(label,

@@ -30,13 +30,15 @@ class HeatmapColorUtils {
     return Colors.red;
   }
 
-  // Spray: 0-70 → blue scale, 70.1-200 → red scale, <0 or >200 → black
+  // Spray: 0 → white (no spray), 1-70 → dark blue scale, 70.1-200 → red
+  // scale, <0 or >200 → black
   static Color getColorForSpray(double? flow) {
     if (flow == null) return Colors.grey;
+    if (flow == 0) return Colors.white;
     if (flow < 0 || flow > 200) return Colors.black;
     if (flow <= 70) {
       final ratio = (flow / 70.0).clamp(0.0, 1.0);
-      return Color.lerp(Colors.blue.shade100, Colors.blue.shade900, ratio) ??
+      return Color.lerp(Colors.blue.shade700, Colors.blue.shade900, ratio) ??
           Colors.blue;
     }
     final ratio = ((flow - 70.0) / 130.0).clamp(0.0, 1.0);
