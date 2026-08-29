@@ -30,6 +30,11 @@ already written — see "Release process" at the bottom.
   the Active Devices list now reflect the same longer window. *(backend)*
 
 ### Fixed
+- Monitoring screen's Flow LPM/Flow L/Speed/PTO summary could keep showing
+  stale pre-reboot numbers after the sprayer device power-cycled mid-session
+  (same "uptime resets on reboot" signal as the Average Speed fix below,
+  now also used client-side) — a reboot now clears the cached values so a
+  later gap falls back to post-reboot data instead of pre-reboot data.
 - Logging out and signing in as a different user (without fully closing the
   app) no longer shows the previous user's Reports, Active Sessions, Jobs,
   Admin Users, or Firmware Alerts — these were cached in memory and never
