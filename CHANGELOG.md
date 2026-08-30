@@ -24,6 +24,8 @@ already written — see "Release process" at the bottom.
   colors the track by which solenoid(s) sprayed (orange = left only,
   purple = right only, teal = both, white = neither), since the existing
   Spray heatmap's combined flow rate couldn't show which side sprayed.
+  On Monitoring it's a "Flow / L-R" sub-toggle next to the legend once
+  Spraying heat map is selected, rather than a separate menu entry.
   *(backend)*
 
 ### Changed
