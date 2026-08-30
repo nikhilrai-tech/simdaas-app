@@ -93,6 +93,12 @@ already written — see "Release process" at the bottom.
 - Monitoring screen's network signal bars stayed plain white regardless of
   strength, hard to read at a glance on a small screen — now colored
   green/orange/red matching the adjacent GPS indicator's thresholds.
+- GPS heatmap row-coverage bands could flip from Auto (blue) back to PTO
+  Off (orange) or Manual (grey) from a single stray later sample at the
+  same spot, wrongly implying spraying never happened there. A sub-band
+  now only ever moves up in priority (PTO Off < Manual < Auto), never
+  back down, for the rest of the session — same fix on Monitoring and
+  Report Details since both share the same coverage-band code.
 
 ## [1.1.1] - 2026-08-06
 
