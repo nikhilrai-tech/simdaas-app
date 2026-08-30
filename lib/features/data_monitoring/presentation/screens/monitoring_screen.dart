@@ -913,10 +913,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 setState(() {
                                   _selectedHeatmap = HeatmapType.gps;
                                 });
-                              } else if (v == 'left_right_heatmap') {
-                                setState(() {
-                                  _selectedHeatmap = HeatmapType.leftRight;
-                                });
                               } else if (v == 'end_session') {
                                 debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
                                 int? sessionIdToEnd = resolvedActiveSessionId;
@@ -1062,8 +1058,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                   value: 'spraying_heatmap',
                                   child: Text('Spraying heat map',
                                       style: TextStyle(
-                                          color: _selectedHeatmap ==
-                                                  HeatmapType.spraying
+                                          color: (_selectedHeatmap ==
+                                                      HeatmapType.spraying ||
+                                                  _selectedHeatmap ==
+                                                      HeatmapType.leftRight)
                                               ? Theme.of(context).primaryColor
                                               : Colors.black))),
                               PopupMenuItem(
@@ -1080,14 +1078,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                       style: TextStyle(
                                           color: _selectedHeatmap ==
                                                   HeatmapType.gps
-                                              ? Theme.of(context).primaryColor
-                                              : Colors.black))),
-                              PopupMenuItem(
-                                  value: 'left_right_heatmap',
-                                  child: Text('Left/Right spray heat map',
-                                      style: TextStyle(
-                                          color: _selectedHeatmap ==
-                                                  HeatmapType.leftRight
                                               ? Theme.of(context).primaryColor
                                               : Colors.black))),
                               const PopupMenuDivider(),
@@ -1159,6 +1149,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        _buildSpraySubToggle(),
                         _buildLegend(),
                         if (_showTankOverlay ||
                             _showSolenoidOverlay ||
@@ -2014,6 +2005,56 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
     flush();
     return result;
+  }
+
+  // Small "Flow / L-R" switch shown only while a spray-related heatmap is
+  // selected, so Left/Right isn't a separate top-level "Spraying heat map"
+  // vs "Left/Right spray heat map" menu choice — it's a sub-view you flip
+  // to without leaving the Spraying heatmap.
+  Widget _buildSpraySubToggle() {
+    if (_selectedHeatmap != HeatmapType.spraying &&
+        _selectedHeatmap != HeatmapType.leftRight) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(230),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withAlpha(25), blurRadius: 4),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _sprayModeChip('Flow', HeatmapType.spraying),
+          const SizedBox(width: 4),
+          _sprayModeChip('L/R', HeatmapType.leftRight),
+        ],
+      ),
+    );
+  }
+
+  Widget _sprayModeChip(String label, HeatmapType type) {
+    final selected = _selectedHeatmap == type;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedHeatmap = type),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? Theme.of(context).primaryColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: selected ? Colors.white : Colors.black87,
+            )),
+      ),
+    );
   }
 
   Widget _buildLegend() {
