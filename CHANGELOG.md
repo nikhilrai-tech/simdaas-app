@@ -104,6 +104,17 @@ already written — see "Release process" at the bottom.
   now only ever moves up in priority (PTO Off < Manual < Auto), never
   back down, for the rest of the session — same fix on Monitoring and
   Report Details since both share the same coverage-band code.
+- Deleting a ControlUnit or Report left zero trace of who did it or when
+  — DELETE requests hard-delete with no audit trail, and Django's admin
+  log only covers actions taken in the admin site, not the regular API.
+  New AuditLog now records user/timestamp/what was deleted for both
+  endpoints, viewable (read-only) in Django admin. *(backend)*
+
+### Security
+- Login no longer prints the incoming email/password pair to the server
+  console on every attempt — a leftover debug `print()` was logging
+  plaintext passwords into container logs (and from there, Loki/Grafana).
+  *(backend)*
 
 ## [1.1.1] - 2026-08-06
 
