@@ -686,17 +686,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                       );
                     }),
                     const SizedBox(width: 16),
-                    // Signal
-                    SignalStrengthIndicator.bars(
-                      value: latestTelemetry!.simSignalQuality != null
-                          ? getSignalBars(latestTelemetry!.simSignalQuality!) / 5
-                          : 0,
-                      size: 22,
-                      barCount: 5,
-                      spacing: 1.0,
-                      activeColor: Colors.white,
-                      inactiveColor: Colors.white.withAlpha(80),
-                    ),
+                    // Signal — bars colored by strength (green/orange/red)
+                    // instead of flat white, so it reads at a glance on a
+                    // small screen instead of relying on subtle bar-height
+                    // and opacity differences alone.
+                    Builder(builder: (ctx) {
+                      final sim = latestTelemetry!.simSignalQuality;
+                      final bars = sim != null ? getSignalBars(sim) : 0;
+                      final Color signalColor = bars >= 4
+                          ? Colors.green
+                          : (bars >= 2 ? Colors.orange : Colors.red);
+                      return SignalStrengthIndicator.bars(
+                        value: sim != null ? bars / 5 : 0,
+                        size: 22,
+                        barCount: 5,
+                        spacing: 1.0,
+                        activeColor: signalColor,
+                        inactiveColor: Colors.white.withAlpha(80),
+                      );
+                    }),
                   ],
                 ),
               )
