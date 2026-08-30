@@ -62,6 +62,20 @@ class HeatmapColorUtils {
     return isAuto ? Colors.blue : Colors.grey;
   }
 
+  // Priority order for the GPS heatmap's row-coverage bands: PTO off (0) <
+  // Manual (1) < Auto (2). A sub-band that has ever reached a given
+  // priority must never visually drop back to a lower one on a later
+  // sample/pass — e.g. once shown Auto (blue), a later PTO-off reading at
+  // the same spot (GPS jitter, a momentary pause) must not repaint it
+  // orange, since spraying already happened there. Only used by the GPS
+  // heatmap — Speed/Spray/Left-Right keep their existing "latest sample"
+  // or accumulation behavior.
+  static int gpsPriority({required bool ptoOn, required bool isAuto}) {
+    if (!ptoOn) return 0;
+    if (!isAuto) return 1;
+    return 2;
+  }
+
   // Left/Right: which solenoid(s) sprayed at this point — orange = left
   // only, purple = right only, teal = both, white = neither (PTO on but
   // not spraying). Four clearly distinct hues so a farmer can tell at a
