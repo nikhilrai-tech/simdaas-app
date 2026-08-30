@@ -88,6 +88,9 @@ already written — see "Release process" at the bottom.
   hard to distinguish on the track. 0 L/min now renders white, and the
   1-70 L/min gradient spans light-to-dark blue so variation within that
   range is easy to read at a glance. Legend updated to match.
+- Monitoring screen's network signal bars stayed plain white regardless of
+  strength, hard to read at a glance on a small screen — now colored
+  green/orange/red matching the adjacent GPS indicator's thresholds.
 
 ## [1.1.1] - 2026-08-06
 
