@@ -27,6 +27,11 @@ already written — see "Release process" at the bottom.
   On Monitoring it's a "Flow / L-R" sub-toggle next to the legend once
   Spraying heat map is selected, rather than a separate menu entry.
   *(backend)*
+- Device now gets an MQTT message on a new `/<device_id>/boundary` topic
+  when it crosses the plot boundary (`{"outside": true/false}`), same
+  push pattern as the existing `/config` topic — lets the firmware react
+  to a geofence breach itself, not just the app's Monitoring screen
+  notification. *(backend)*
 
 ### Changed
 - Session auto-timeout (grace period after a device stops sending data
