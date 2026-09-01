@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -14,6 +12,33 @@ import '../providers/report_providers.dart';
 import '../widgets/plot_snapshot.dart';
 import '../widgets/saved_donut_chart.dart';
 
+const String _kSatelliteTileUrl =
+    'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+const String _kNormalTileUrl =
+    'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+
+/// Small floating icon button toggling satellite/normal map view, styled to
+/// match the existing fullscreen/close buttons on these map cards. Shared by
+/// the inline report map header and its fullscreen page.
+Widget _mapViewToggleButton(
+    {required bool isSatellite, required VoidCallback onTap}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 4),
+        ],
+      ),
+      child: Icon(isSatellite ? Icons.map : Icons.satellite_alt,
+          size: 22, color: Colors.black87),
+    ),
+  );
+}
+
 class ReportDetailsScreen extends ConsumerStatefulWidget {
   final Report report;
 
@@ -25,6 +50,7 @@ class ReportDetailsScreen extends ConsumerStatefulWidget {
 
 class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   HeatmapType _heatmapType = HeatmapType.gps;
+  bool _isSatelliteView = true;
 
   @override
   Widget build(BuildContext context) {
@@ -43,10 +69,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     final avgSpeed = report.avgSpeedKmph;
     final maxSpeed = report.maxSpeedKmph;
     final areaCoveredAcres = report.areaCoveredSqm / 4046.86;
-    // spray used = final - initial (accumulated flow meter, session delta)
-    final initialTank = report.initialTankLevel ?? 0.0;
-    final finalTank = report.finalTankLevel ?? 0.0;
-    final sprayLitres = (finalTank - initialTank).clamp(0.0, double.infinity);
+    // Same source as the "Applied" stat on the reports list (backend prefers
+    // the flow-sensor total over the tank-level delta) — recomputing from
+    // initial/final tank level here would drift from that value and show a
+    // different number for the same report.
+    final sprayLitres = report.sprayUsedLitres;
     // Use backend-computed flow rates directly (tank_spray_used / pto_min and / area_acres)
     final avgFlowRateLperMin = report.avgFlowRateLpm;
     final avgFlowRatePerAcre = report.avgFlowRateLacre;
@@ -118,29 +145,63 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     child: const Icon(Icons.eco_outlined, color: Colors.white, size: 28),
                   ),
                   const SizedBox(width: 20),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${report.chemicalSavedPercentage.toStringAsFixed(0)}%',
-                        style: const TextStyle(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          height: 1.1,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          report.chemicalSavedNote != null
+                              ? '—'
+                              : '${report.chemicalSavedPercentage.toStringAsFixed(0)}%',
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            height: 1.1,
+                          ),
                         ),
-                      ),
-                      const Text(
-                        'Chemical Saved',
-                        style: TextStyle(fontSize: 13, color: Colors.white70),
-                      ),
-                    ],
+                        Text(
+                          report.chemicalSavedNote ??
+                              'Chemical Saved (Auto mode)',
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.white70),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
 
             const SizedBox(height: 24),
+
+            if (report.gpsUnavailableNote != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.amber.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        report.gpsUnavailableNote!,
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.amber.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // ── Performance Overview ──────────────────────────────────────
             _sectionHeader('Performance Overview'),
@@ -268,6 +329,46 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             ),
 
             const SizedBox(height: 24),
+
+            // ── Additional Details (user-editable, per report) ─────────────
+            _sectionHeader('Additional Details'),
+            Card(
+              elevation: 1,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: [
+                  _editableRow(
+                    Icons.person_outline,
+                    'Driver Name',
+                    report.driverName,
+                    const Color(0xFF00695C),
+                    onTap: () => _editReportField(
+                      context: context,
+                      title: 'Driver Name',
+                      currentValue: report.driverName,
+                      onSave: (value) => _saveReportField(driverName: value),
+                    ),
+                  ),
+                  _editableRow(
+                    Icons.eco_outlined,
+                    'Fertilizers Used',
+                    report.fertilizersUsed,
+                    const Color(0xFF558B2F),
+                    isLast: true,
+                    onTap: () => _editReportField(
+                      context: context,
+                      title: 'Fertilizers Used',
+                      currentValue: report.fertilizersUsed,
+                      multiline: true,
+                      onSave: (value) =>
+                          _saveReportField(fertilizersUsed: value),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
           ],
         ),
       ),
@@ -339,7 +440,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               children: [
                 TileLayer(
                   urlTemplate:
-                      'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                      _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
                   subdomains: const ['a', 'b', 'c'],
                 ),
                 if (report.plot != null)
@@ -397,6 +498,15 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             ),
           ),
         ),
+        // Satellite/Normal toggle (top-left)
+        Positioned(
+          top: 12,
+          left: 12,
+          child: _mapViewToggleButton(
+            isSatellite: _isSatelliteView,
+            onTap: () => setState(() => _isSatelliteView = !_isSatelliteView),
+          ),
+        ),
         // Legend (top-right)
         Positioned(
           top: 12,
@@ -412,6 +522,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               builder: (_) => _FullScreenMapPage(
                 report: report,
                 initialHeatmapType: _heatmapType,
+                initialIsSatelliteView: _isSatelliteView,
               ),
             )),
             child: Container(
@@ -590,6 +701,111 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     );
   }
 
+  // Same visual style as _equipRow, but tappable — used for the
+  // user-editable Driver Name / Fertilizers Used fields. Shows "N/A" until
+  // the user fills a value in.
+  Widget _editableRow(
+      IconData icon, String label, String? value, Color accentColor,
+      {required VoidCallback onTap, bool isLast = false}) {
+    final displayValue =
+        (value == null || value.trim().isEmpty) ? 'N/A' : value;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          border: isLast
+              ? null
+              : Border(bottom: BorderSide(color: Colors.grey[100]!, width: 1)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 18, color: accentColor),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label,
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(displayValue,
+                  textAlign: TextAlign.end,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87)),
+            ),
+            const SizedBox(width: 6),
+            Icon(Icons.edit, size: 15, color: Colors.grey[400]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editReportField({
+    required BuildContext context,
+    required String title,
+    required String? currentValue,
+    required Future<void> Function(String value) onSave,
+    bool multiline = false,
+  }) async {
+    final controller = TextEditingController(
+        text: (currentValue ?? '').trim() == 'N/A' ? '' : (currentValue ?? ''));
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Edit $title'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: multiline ? 3 : 1,
+          decoration: InputDecoration(
+            hintText: 'Enter $title',
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return; // cancelled
+    await onSave(result);
+  }
+
+  Future<void> _saveReportField({String? driverName, String? fertilizersUsed}) async {
+    try {
+      await ref.read(reportRepoProvider).updateReportDetails(
+            widget.report.id,
+            driverName: driverName,
+            fertilizersUsed: fertilizersUsed,
+          );
+      ref.invalidate(reportDetailProvider(widget.report.id));
+      if (context.mounted) showSuccessSnackBar(context, 'Saved');
+    } catch (e) {
+      if (context.mounted) {
+        showGenericErrorSnackBar(context, 'Failed to save — try again');
+      }
+    }
+  }
+
   Widget _buildLegend() {
     List<Widget> items = [];
     switch (_heatmapType) {
@@ -610,9 +826,18 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         break;
       case HeatmapType.spraying:
         items = [
-          _legendItem('0-70 L/m', Colors.blue.shade400),
+          _legendItem('0 L/m (No Spray)', Colors.white),
+          _legendItem('1-70 L/m', Colors.blue.shade800),
           _legendItem('70-200 L/m', Colors.red.shade400),
           _legendItem('>200 L/m', Colors.black),
+        ];
+        break;
+      case HeatmapType.leftRight:
+        items = [
+          _legendItem('Left only', Colors.orange.shade700),
+          _legendItem('Right only', Colors.purple.shade700),
+          _legendItem('Both', Colors.teal.shade700),
+          _legendItem('Neither', Colors.white),
         ];
         break;
     }
@@ -643,7 +868,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           Container(
             width: 12,
             height: 12,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade400, width: 0.5),
+            ),
           ),
           const SizedBox(width: 6),
           Text(label,
@@ -663,6 +892,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         _heatmapButton(HeatmapType.speed, 'Speed'),
         const SizedBox(width: 8),
         _heatmapButton(HeatmapType.spraying, 'Spray'),
+        const SizedBox(width: 8),
+        _heatmapButton(HeatmapType.leftRight, 'L/R'),
       ],
     );
   }
@@ -693,39 +924,27 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
-    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
-      if (!isInPlot) {
-        prev = p;
-        continue;
-      }
-      // The backend records GPS points only every ~10 s when the device is
-      // stationary and spraying (time-based fallback). Scale the flow
-      // contribution by the time delta so the heatmap accumulates the same
-      // intensity as the live monitoring screen (which sees every 1-second
-      // telemetry packet).
-      double effectiveFlow = p.flowRateLpm;
-      if (prev != null && p.flowRateLpm > 0) {
-        final dist = _gpsDistanceMeters(prev.lat, prev.lon, p.lat, p.lon);
-        if (dist < 3.0) {
-          final secs = p.timestamp.difference(prev.timestamp).inSeconds;
-          if (secs > 1) effectiveFlow = p.flowRateLpm * secs.toDouble();
-        }
-      }
+      if (!isInPlot) continue;
+      // The backend now records a GPS point on every telemetry packet while
+      // spraying (see session_service.py's should_record), so trajectory is
+      // as dense as what the live Monitoring screen draws from — no need to
+      // scale the flow value to compensate for sparse sampling anymore.
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
         ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
-        flowRate: effectiveFlow,
+        flowRate: p.flowRateLpm,
+        leftSolenoidOn: p.leftSolenoidState == 1,
+        rightSolenoidOn: p.rightSolenoidState == 1,
       ));
-      prev = p;
     }
     return result;
   }
@@ -782,6 +1001,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         case HeatmapType.spraying:
           color = HeatmapColorUtils.getColorForSpray(p.flowRateLpm);
           break;
+        case HeatmapType.leftRight:
+          color = Colors.red;
+          break;
       }
 
       if (currentColor == null) {
@@ -831,25 +1053,17 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 }
 
-double _gpsDistanceMeters(
-    double lat1, double lon1, double lat2, double lon2) {
-  const mPerDeg = 111320.0;
-  final cosLat =
-      math.cos((lat1 + lat2) / 2.0 * math.pi / 180.0);
-  final dLat = (lat2 - lat1) * mPerDeg;
-  final dLon = (lon2 - lon1) * mPerDeg * cosLat;
-  return math.sqrt(dLat * dLat + dLon * dLon);
-}
-
 // ── Full-screen map page ────────────────────────────────────────────────────
 
 class _FullScreenMapPage extends StatefulWidget {
   final Report report;
   final HeatmapType initialHeatmapType;
+  final bool initialIsSatelliteView;
 
   const _FullScreenMapPage({
     required this.report,
     required this.initialHeatmapType,
+    this.initialIsSatelliteView = true,
   });
 
   @override
@@ -858,11 +1072,13 @@ class _FullScreenMapPage extends StatefulWidget {
 
 class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   late HeatmapType _heatmapType;
+  late bool _isSatelliteView;
 
   @override
   void initState() {
     super.initState();
     _heatmapType = widget.initialHeatmapType;
+    _isSatelliteView = widget.initialIsSatelliteView;
   }
 
   @override
@@ -884,7 +1100,7 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
             children: [
               TileLayer(
                 urlTemplate:
-                    'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                    _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
                 subdomains: const ['a', 'b', 'c'],
               ),
               if (report.plot != null)
@@ -962,6 +1178,17 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
             ),
           ),
 
+          // Satellite/Normal toggle (top-left, below close)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8 + 44,
+            left: 12,
+            child: _mapViewToggleButton(
+              isSatellite: _isSatelliteView,
+              onTap: () =>
+                  setState(() => _isSatelliteView = !_isSatelliteView),
+            ),
+          ),
+
           // Legend (top-right)
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
@@ -982,6 +1209,8 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                 _heatmapButton(HeatmapType.speed, 'Speed'),
                 const SizedBox(width: 8),
                 _heatmapButton(HeatmapType.spraying, 'Spray'),
+                const SizedBox(width: 8),
+                _heatmapButton(HeatmapType.leftRight, 'L/R'),
               ],
             ),
           ),
@@ -1010,9 +1239,18 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         break;
       case HeatmapType.spraying:
         items = [
-          _legendItem('0-70 L/m', Colors.blue.shade400),
+          _legendItem('0 L/m (No Spray)', Colors.white),
+          _legendItem('1-70 L/m', Colors.blue.shade800),
           _legendItem('70-200 L/m', Colors.red.shade400),
           _legendItem('>200 L/m', Colors.black),
+        ];
+        break;
+      case HeatmapType.leftRight:
+        items = [
+          _legendItem('Left only', Colors.orange.shade700),
+          _legendItem('Right only', Colors.purple.shade700),
+          _legendItem('Both', Colors.teal.shade700),
+          _legendItem('Neither', Colors.white),
         ];
         break;
     }
@@ -1042,7 +1280,11 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
           Container(
             width: 12,
             height: 12,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade400, width: 0.5),
+            ),
           ),
           const SizedBox(width: 6),
           Text(label,
@@ -1083,39 +1325,27 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
-    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
-      if (!isInPlot) {
-        prev = p;
-        continue;
-      }
-      // The backend records GPS points only every ~10 s when the device is
-      // stationary and spraying (time-based fallback). Scale the flow
-      // contribution by the time delta so the heatmap accumulates the same
-      // intensity as the live monitoring screen (which sees every 1-second
-      // telemetry packet).
-      double effectiveFlow = p.flowRateLpm;
-      if (prev != null && p.flowRateLpm > 0) {
-        final dist = _gpsDistanceMeters(prev.lat, prev.lon, p.lat, p.lon);
-        if (dist < 3.0) {
-          final secs = p.timestamp.difference(prev.timestamp).inSeconds;
-          if (secs > 1) effectiveFlow = p.flowRateLpm * secs.toDouble();
-        }
-      }
+      if (!isInPlot) continue;
+      // The backend now records a GPS point on every telemetry packet while
+      // spraying (see session_service.py's should_record), so trajectory is
+      // as dense as what the live Monitoring screen draws from — no need to
+      // scale the flow value to compensate for sparse sampling anymore.
       result.add(HeatmapTrackPoint(
         position: point,
         isInPlot: true,
         ptoOn: p.ptoState == 1,
         isAuto: p.sprayMode == 1,
         speed: p.speedKmph,
-        flowRate: effectiveFlow,
+        flowRate: p.flowRateLpm,
+        leftSolenoidOn: p.leftSolenoidState == 1,
+        rightSolenoidOn: p.rightSolenoidState == 1,
       ));
-      prev = p;
     }
     return result;
   }
@@ -1171,6 +1401,9 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
           break;
         case HeatmapType.spraying:
           color = HeatmapColorUtils.getColorForSpray(p.flowRateLpm);
+          break;
+        case HeatmapType.leftRight:
+          color = Colors.red;
           break;
       }
 

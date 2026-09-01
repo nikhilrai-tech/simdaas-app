@@ -18,6 +18,7 @@ class ReportModel extends Report {
     required super.plotAreaSqm,
     required super.completionPercentage,
     super.chemicalSavedPercentage,
+    super.chemicalSavedNote,
     super.controlUnitId,
     super.controlUnitName,
     super.linkedSprayerName,
@@ -33,6 +34,9 @@ class ReportModel extends Report {
     super.startedAt,
     super.endedAt,
     super.trajectory = const [],
+    super.gpsUnavailableNote,
+    super.driverName,
+    super.fertilizersUsed,
   });
 
   factory ReportModel.fromJson(Map<String, dynamic> json) {
@@ -74,6 +78,7 @@ class ReportModel extends Report {
       plotAreaSqm: parseDouble(json['plot_area_sqm']),
       completionPercentage: parseDouble(json['completion_percentage']),
       chemicalSavedPercentage: parseDouble(json['chemical_saved_percentage']),
+      chemicalSavedNote: json['chemical_saved_note']?.toString(),
       controlUnitId: json['control_unit_details']?['id']?.toString()
           ?? json['control_unit_id']?.toString(),
       controlUnitName: json['control_unit_details']?['name']?.toString(),
@@ -90,9 +95,9 @@ class ReportModel extends Report {
       avgFlowRateLacre: parseDouble(json['avg_flow_rate_lacre']),
       avgSpeedKmph: parseDouble(json['avg_speed_kmph']),
       maxSpeedKmph: parseDouble(json['max_speed_kmph']),
-      createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
-      startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at']) : null,
-      endedAt: json['ended_at'] != null ? DateTime.tryParse(json['ended_at']) : null,
+      createdAt: DateTime.tryParse(json['created_at'] ?? '')?.toLocal() ?? DateTime.now(),
+      startedAt: json['started_at'] != null ? DateTime.tryParse(json['started_at'])?.toLocal() : null,
+      endedAt: json['ended_at'] != null ? DateTime.tryParse(json['ended_at'])?.toLocal() : null,
       trajectory: (json['trajectory'] as List<dynamic>?)
               ?.map((e) => GPSPointData(
                     lat: parseDouble(e['lat']),
@@ -101,11 +106,18 @@ class ReportModel extends Report {
                     flowRateLpm: parseDouble(e['flow_rate_lpm']),
                     sprayMode: (e['spray_mode'] as num?)?.toInt() ?? 0,
                     ptoState: (e['pto_state'] as num?)?.toInt() ?? 0,
-                    timestamp: DateTime.tryParse(e['timestamp'] ?? '') ??
+                    leftSolenoidState:
+                        (e['left_solenoid_state'] as num?)?.toInt() ?? 0,
+                    rightSolenoidState:
+                        (e['right_solenoid_state'] as num?)?.toInt() ?? 0,
+                    timestamp: DateTime.tryParse(e['timestamp'] ?? '')?.toLocal() ??
                         DateTime.now(),
                   ))
               .toList() ??
           [],
+      gpsUnavailableNote: json['gps_unavailable_note']?.toString(),
+      driverName: json['driver_name']?.toString(),
+      fertilizersUsed: json['fertilizers_used']?.toString(),
     );
   }
 

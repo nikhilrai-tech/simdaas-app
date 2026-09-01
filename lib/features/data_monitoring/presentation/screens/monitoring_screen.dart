@@ -32,12 +32,14 @@ class MonitoringScreen extends ConsumerStatefulWidget {
   ConsumerState<MonitoringScreen> createState() => _MonitoringScreenState();
 }
 
-class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
+class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
+    with WidgetsBindingObserver {
   // Ignore telemetry for N minutes after a manual end (belt-and-suspenders
   // in case the WS event arrives late).
   final Map<String, DateTime> _ignoredUntil = {};
 
   HeatmapType _selectedHeatmap = HeatmapType.gps;
+  bool _isSatelliteView = true;
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
   StreamSubscription<TelemetryData>? _deviceSub;
@@ -65,6 +67,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   double? _lastSpeed;
   bool? _lastPtoOn;
 
+  // Device's uptime from the previous packet, used to detect a reboot
+  // (uptime resets to ~0) so the four cached values above get dropped right
+  // then instead of lingering on-screen as stale pre-reboot numbers until a
+  // fresh packet happens to overwrite each one individually.
+  double? _lastUptimeSec;
+
+  // Backend-reported last-seen time for this device (from the control unit
+  // list), used as a fallback in _waitingSecondsRemaining() when this app
+  // session hasn't received a live telemetry packet yet — e.g. navigating
+  // straight into a device that was already in WAITING before this screen
+  // mounted. Without it, the WAITING countdown (and the "End active device"
+  // menu item, which is gated on it) never appears until a packet arrives.
+  DateTime? _backendLastSeenAt;
+
   // Set to true when the user manually ends the session on this screen.
   // Blocks incoming telemetry so the device cannot flicker back to "online"
   // before the cooldown event lands. Cleared automatically once the cooldown
@@ -74,6 +90,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     debugPrint('MonitoringScreen: Initializing. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
     
     // Refresh providers to ensure we have the latest session state
@@ -94,6 +111,19 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         debugPrint('stack: $st');
       }
 
+      // Correct the cached cooldown state against the backend's live Redis
+      // status, in case a status_change/report_ready WebSocket event was
+      // missed while this screen wasn't mounted (app backgrounded, socket
+      // drop, etc). Fire-and-forget: never blocks initState, and any
+      // failure is swallowed inside reconcileCooldownState itself.
+      unawaited(svc.reconcileCooldownState(widget.deviceId!));
+
+      // Re-fetch this session's GPS track from the backend in case the app
+      // was killed or the WebSocket dropped while this screen wasn't
+      // mounted — see restoreTrackFromBackend's doc comment. Fire-and-forget;
+      // updates `positions` via setState once it resolves.
+      unawaited(_restoreGpsTrack(normId));
+
       // Seed positions and latest telemetry from the service snapshot if available.
       try {
         positions = svc.getPositions(normId);
@@ -111,6 +141,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           if (seed.tankLevel != null) _lastTankLevel = seed.tankLevel;
           if (seed.speed != null) _lastSpeed = seed.speed;
           if (seed.ptoState != null) _lastPtoOn = seed.ptoState == 1;
+          if (seed.uptimeSec != null) _lastUptimeSec = seed.uptimeSec;
         }
       } catch (e, st) {
         debugPrint('MonitoringScreen: latestTelemetry seed error: $e');
@@ -153,6 +184,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           if (!mounted) return;
 
           setState(() {
+            // Device reboot detected (uptime_sec resets to ~0) — drop the
+            // cached last-known values instead of letting them linger as
+            // stale pre-reboot numbers; they get replaced by this same
+            // packet's fresh values immediately below.
+            if (t.uptimeSec != null &&
+                _lastUptimeSec != null &&
+                t.uptimeSec! < _lastUptimeSec!) {
+              _lastFlowRate = null;
+              _lastTankLevel = null;
+              _lastSpeed = null;
+              _lastPtoOn = null;
+            }
+            if (t.uptimeSec != null) _lastUptimeSec = t.uptimeSec;
+
             latestTelemetry = t;
             // Cache last known values so they survive waiting/cooldown gaps
             if (t.flowRate != null) _lastFlowRate = t.flowRate;
@@ -169,6 +214,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                 'speed': t.speed,
                 'flow_rate': t.flowRate,
                 'spray_mode': t.sprayMode,
+                'left_solenoid': t.leftSolenoidState,
+                'right_solenoid': t.rightSolenoidState,
               });
             }
           });
@@ -279,9 +326,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       final cooldownDone = (_cooldownState?.secondsRemaining ?? 0) <= 0;
       final waitingSecsLeft = _waitingSecondsRemaining();
 
-      // Fallback: if the 10-min session timeout has expired and no report_ready
-      // WebSocket event was received (Celery Beat may be down or WS missed it),
-      // clear stale GPS track proactively so the UI doesn't keep showing old data.
+      // Fallback: if the session timeout (TelemetryService.sessionTimeoutMinutes)
+      // has expired and no report_ready WebSocket event was received (Celery
+      // Beat may be down or WS missed it), clear stale GPS track proactively
+      // so the UI doesn't keep showing old data.
       if (waitingSecsLeft == 0 &&
           _cooldownState == null &&
           positions.isNotEmpty) {
@@ -308,7 +356,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     if (_cooldownState?.status == DeviceLifecycleStatus.offline) return 0;
     final svc = ref.read(telemetryServiceProvider);
     final nid = canonicalizeMac(widget.deviceId!);
-    final lastSeen = svc.getLastSeenAt(nid);
+    // Prefer the in-memory last-seen (actual last MQTT receive time this
+    // app session observed); fall back to the backend-reported value when
+    // this screen hasn't seen a live packet yet (e.g. opened directly onto
+    // a device that was already waiting).
+    final lastSeen = svc.getLastSeenAt(nid) ?? _backendLastSeenAt;
     if (lastSeen == null) return 0;
     final elapsed = DateTime.now().toUtc().difference(lastSeen).inSeconds;
     final remaining = TelemetryService.sessionTimeoutMinutes * 60 - elapsed;
@@ -322,11 +374,41 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _deviceSub?.cancel();
     _cooldownSub?.cancel();
     _countdownTimer?.cancel();
     _cooldownBannerDismissTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed) return;
+    if (widget.deviceId == null || widget.deviceId!.isEmpty) return;
+
+    final normId = canonicalizeMac(widget.deviceId!);
+    final svc = ref.read(telemetryServiceProvider);
+    // Same "resync on resume" fix as reconcileCooldownState (status badge)
+    // and _restoreGpsTrack (GPS track): the app may have been backgrounded
+    // long enough for Android to kill it or drop the WebSocket, so both are
+    // re-checked against the backend every time this screen comes back to
+    // the foreground, not just on first mount.
+    unawaited(svc.reconcileCooldownState(widget.deviceId!));
+    unawaited(_restoreGpsTrack(normId));
+  }
+
+  /// Re-fetch this device's GPS track from the backend and merge it into
+  /// the local `positions` list shown on the map. See
+  /// [TelemetryService.restoreTrackFromBackend] for why this is needed.
+  Future<void> _restoreGpsTrack(String normId) async {
+    final svc = ref.read(telemetryServiceProvider);
+    await svc.restoreTrackFromBackend(normId);
+    if (!mounted) return;
+    setState(() {
+      positions = svc.getPositions(normId);
+    });
   }
 
 
@@ -464,6 +546,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           if (candidate.isNotEmpty && canonicalizeMac(candidate) == normId) {
             resolvedControlUnitName = cu.name;
             resolvedActiveSessionId = cu.activeSessionId;
+            _backendLastSeenAt = cu.lastSeenAt;
             break;
           }
         }
@@ -524,7 +607,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(resolvedControlUnitName ?? 'Data Monitoring', style: const TextStyle(fontSize: 18)),
-                if (latestTelemetry != null &&
+                if (_cooldownState?.isInCooldown ?? false)
+                  Builder(builder: (_) {
+                    final cd = _cooldownState!;
+                    final label = cd.cooldownEnd != null
+                        ? '❄️ ${cd.countdownLabel}'
+                        : '❄️ COOLDOWN';
+                    return Text(
+                      label,
+                      style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 10, fontWeight: FontWeight.bold),
+                    );
+                  })
+                else if (latestTelemetry != null &&
                     DateTime.now().difference(latestTelemetry!.timestamp.toLocal()).inSeconds < 10)
                   const Text('● LIVE', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold))
                 else if (_waitingSecondsRemaining() > 0)
@@ -592,17 +686,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                       );
                     }),
                     const SizedBox(width: 16),
-                    // Signal
-                    SignalStrengthIndicator.bars(
-                      value: latestTelemetry!.simSignalQuality != null
-                          ? getSignalBars(latestTelemetry!.simSignalQuality!) / 5
-                          : 0,
-                      size: 22,
-                      barCount: 5,
-                      spacing: 1.0,
-                      activeColor: Colors.white,
-                      inactiveColor: Colors.white.withAlpha(80),
-                    ),
+                    // Signal — bars colored by strength (green/orange/red)
+                    // instead of flat white, so it reads at a glance on a
+                    // small screen instead of relying on subtle bar-height
+                    // and opacity differences alone.
+                    Builder(builder: (ctx) {
+                      final sim = latestTelemetry!.simSignalQuality;
+                      final bars = sim != null ? getSignalBars(sim) : 0;
+                      final Color signalColor = bars >= 4
+                          ? Colors.green
+                          : (bars >= 2 ? Colors.orange : Colors.red);
+                      return SignalStrengthIndicator.bars(
+                        value: sim != null ? bars / 5 : 0,
+                        size: 22,
+                        barCount: 5,
+                        spacing: 1.0,
+                        activeColor: signalColor,
+                        inactiveColor: Colors.white.withAlpha(80),
+                      );
+                    }),
                   ],
                 ),
               )
@@ -645,8 +747,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
               ),
               children: [
                 TileLayer(
-                    urlTemplate:
-                        'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                    urlTemplate: _isSatelliteView
+                        ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+                        : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                     subdomains: const ['a', 'b', 'c']),
                 if (plot.polygon.isNotEmpty)
                   PolygonLayer(polygons: [
@@ -706,12 +809,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                             color: _markerColorForTelemetry(latestTelemetry!,
                               ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull))),
                   ]),
-                _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
-                    sprayersAsync.asData?.value, userId),
-                _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
-                    sprayersAsync.asData?.value, userId),
-                _buildSensorOverlay(controlUnitsAsync.asData?.value,
-                    sprayersAsync.asData?.value, userId),
               ],
             ),
             // Top-right map overlay for PTO and Auto/Manual indicators.
@@ -961,8 +1058,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                                   value: 'spraying_heatmap',
                                   child: Text('Spraying heat map',
                                       style: TextStyle(
-                                          color: _selectedHeatmap ==
-                                                  HeatmapType.spraying
+                                          color: (_selectedHeatmap ==
+                                                      HeatmapType.spraying ||
+                                                  _selectedHeatmap ==
+                                                      HeatmapType.leftRight)
                                               ? Theme.of(context).primaryColor
                                               : Colors.black))),
                               PopupMenuItem(
@@ -1031,11 +1130,42 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
                 child: _buildCooldownBanner(_cooldownState!),
               ),
 
-            // ── Heatmap legend (below nozzle card, left side) ────────────
+            // ── Heatmap legend + active info card (left side, stacked) ───
+            // The info card (tank/spray/sensor) always renders directly
+            // below the legend instead of floating over the top-right area,
+            // so the two never overlap on small screens. Only one of the
+            // three overlays can be visible at a time (see the _toggle*
+            // methods), so at most one extra card appears here.
             Positioned(
               top: 80,
               left: 12,
-              child: SafeArea(child: _buildLegend()),
+              child: SafeArea(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width - 24,
+                  ),
+                  child: IntrinsicWidth(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildSpraySubToggle(),
+                        _buildLegend(),
+                        if (_showTankOverlay ||
+                            _showSolenoidOverlay ||
+                            _showSensorOverlay)
+                          const SizedBox(height: 8),
+                        _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
+                            sprayersAsync.asData?.value, userId),
+                        _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
+                            sprayersAsync.asData?.value, userId),
+                        _buildSensorOverlay(controlUnitsAsync.asData?.value,
+                            sprayersAsync.asData?.value, userId),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
 
             // ── Top-left L/R nozzle indicators (left/right) ───────────────
@@ -1253,11 +1383,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         error: (e, st) => Center(child: Text(extractErrorMessage(e))),
       ),
       floatingActionButton: widget.deviceId != null
-          ? FloatingActionButton(
-              heroTag: 'center_current',
-              mini: true,
-              onPressed: _goToCurrentPosition,
-              child: const Icon(Icons.my_location),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'toggle_map_view',
+                  mini: true,
+                  onPressed: () =>
+                      setState(() => _isSatelliteView = !_isSatelliteView),
+                  child: Icon(
+                      _isSatelliteView ? Icons.map : Icons.satellite_alt),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: 'center_current',
+                  mini: true,
+                  onPressed: _goToCurrentPosition,
+                  child: const Icon(Icons.my_location),
+                ),
+              ],
             )
           : null,
     ),   // Scaffold
@@ -1303,56 +1447,45 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     const imgHeight = 220.0;
     final fillHeight = imgHeight * (percent / 100.0);
 
-    return Positioned(
-      top: 120,
-      right: 12,
-      child: SafeArea(
-        child: Card(
-          color: Colors.white.withAlpha(230),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8)),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: imgWidth,
-                  height: imgHeight,
-                  child: Stack(alignment: Alignment.center, children: [
-                    Image.asset('assets/monitoring/tank_level.png',
-                        width: imgWidth,
-                        height: imgHeight,
-                        fit: BoxFit.contain),
-                    Positioned(
-                      bottom: 0,
-                      child: Container(
-                        width: imgWidth,
-                        height: fillHeight,
-                        color: Colors.blue.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    Text(pctLabel,
-                        style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color:
-                                percent < 30 ? Colors.red : Colors.black)),
-                  ]),
+    return Card(
+      color: Colors.white.withAlpha(230),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: imgWidth,
+              height: imgHeight,
+              child: Stack(alignment: Alignment.center, children: [
+                Image.asset('assets/monitoring/tank_level.png',
+                    width: imgWidth, height: imgHeight, fit: BoxFit.contain),
+                Positioned(
+                  bottom: 0,
+                  child: Container(
+                    width: imgWidth,
+                    height: fillHeight,
+                    color: Colors.blue.withValues(alpha: 0.45),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                    'Cap: ${tankCapacity != null ? '${tankCapacity.toString()} L' : '-'}'),
-                const SizedBox(height: 6),
-                Text(
-                    'Now: ${liters != null ? '${liters.toStringAsFixed(2)} L' : pctLabel}'),
-                const SizedBox(height: 8),
-                TextButton(
-                    onPressed: _hideTankLevelOverlay,
-                    child: const Text('Close'))
-              ],
+                Text(pctLabel,
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: percent < 30 ? Colors.red : Colors.black)),
+              ]),
             ),
-          ),
+            const SizedBox(height: 8),
+            Text(
+                'Cap: ${tankCapacity != null ? '${tankCapacity.toString()} L' : '-'}'),
+            const SizedBox(height: 6),
+            Text(
+                'Now: ${liters != null ? '${liters.toStringAsFixed(2)} L' : pctLabel}'),
+            const SizedBox(height: 8),
+            TextButton(
+                onPressed: _hideTankLevelOverlay, child: const Text('Close'))
+          ],
         ),
       ),
     );
@@ -1368,7 +1501,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
     setState(() {
-      _showTankOverlay = !_showTankOverlay;
+      final next = !_showTankOverlay;
+      _showTankOverlay = next;
+      if (next) {
+        _showSolenoidOverlay = false;
+        _showSensorOverlay = false;
+      }
     });
     } catch (e, st) {
       debugPrint('Error toggling tank overlay: $e');
@@ -1387,80 +1525,70 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
     const imgWidth = 260.0;
     const imgHeight = 140.0;
 
-    return Positioned(
-      top: 120,
-      right: 12,
-      child: SafeArea(
-        child: Card(
-          color: Colors.white.withAlpha(230),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+    return Card(
+      color: Colors.white.withAlpha(230),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: imgWidth,
+              height: imgHeight,
+              child: Stack(alignment: Alignment.center, children: [
+                Image.asset('assets/monitoring/solenoid.png',
+                    width: imgWidth, height: imgHeight, fit: BoxFit.contain),
+                // Left indicator
+                Positioned(
+                  left: 90,
+                  top: imgHeight * 0.40,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                        color: leftOn ? Colors.green : Colors.grey,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2)),
+                  ),
+                ),
+                // Right indicator
+                Positioned(
+                  right: 90,
+                  top: imgHeight * 0.40,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                        color: rightOn ? Colors.green : Colors.grey,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2)),
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 8),
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                SizedBox(
-                  width: imgWidth,
-                  height: imgHeight,
-                  child: Stack(alignment: Alignment.center, children: [
-                    Image.asset('assets/monitoring/solenoid.png',
-                        width: imgWidth,
-                        height: imgHeight,
-                        fit: BoxFit.contain),
-                    // Left indicator
-                    Positioned(
-                      left: 90,
-                      top: imgHeight * 0.40,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                            color: leftOn ? Colors.green : Colors.grey,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2)),
-                      ),
-                    ),
-                    // Right indicator
-                    Positioned(
-                      right: 90,
-                      top: imgHeight * 0.40,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                            color: rightOn ? Colors.green : Colors.grey,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2)),
-                      ),
-                    ),
-                  ]),
-                ),
-                const SizedBox(height: 8),
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Text('LEFT',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 12)),
-                    Text('RIGHT',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 12)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text('L: ${leftOn ? 'ON' : 'OFF'}'),
-                  const SizedBox(width: 12),
-                  Text('R: ${rightOn ? 'ON' : 'OFF'}'),
-                ]),
-                const SizedBox(height: 8),
-                TextButton(
-                    onPressed: _hideSolenoidOverlay,
-                    child: const Text('Close'))
+                Text('LEFT',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                Text('RIGHT',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
               ],
             ),
-          ),
+            const SizedBox(height: 8),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('L: ${leftOn ? 'ON' : 'OFF'}'),
+              const SizedBox(width: 12),
+              Text('R: ${rightOn ? 'ON' : 'OFF'}'),
+            ]),
+            const SizedBox(height: 8),
+            TextButton(
+                onPressed: _hideSolenoidOverlay, child: const Text('Close'))
+          ],
         ),
       ),
     );
@@ -1476,7 +1604,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
     setState(() {
-      _showSolenoidOverlay = !_showSolenoidOverlay;
+      final next = !_showSolenoidOverlay;
+      _showSolenoidOverlay = next;
+      if (next) {
+        _showTankOverlay = false;
+        _showSensorOverlay = false;
+      }
     });
     } catch (e, st) {
       debugPrint('Error toggling solenoid overlay: $e');
@@ -1502,92 +1635,82 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         ? t.rightDensity!.toStringAsFixed(2)
         : '-';
 
-    return Positioned(
-      top: 100,
-      right: 12,
-      child: SafeArea(
-        child: Card(
-          color: Colors.white.withAlpha(240),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
-            child: SizedBox(
-              width: 340,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Card(
+      color: Colors.white.withAlpha(240),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
+        child: SizedBox(
+          width: 340,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sensor Data',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).primaryColor)),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Sensor Data',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor)),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Expanded(
-                          flex: 2,
-                          child: Text('Distance',
-                              style: TextStyle(fontWeight: FontWeight.w600))),
-                      Expanded(
-                        flex: 3,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            SizedBox(
-                                width: 60,
-                                child:
-                                    Text(leftDist, textAlign: TextAlign.right)),
-                            const SizedBox(width: 20),
-                            SizedBox(
-                                width: 60,
-                                child: Text(rightDist,
-                                    textAlign: TextAlign.right)),
-                          ],
-                        ),
-                      ),
-                    ],
+                  const Expanded(
+                      flex: 2,
+                      child: Text('Distance',
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  Expanded(
+                    flex: 3,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        SizedBox(
+                            width: 60,
+                            child: Text(leftDist, textAlign: TextAlign.right)),
+                        const SizedBox(width: 20),
+                        SizedBox(
+                            width: 60,
+                            child:
+                                Text(rightDist, textAlign: TextAlign.right)),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Expanded(
-                          flex: 2,
-                          child: Text('Strength',
-                              style: TextStyle(fontWeight: FontWeight.w600))),
-                      Expanded(
-                        flex: 3,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            SizedBox(
-                                width: 60,
-                                child:
-                                    Text(leftStr, textAlign: TextAlign.right)),
-                            const SizedBox(width: 20),
-                            SizedBox(
-                                width: 60,
-                                child:
-                                    Text(rightStr, textAlign: TextAlign.right)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                        onPressed: _hideSensorOverlay,
-                        child: const Text('Close')),
-                  )
                 ],
               ),
-            ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                      flex: 2,
+                      child: Text('Strength',
+                          style: TextStyle(fontWeight: FontWeight.w600))),
+                  Expanded(
+                    flex: 3,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        SizedBox(
+                            width: 60,
+                            child: Text(leftStr, textAlign: TextAlign.right)),
+                        const SizedBox(width: 20),
+                        SizedBox(
+                            width: 60,
+                            child:
+                                Text(rightStr, textAlign: TextAlign.right)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                    onPressed: _hideSensorOverlay,
+                    child: const Text('Close')),
+              )
+            ],
           ),
         ),
       ),
@@ -1604,7 +1727,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       List<dynamic>? controlUnits, List<dynamic>? sprayers, String userId) {
     try {
     setState(() {
-      _showSensorOverlay = !_showSensorOverlay;
+      final next = !_showSensorOverlay;
+      _showSensorOverlay = next;
+      if (next) {
+        _showTankOverlay = false;
+        _showSolenoidOverlay = false;
+      }
     });
     } catch (e, st) {
       debugPrint('Error toggling sensor overlay: $e');
@@ -1644,6 +1772,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
         case HeatmapType.spraying:
           return HeatmapColorUtils.getColorForSpray(t.flowRate);
+
+        case HeatmapType.leftRight:
+          return HeatmapColorUtils.getColorForLeftRight(
+            leftOn: t.leftSolenoidState == 1,
+            rightOn: t.rightSolenoidState == 1,
+          );
       }
     } catch (e, st) {
       debugPrint('MonitoringScreen._markerColorForTelemetry error: $e');
@@ -1756,6 +1890,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
       final spray = p['spray_mode'];
       final isAuto =
           spray != null && (spray is int ? spray == 1 : spray.toString() == '1');
+      final leftSol = p['left_solenoid'];
+      final leftOn = leftSol != null &&
+          (leftSol is int ? leftSol == 1 : leftSol.toString() == '1');
+      final rightSol = p['right_solenoid'];
+      final rightOn = rightSol != null &&
+          (rightSol is int ? rightSol == 1 : rightSol.toString() == '1');
 
       result.add(HeatmapTrackPoint(
         position: LatLng(lat, lon),
@@ -1764,6 +1904,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         isAuto: isAuto,
         speed: (p['speed'] as num?)?.toDouble(),
         flowRate: (p['flow_rate'] as num?)?.toDouble(),
+        leftSolenoidOn: leftOn,
+        rightSolenoidOn: rightOn,
       ));
     }
     return result;
@@ -1843,6 +1985,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           color = HeatmapColorUtils.getColorForSpray(
               (p['flow_rate'] as num?)?.toDouble());
           break;
+        case HeatmapType.leftRight:
+          color = Colors.red;
+          break;
       }
 
       if (currentColor == null) {
@@ -1860,6 +2005,56 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
 
     flush();
     return result;
+  }
+
+  // Small "Flow / L-R" switch shown only while a spray-related heatmap is
+  // selected, so Left/Right isn't a separate top-level "Spraying heat map"
+  // vs "Left/Right spray heat map" menu choice — it's a sub-view you flip
+  // to without leaving the Spraying heatmap.
+  Widget _buildSpraySubToggle() {
+    if (_selectedHeatmap != HeatmapType.spraying &&
+        _selectedHeatmap != HeatmapType.leftRight) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(230),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withAlpha(25), blurRadius: 4),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _sprayModeChip('Flow', HeatmapType.spraying),
+          const SizedBox(width: 4),
+          _sprayModeChip('L/R', HeatmapType.leftRight),
+        ],
+      ),
+    );
+  }
+
+  Widget _sprayModeChip(String label, HeatmapType type) {
+    final selected = _selectedHeatmap == type;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedHeatmap = type),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? Theme.of(context).primaryColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: selected ? Colors.white : Colors.black87,
+            )),
+      ),
+    );
   }
 
   Widget _buildLegend() {
@@ -1882,9 +2077,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
         break;
       case HeatmapType.spraying:
         items = [
-          _legendItem('0-70 L/m', Colors.blue.shade400),
+          _legendItem('0 L/m (No Spray)', Colors.white),
+          _legendItem('1-70 L/m', Colors.blue.shade800),
           _legendItem('70-200 L/m', Colors.red.shade400),
           _legendItem('>200 L/m', Colors.black),
+        ];
+        break;
+      case HeatmapType.leftRight:
+        items = [
+          _legendItem('Left only', Colors.orange.shade700),
+          _legendItem('Right only', Colors.purple.shade700),
+          _legendItem('Both', Colors.teal.shade700),
+          _legendItem('Neither', Colors.white),
         ];
         break;
     }
@@ -1914,7 +2118,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen> {
           Container(
             width: 12,
             height: 12,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade400, width: 0.5),
+            ),
           ),
           const SizedBox(width: 6),
           Text(label,

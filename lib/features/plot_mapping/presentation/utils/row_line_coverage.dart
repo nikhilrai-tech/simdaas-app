@@ -16,7 +16,7 @@ import 'row_line_generator.dart';
 ///    is split into ~2 m sub-bands along its length. A sub-band is colored when
 ///    the sprayer GPS track passes through it. Revisited sub-bands go darker.
 ///
-/// 2. **Row lines** — plain yellow polylines drawn on top of the bands.
+/// 2. **Row lines** — plain white polylines drawn on top of the bands.
 ///    These never change color; they are the tree row reference lines.
 ///
 /// Color scheme (single corridor = space between two tree rows):
@@ -134,7 +134,9 @@ class RowLineCoverage {
           (segLen / subSegmentLengthMeters).ceil().clamp(1, 1000).toInt();
       final halfWidth = rowSpacing / 2;
 
-      // Spray: accumulate flow rates + counts for averaging; GPS/Speed: track latest color.
+      // Spray: accumulate flow rates + counts for averaging. GPS: track the
+      // highest-priority color ever seen (never downgrades). Speed/Left-
+      // Right: track latest color.
       // subBandMaxPass: highest corridor-entry number that touched each sub-band.
       //   corridorPassCount increments each time the sprayer re-enters this corridor
       //   (prevIdxInCorridor null → non-null transition). This detects re-passes
@@ -143,6 +145,10 @@ class RowLineCoverage {
       final accumulatedCount = List<int>.filled(numSub, 0);
       final latestColor = List<Color?>.filled(numSub, null);
       final subBandMaxPass = List<int>.filled(numSub, 0);
+      // GPS heatmap only: highest gpsPriority ever recorded for each
+      // sub-band, so a later lower-priority sample (e.g. Auto -> PTO off)
+      // can't repaint it backwards — see HeatmapColorUtils.gpsPriority.
+      final gpsMaxPriority = List<int>.filled(numSub, -1);
       int corridorPassCount = 0;
 
       // Track last index in this corridor so we can fill the gap to the next
@@ -178,12 +184,23 @@ class RowLineCoverage {
           if (heatmapType == HeatmapType.spraying) {
             accumulated[s] += pt.flowRate ?? 0.0;
             accumulatedCount[s]++;
+          } else if (heatmapType == HeatmapType.gps) {
+            // Never downgrade: a sub-band that reached Auto must stay Auto
+            // even if a later sample here is PTO-off/Manual (GPS jitter, a
+            // momentary pause) — only an equal-or-higher priority sample
+            // updates the shown color.
+            final priority =
+                HeatmapColorUtils.gpsPriority(ptoOn: pt.ptoOn, isAuto: pt.isAuto);
+            if (priority >= gpsMaxPriority[s]) {
+              gpsMaxPriority[s] = priority;
+              latestColor[s] = color;
+            }
           } else {
-            // First-write wins for GPS/Speed heatmaps — a re-pass over the
-            // same sub-band (e.g. after a waiting-period gap) must NOT
-            // change the colour that was already recorded on the first
-            // pass. Only the Spray heatmap accumulates on re-pass.
-            latestColor[s] ??= color;
+            // Latest-write wins for Speed/Left-Right heatmaps — a re-pass
+            // over the same sub-band reflects the sprayer's current state
+            // there. Only the Spray heatmap accumulates on re-pass, and
+            // only the GPS heatmap has a no-downgrade priority rule.
+            latestColor[s] = color;
           }
         }
 
@@ -214,9 +231,10 @@ class RowLineCoverage {
           bandColor = HeatmapColorUtils.getColorForSpray(totalFlow);
           alpha = 200;
         } else {
-          // GPS / Speed heatmaps never override on re-pass — always show
-          // the colour recorded on the first visit, regardless of how many
-          // times the sprayer has driven over this sub-band since.
+          // GPS heatmap: highest-priority state ever recorded (never
+          // downgrades). Speed/Left-Right: most recent state (updated on
+          // every re-pass). Both are just whatever's currently in
+          // latestColor[i] at this point.
           final c = latestColor[i];
           if (c == null) continue;
           bandColor = c;
@@ -248,16 +266,16 @@ class RowLineCoverage {
     return bands;
   }
 
-  /// Build the planned row line polylines (always yellow — tree rows).
+  /// Build the planned row line polylines (tree rows).
   static List<Polyline> buildRowLines({
     required List<List<LatLng>> rowLines,
-    double strokeWidth = 2.5,
+    double strokeWidth = 2.0,
   }) {
     return rowLines
         .where((seg) => seg.length >= 2)
         .map((seg) => Polyline(
               points: seg,
-              color: Colors.yellow.withAlpha(220),
+              color: Colors.white.withAlpha(200),
               strokeWidth: strokeWidth,
             ))
         .toList();

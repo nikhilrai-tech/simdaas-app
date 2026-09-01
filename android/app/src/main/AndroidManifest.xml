@@ -6,9 +6,13 @@
     <!-- required for Android 12+ coarse/fine access -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    
+    <!-- Lets us ask the user to exempt the app from battery optimizations,
+         so the live telemetry WebSocket / cooldown timers keep running in
+         the background instead of being frozen by Doze/App Standby. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
-        android:label="simdaas"
+        android:label="Agrios"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

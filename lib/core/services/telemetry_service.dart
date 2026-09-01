@@ -8,6 +8,8 @@ import 'ws_channel_stub.dart'
     if (dart.library.html) 'ws_channel_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/mac_utils.dart';
+import 'api_service.dart';
+import 'auth_service.dart' show apiServiceProvider;
 
 /// Possible device lifecycle states driven by backend WebSocket events.
 enum DeviceLifecycleStatus {
@@ -149,6 +151,11 @@ class TelemetryData {
   final bool? deviceInPlot;
   final double? flowRateLpm;
   final double? flowInLitres;
+  // Device's own uptime counter (resets to ~0 on every reboot). Used to
+  // detect a reboot client-side (uptimeSec dropping below the previous
+  // packet's value) so cached "last known" stats aren't shown stale across
+  // the boundary — see monitoring_screen.dart's telemetry listener.
+  final double? uptimeSec;
 
   TelemetryData({
     required this.deviceId,
@@ -173,6 +180,7 @@ class TelemetryData {
     this.deviceInPlot,
     this.flowRateLpm,
     this.flowInLitres,
+    this.uptimeSec,
   });
 
   /// Parse telemetry JSON. Returns null when required fields (device_id
@@ -299,16 +307,26 @@ class TelemetryData {
       flowInLitres: json['flow_in_litres'] is num
           ? (json['flow_in_litres'] as num).toDouble()
           : null,
+      uptimeSec: json['uptime_sec'] is num
+          ? (json['uptime_sec'] as num).toDouble()
+          : null,
     );
   }
 }
 
 class TelemetryService {
-  TelemetryService({required this.baseUrl}) {
+  TelemetryService({required this.baseUrl, ApiService? apiService})
+      : _apiService = apiService {
     _startPruner();
   }
 
   final String baseUrl;
+
+  // Used only by [reconcileCooldownState] to fetch backend truth as a
+  // fallback when a WebSocket status_change/report_ready event is missed.
+  // Nullable so existing callers/tests that construct TelemetryService
+  // without an ApiService keep working unchanged (reconcile just no-ops).
+  final ApiService? _apiService;
 
   // Map deviceId -> last telemetry
   final Map<String, TelemetryData> _latest = {};
@@ -334,7 +352,8 @@ class TelemetryService {
   // Last time telemetry was received per device. Not cleared by the pruner —
   // only cleared when the session actually ends (status_change / report_ready)
   // or on unsubscribe/clearCache. Used to show a "waiting" countdown on the UI
-  // during the 10-minute backend idle window before session auto-timeout.
+  // during the backend idle window (sessionTimeoutMinutes) before session
+  // auto-timeout.
   final Map<String, DateTime> _lastSeenAt = {};
 
   // Last known job_completion_percent per device. Not cleared by the pruner so
@@ -342,8 +361,9 @@ class TelemetryService {
   // is temporarily offline (latestTelemetry is null). Cleared on session end.
   final Map<String, double> _lastKnownCoverage = {};
 
-  /// Idle minutes before the backend auto-ends a session (mirrors SESSION_TIMEOUT_MINUTES).
-  static const int sessionTimeoutMinutes = 10;
+  /// Idle minutes before the backend auto-ends a session
+  /// (mirrors jobs/session_service.py's WATCHDOG_TIMEOUT_MINUTES — keep in sync).
+  static const int sessionTimeoutMinutes = 60;
 
   // Broadcast stream that emits a CooldownState whenever any device's
   // lifecycle status changes (status_change or report_ready events).
@@ -696,6 +716,7 @@ class TelemetryService {
             deviceInPlot: t.deviceInPlot,
             flowRateLpm: t.flowRateLpm,
             flowInLitres: t.flowInLitres,
+            uptimeSec: t.uptimeSec,
           );
 
           _latest[normId] = stored;
@@ -728,6 +749,8 @@ class TelemetryService {
                 sprayMode: stored.sprayMode,
                 ptoState: stored.ptoState,
                 deviceInPlot: stored.deviceInPlot,
+                leftSolenoidState: stored.leftSolenoidState,
+                rightSolenoidState: stored.rightSolenoidState,
               ));
             }
           }
@@ -793,6 +816,159 @@ class TelemetryService {
     );
     _cooldownStates[norm] = normalized;
     _cooldownController.add(normalized);
+  }
+
+  /// Reconcile the cached [CooldownState] for [rawMac] against the backend's
+  /// live Redis state (`GET /jobs/api/devices/<mac>/status/`).
+  ///
+  /// The cooldown badge/timer is normally driven purely by pushed WebSocket
+  /// events (`status_change`, `report_ready`). Pub/sub delivery is
+  /// fire-and-forget — if the app is backgrounded or the socket drops for a
+  /// few seconds at the exact moment one of those events fires, it's gone
+  /// for good and the cached state is stuck showing a stale cooldown
+  /// forever (seen in production: badge frozen on "Cooldown" with a dead
+  /// timer, while a brand new session was already active in the DB).
+  ///
+  /// Call this whenever a screen that shows device status mounts/resumes.
+  /// It only *corrects* an out-of-date cache — it never fights a WS event
+  /// that already agrees, and any failure (offline, 404, auth) is swallowed
+  /// silently so a flaky network never disrupts the live WS-driven UI this
+  /// sits alongside.
+  Future<void> reconcileCooldownState(String rawMac) async {
+    final api = _apiService;
+    if (api == null || rawMac.trim().isEmpty) return;
+    final norm = canonicalizeMac(rawMac);
+
+    try {
+      final path = '/jobs/api/devices/${Uri.encodeComponent(rawMac)}/status/';
+      final data = await api.getJson(path);
+      if (data is! Map) return;
+
+      final statusStr = data['status']?.toString() ?? 'offline';
+      final DeviceLifecycleStatus backendStatus;
+      switch (statusStr) {
+        case 'online':
+          backendStatus = DeviceLifecycleStatus.online;
+          break;
+        case 'offline_pending_report':
+          backendStatus = DeviceLifecycleStatus.cooldown;
+          break;
+        default:
+          backendStatus = DeviceLifecycleStatus.offline;
+      }
+
+      DateTime? cooldownEnd;
+      final endTs = data['cooldown_end_ts'];
+      if (endTs != null) {
+        final asNum =
+            endTs is num ? endTs.toDouble() : double.tryParse(endTs.toString());
+        if (asNum != null && asNum > 0) {
+          final ms = asNum > 1e12 ? asNum.toInt() : (asNum * 1000).toInt();
+          cooldownEnd = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+        }
+      }
+
+      final cached = _cooldownStates[norm];
+      // Cache already agrees with the backend — nothing to correct, and
+      // skipping avoids a redundant stream event on every screen mount.
+      if (cached != null &&
+          cached.status == backendStatus &&
+          cached.cooldownEnd == cooldownEnd) {
+        return;
+      }
+
+      final reconciled = CooldownState(
+        deviceId: rawMac,
+        status: backendStatus,
+        cooldownEnd: cooldownEnd,
+        cooldownType: data['cooldown_type']?.toString(),
+        sessionId: data['session_id'] is int
+            ? data['session_id'] as int
+            : int.tryParse(data['session_id']?.toString() ?? ''),
+      );
+      _cooldownStates[norm] = reconciled;
+      _cooldownController.add(reconciled);
+      debugPrint(
+          'Telemetry: reconciled $norm from status endpoint (was ${cached?.status}) → $backendStatus');
+    } catch (e) {
+      debugPrint('Telemetry: reconcileCooldownState failed for $rawMac: $e');
+    }
+  }
+
+  /// Restore this device's GPS track from the backend's persisted history
+  /// (`GET /jobs/api/devices/<mac>/gps_points/`), replacing whatever partial
+  /// or empty local `_positions` list we currently have.
+  ///
+  /// The live track is normally built up purely from WebSocket pushes held
+  /// in memory — nothing is persisted on the phone. If the app is
+  /// backgrounded, Android can either kill the process outright (wiping the
+  /// in-memory track entirely) or just drop the WebSocket for a while
+  /// (leaving a gap that shows up as the track "jumping" once it
+  /// reconnects). The backend keeps every point for the active session in
+  /// Postgres regardless of whether the app is open, so re-fetching it here
+  /// makes the track whole again instead of missing or jumping.
+  ///
+  /// Call this whenever a screen showing the live track mounts/resumes.
+  /// Fire-and-forget safe: any failure (offline, 404, auth) is swallowed
+  /// silently so a flaky network never disrupts the live WS-driven UI.
+  ///
+  /// The backend endpoint returns the device's most recent session even if
+  /// it already ended (up to 2h ago) — that's by design for other callers,
+  /// but here it would resurrect a finished job's track and show it as if
+  /// it were live for a device that's now off. Only `session_status ==
+  /// "active"` is applied; anything else (completed, or no session at all)
+  /// is a no-op, leaving the screen's existing "no active session" state
+  /// (already cleared by report_ready — see _clearSessionState) untouched.
+  Future<void> restoreTrackFromBackend(String rawMac) async {
+    final api = _apiService;
+    if (api == null || rawMac.trim().isEmpty) return;
+    final norm = canonicalizeMac(rawMac);
+
+    try {
+      final path = '/jobs/api/devices/${Uri.encodeComponent(rawMac)}/gps_points/';
+      final data = await api.getJson(path);
+      if (data is! Map) return;
+
+      if (data['session_status']?.toString() != 'active') {
+        debugPrint(
+            'Telemetry: restoreTrackFromBackend skipped for $norm — session_status=${data['session_status']} (not active)');
+        return;
+      }
+
+      final rawPoints = data['points'];
+      if (rawPoints is! List || rawPoints.isEmpty) return;
+
+      final restored = <_LatLonEntry>[];
+      for (final p in rawPoints) {
+        if (p is! Map) continue;
+        final lat = (p['lat'] as num?)?.toDouble();
+        final lon = (p['lon'] as num?)?.toDouble();
+        final ts = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+        if (lat == null || lon == null || ts == null) continue;
+        restored.add(_LatLonEntry(
+          timestamp: ts.toUtc(),
+          lat: lat,
+          lon: lon,
+          speed: (p['speed_kmph'] as num?)?.toDouble(),
+          flowRate: (p['flow_rate_lpm'] as num?)?.toDouble(),
+          sprayMode: (p['spray_mode'] as num?)?.toInt(),
+          ptoState: (p['pto_state'] as num?)?.toInt(),
+          deviceInPlot: p['device_in_plot'] as bool?,
+          leftSolenoidState: (p['left_solenoid_state'] as num?)?.toInt(),
+          rightSolenoidState: (p['right_solenoid_state'] as num?)?.toInt(),
+        ));
+      }
+      if (restored.isEmpty) return;
+
+      // Backend is authoritative for this session's track — replace rather
+      // than merge/append, so a killed-and-restarted app doesn't end up with
+      // duplicate points once live WS updates resume.
+      _positions[norm] = restored;
+      debugPrint(
+          'Telemetry: restored ${restored.length} GPS points for $norm from backend');
+    } catch (e) {
+      debugPrint('Telemetry: restoreTrackFromBackend failed for $rawMac: $e');
+    }
   }
 
   /// Manually clear the cached telemetry for a device.
@@ -863,6 +1039,8 @@ class TelemetryService {
               'spray_mode': e.sprayMode,
               'pto': e.ptoState,
               'device_in_plot': e.deviceInPlot,
+              'left_solenoid': e.leftSolenoidState,
+              'right_solenoid': e.rightSolenoidState,
             })
         .toList();
   }
@@ -913,6 +1091,8 @@ class _LatLonEntry {
   final int? sprayMode;
   final int? ptoState;
   final bool? deviceInPlot;
+  final int? leftSolenoidState;
+  final int? rightSolenoidState;
   _LatLonEntry({
     required this.timestamp,
     required this.lat,
@@ -922,12 +1102,17 @@ class _LatLonEntry {
     this.sprayMode,
     this.ptoState,
     this.deviceInPlot,
+    this.leftSolenoidState,
+    this.rightSolenoidState,
   });
 }
 
 final telemetryServiceProvider = Provider<TelemetryService>((ref) {
   // Use provided base URL; default to ws://13.201.0.34:8001
-  final svc = TelemetryService(baseUrl: 'ws://3.108.218.140:8001');
+  final svc = TelemetryService(
+    baseUrl: 'ws://3.108.218.140:8001',
+    apiService: ref.watch(apiServiceProvider),
+  );
   ref.onDispose(() => svc.dispose());
   return svc;
 });

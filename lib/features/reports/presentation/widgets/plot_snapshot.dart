@@ -6,7 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'dart:ui' as ui;
 import '../../../plot_mapping/domain/entities/plot.dart';
 
-class PlotSnapshot extends StatelessWidget {
+class PlotSnapshot extends StatefulWidget {
   final PlotEntity? plot;
   final String? base64Image; // Base64-encoded PNG from backend
   final double height;
@@ -17,6 +17,19 @@ class PlotSnapshot extends StatelessWidget {
     this.height = 200,
     super.key,
   });
+
+  @override
+  State<PlotSnapshot> createState() => _PlotSnapshotState();
+}
+
+class _PlotSnapshotState extends State<PlotSnapshot> {
+  // Only relevant to the client-side live-tile render path below — the
+  // base64Image path is a static PNG with no tiles to toggle.
+  bool _isSatelliteView = true;
+
+  PlotEntity? get plot => widget.plot;
+  String? get base64Image => widget.base64Image;
+  double get height => widget.height;
 
   @override
   Widget build(BuildContext context) {
@@ -97,8 +110,9 @@ class PlotSnapshot extends StatelessWidget {
               ),
               children: [
                 TileLayer(
-                  urlTemplate:
-                      'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                  urlTemplate: _isSatelliteView
+                      ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+                      : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                   subdomains: const ['a', 'b', 'c'],
                 ),
                 PolygonLayer(
@@ -112,6 +126,29 @@ class PlotSnapshot extends StatelessWidget {
                   ],
                 ),
               ],
+            ),
+          ),
+        ),
+        Positioned(
+          top: 12,
+          left: 12,
+          child: GestureDetector(
+            onTap: () =>
+                setState(() => _isSatelliteView = !_isSatelliteView),
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.15), blurRadius: 4),
+                ],
+              ),
+              child: Icon(
+                  _isSatelliteView ? Icons.map : Icons.satellite_alt,
+                  size: 20,
+                  color: Colors.black87),
             ),
           ),
         ),

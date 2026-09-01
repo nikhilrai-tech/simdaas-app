@@ -10,6 +10,125 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-08-31
+
+### Added
+- Satellite/Normal map view toggle on the Map Plot create/edit screen,
+  the live Monitoring screen, and every map on Report Details (inline
+  header, fullscreen view, and the no-GPS-data fallback). Defaults to
+  satellite, matching current behavior until toggled.
+- Report Details now has an editable "Additional Details" card for Driver
+  Name and Fertilizers Used — free-text fields you fill in per report,
+  defaulting to "N/A" until set. *(backend)*
+- New "Left/Right" spray heatmap on Monitoring and Report Details —
+  colors the track by which solenoid(s) sprayed (orange = left only,
+  purple = right only, teal = both, white = neither), since the existing
+  Spray heatmap's combined flow rate couldn't show which side sprayed.
+  On Monitoring it's a "Flow / L-R" sub-toggle next to the legend once
+  Spraying heat map is selected, rather than a separate menu entry.
+  *(backend)*
+- Device now gets an MQTT message on a new `/<device_id>/boundary` topic
+  when it crosses the plot boundary (`{"outside": true/false}`), same
+  push pattern as the existing `/config` topic — lets the firmware react
+  to a geofence breach itself, not just the app's Monitoring screen
+  notification. *(backend)*
+
+### Changed
+- Session auto-timeout (grace period after a device stops sending data
+  before its session is closed and a report generated) increased from 10
+  minutes to 60 minutes, so a temporary network drop in the field no longer
+  prematurely ends an active spray session while the sprayer is still
+  physically running. The "waiting" countdown on the Monitoring screen and
+  the Active Devices list now reflect the same longer window. *(backend)*
+
+### Fixed
+- Monitoring screen's Flow LPM/Flow L/Speed/PTO summary could keep showing
+  stale pre-reboot numbers after the sprayer device power-cycled mid-session
+  (same "uptime resets on reboot" signal as the Average Speed fix below,
+  now also used client-side) — a reboot now clears the cached values so a
+  later gap falls back to post-reboot data instead of pre-reboot data.
+- Logging out and signing in as a different user (without fully closing the
+  app) no longer shows the previous user's Reports, Active Sessions, Jobs,
+  Admin Users, or Firmware Alerts — these were cached in memory and never
+  cleared on sign out, so they kept displaying stale data until the app was
+  fully restarted. Signing out now clears all of it immediately.
+- Report Details screen's Start/End session times now display in the
+  phone's local time instead of raw UTC clock digits (was showing up to
+  5.5 hours off from the actual time).
+- Report's Average Speed could show higher than Max Speed when the sprayer
+  device was rebooted mid-session (e.g. farmer power-cycles it and resumes
+  spraying ~20 minutes later) — device uptime now correctly accumulates
+  across reboots so Average Speed reflects the true session duration
+  instead of only the time since the most recent reboot. *(backend)*
+- Device config pushed to the sprayer (row spacing, wheel diameter, etc.)
+  now reads wheel diameter from the sprayer instead of the tractor, both on
+  config save and when toggling Demo Mode. *(backend)*
+- A device whose sensor reported a bare `inf` value (e.g. an unconnected
+  water-level sensor) had every single heartbeat silently dropped — the
+  nan/Infinity sanitizer only recognized the word "Infinity", not `inf`, so
+  the packet failed to parse and never reached the app, leaving the device
+  stuck showing "Waiting" indefinitely even while actively transmitting.
+  *(backend)*
+- Report's Distance Travelled and Area Covered could be wildly inflated
+  when the device's GPS briefly lost its fix (device reports lat/lon as
+  0.0, 0.0 while unlocked) — a single dropped fix added a false
+  multi-thousand-km jump to the session's running distance. Distance is no
+  longer accumulated from an invalid (0, 0) fix, and a session that never
+  gets a real GPS fix now shows a "GPS data unavailable for this session"
+  note on the Report Details screen instead of a misleading 0 km / 0%
+  coverage.
+- Monitoring screen's live GPS track could disappear entirely or show a
+  straight-line "jump" after minimizing the app — the track was held only
+  in phone memory, so backgrounding long enough for Android to kill the
+  app (or just drop the WebSocket for a while) lost it or left a gap. The
+  screen now re-fetches the active session's track from the backend (which
+  always has it, MQTT-side, independent of the app) on open and every time
+  the app resumes from background.
+- Report Details' "Chemical Saved" percentage was mixing Manual-mode
+  distance into a metric meant to measure Auto-mode spray efficiency
+  (solenoid toggled off manually was counted the same as Auto skipping a
+  gap). Now computed from Auto-mode distance only; a session sprayed
+  entirely in Manual mode shows a note explaining why instead of a
+  misleading 0%. *(backend)*
+- Spray heatmap (Monitoring and Report Details) showed 0 L/min flow as
+  nearly the same light blue as a very low nonzero flow, making "no spray"
+  hard to distinguish on the track. 0 L/min now renders white, and the
+  1-70 L/min gradient spans light-to-dark blue so variation within that
+  range is easy to read at a glance. Legend updated to match.
+- Monitoring screen's network signal bars stayed plain white regardless of
+  strength, hard to read at a glance on a small screen — now colored
+  green/orange/red matching the adjacent GPS indicator's thresholds.
+- GPS heatmap row-coverage bands could flip from Auto (blue) back to PTO
+  Off (orange) or Manual (grey) from a single stray later sample at the
+  same spot, wrongly implying spraying never happened there. A sub-band
+  now only ever moves up in priority (PTO Off < Manual < Auto), never
+  back down, for the rest of the session — same fix on Monitoring and
+  Report Details since both share the same coverage-band code.
+- Deleting a ControlUnit or Report left zero trace of who did it or when
+  — DELETE requests hard-delete with no audit trail, and Django's admin
+  log only covers actions taken in the admin site, not the regular API.
+  New AuditLog now records user/timestamp/what was deleted for both
+  endpoints, viewable (read-only) in Django admin. *(backend)*
+
+### Security
+- Login no longer prints the incoming email/password pair to the server
+  console on every attempt — a leftover debug `print()` was logging
+  plaintext passwords into container logs (and from there, Loki/Grafana).
+  *(backend)*
+
+## [1.1.1] - 2026-08-06
+
+### Fixed
+- GPS coverage heatmap on the live Monitoring screen no longer gets stuck
+  showing orange (PTO off) at a sub-band once the sprayer returns to that
+  spot with PTO back on — the band now always reflects the most recently
+  recorded PTO state instead of only the first pass ever recorded there.
+- Device status (Active Devices list and Monitoring screen) no longer gets
+  stuck showing a "Cooldown" badge with a dead timer if a status WebSocket
+  update is missed — the app now resyncs every device's status against the
+  backend on app start, login, and network reconnect, so a missed event
+  self-corrects instead of leaving the badge stuck indefinitely.
+
 ## [1.1.0] - 2026-07-24
 
 ### Changed

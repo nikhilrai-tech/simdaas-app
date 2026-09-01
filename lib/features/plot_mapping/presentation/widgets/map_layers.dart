@@ -14,6 +14,9 @@ class MapLayers extends StatelessWidget {
   final double maxZoom;
   final void Function(TapPosition, LatLng)? onTap;
   final void Function(LatLng position)? onMyLocation;
+  // true = satellite/hybrid tiles (default, unchanged look), false = plain
+  // road map tiles.
+  final bool isSatellite;
 
   // Pointer event forwards for markers
   final void Function(int index, PointerEvent event) onMarkerPointerDown;
@@ -31,6 +34,7 @@ class MapLayers extends StatelessWidget {
     required this.maxZoom,
     this.onTap,
     this.onMyLocation,
+    this.isSatellite = true,
     required this.onMarkerPointerDown,
     required this.onMarkerPointerMove,
     required this.onMarkerPointerUp,
@@ -52,7 +56,9 @@ class MapLayers extends StatelessWidget {
       ),
       children: [
         TileLayer(
-            urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+            urlTemplate: isSatellite
+                ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+                : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
             subdomains: const ['a', 'b', 'c']),
         MyLocationLayer(onPosition: onMyLocation),
         if (points.isNotEmpty) ...[

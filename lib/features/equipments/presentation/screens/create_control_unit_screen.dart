@@ -194,7 +194,7 @@ class _CreateControlUnitScreenState
                 Expanded(
                   child: TextFormField(
                     controller: controller,
-                    decoration: InputDecoration(hintText: hint),
+                    decoration: InputDecoration(labelText: hint, hintText: hint),
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     validator: (v) => null,
@@ -213,7 +213,7 @@ class _CreateControlUnitScreenState
                       ],
                       onChanged: (v) =>
                           _onUnitChanged(v, unit, controller, onUnitChanged),
-                      decoration: const InputDecoration(hintText: 'Unit'),
+                      decoration: const InputDecoration(labelText: 'Unit'),
                     ),
                   ),
                 ],
@@ -264,9 +264,8 @@ class _CreateControlUnitScreenState
   Widget _buildScaffold(BuildContext context) {
     // Prefill if existingData provided (e.g., from QR scan or editing an
     // existing equipment). Behavior differs for two cases:
-    // - Editing existing equipment (_isEditing == true): lock only name and
-    //   name (primary/identity field). Other fields will
-    //   be populated but remain editable so the user can change them.
+    // - Editing existing equipment (_isEditing == true): all fields,
+    //   including name, are populated but remain editable.
     // - QR scan / new prefill (not editing): preserve the original behavior
     //   where prefilled fields are locked individually.
     // Apply existingData only once to avoid overwriting any user changes
@@ -285,15 +284,18 @@ class _CreateControlUnitScreenState
         _name.text = m['name'] as String;
       }
 
-      // When editing, only lock name. For QR-prefill
-      // (not editing) retain the previous per-field prefill locking.
+      // When editing, keep name editable (it's populated above but not
+      // locked). MAC address is locked instead — it identifies the
+      // physical hardware, so it shouldn't change once a unit is
+      // registered. For QR-prefill (not editing) retain the previous
+      // per-field prefill locking.
       if (_isEditing) {
-        if (_name.text.isNotEmpty) _prefilledName = true;
         // Populate other fields but don't set their _prefilled flags so they
         // remain editable.
         if (m.containsKey('macAddress') &&
             (m['macAddress'] as String?)?.isNotEmpty == true) {
           _macAddress.text = m['macAddress'] as String;
+          _prefilledMac = true;
         }
         if (m.containsKey('linkedSprayerId') &&
             (m['linkedSprayerId'] as String?)?.isNotEmpty == true) {
@@ -720,14 +722,21 @@ class _CreateControlUnitScreenState
                                 ),
                               ),
                               const SizedBox(height: 12),
+                              const Text(
+                                'Distance b/w sensor and nozzle center',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87),
+                              ),
+                              const SizedBox(height: 6),
                               Row(children: [
                                 Expanded(
                                   child: TextFormField(
                                     controller: _lidarNozzleDistance,
                                     enabled: !_prefilledLidarNozzle,
                                     decoration: const InputDecoration(
-                                        hintText:
-                                            'Distance b/w sensor and nozzle center'),
+                                        labelText: 'Distance'),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
                                             decimal: true),
@@ -755,7 +764,7 @@ class _CreateControlUnitScreenState
                                         _lidarNozzleDistance,
                                         (u) => _lidarNozzleDistanceUnit = u),
                                     decoration:
-                                        const InputDecoration(hintText: 'Unit'),
+                                        const InputDecoration(labelText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -786,13 +795,21 @@ class _CreateControlUnitScreenState
                                 ),
                               ),
                               const SizedBox(height: 12),
+                              const Text(
+                                'Mount height of LIDAR',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87),
+                              ),
+                              const SizedBox(height: 6),
                               Row(children: [
                                 Expanded(
                                   child: TextFormField(
                                     controller: _mountHeightOfLidar,
                                     enabled: !_prefilledMountHeight,
                                     decoration: const InputDecoration(
-                                        hintText: 'Mount height of LIDAR'),
+                                        labelText: 'Height'),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
                                             decimal: true),
@@ -818,7 +835,7 @@ class _CreateControlUnitScreenState
                                         _mountHeightOfLidar,
                                         (u) => _mountHeightUnit = u),
                                     decoration:
-                                        const InputDecoration(hintText: 'Unit'),
+                                        const InputDecoration(labelText: 'Unit'),
                                   ),
                                 )
                               ]),
@@ -901,14 +918,21 @@ class _CreateControlUnitScreenState
                                 ),
                               ),
                               const SizedBox(height: 12),
+                              const Text(
+                                'Distance of US sensor from center line',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87),
+                              ),
+                              const SizedBox(height: 6),
                               Row(children: [
                                 Expanded(
                                   child: TextFormField(
                                     controller: _ultrasonicDistance,
                                     enabled: !_prefilledUltrasonic,
                                     decoration: const InputDecoration(
-                                        hintText:
-                                            'Distance of US sensor from center line'),
+                                        labelText: 'Distance'),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
                                             decimal: true),
@@ -934,7 +958,7 @@ class _CreateControlUnitScreenState
                                         _ultrasonicDistance,
                                         (u) => _ultrasonicDistanceUnit = u),
                                     decoration:
-                                        const InputDecoration(hintText: 'Unit'),
+                                        const InputDecoration(labelText: 'Unit'),
                                   ),
                                 )
                               ]),

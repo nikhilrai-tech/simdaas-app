@@ -16,6 +16,14 @@ class Report {
   final double plotAreaSqm;
   final double completionPercentage;
   final double chemicalSavedPercentage;
+  // Set by the backend when the session had no Auto-mode PTO-on distance at
+  // all (e.g. sprayed entirely in Manual mode) — chemicalSavedPercentage is
+  // 0 because there's nothing to measure, not because 0% was saved.
+  final String? chemicalSavedNote;
+  // User-entered, editable from Report Details after the report is
+  // generated — not computed from telemetry. Null/blank shows as "N/A".
+  final String? driverName;
+  final String? fertilizersUsed;
   final String? controlUnitId;
   final String? controlUnitName;
   final String? linkedSprayerName;
@@ -34,6 +42,10 @@ class Report {
   final DateTime? startedAt;
   final DateTime? endedAt;
   final List<GPSPointData> trajectory;
+  // Set by the backend when the session never got a real GPS fix (device
+  // sent lat=lon=0.0 throughout) — distanceTravelledKm/areaCoveredSqm are
+  // 0 because there was no usable position data, not because nothing happened.
+  final String? gpsUnavailableNote;
 
   const Report({
     this.plotId,
@@ -51,6 +63,7 @@ class Report {
     required this.plotAreaSqm,
     required this.completionPercentage,
     this.chemicalSavedPercentage = 0.0,
+    this.chemicalSavedNote,
     this.controlUnitId,
     this.controlUnitName,
     this.linkedSprayerName,
@@ -66,6 +79,9 @@ class Report {
     this.startedAt,
     this.endedAt,
     this.trajectory = const [],
+    this.gpsUnavailableNote,
+    this.driverName,
+    this.fertilizersUsed,
   });
 }
 
@@ -76,6 +92,8 @@ class GPSPointData {
   final double flowRateLpm;
   final int sprayMode;
   final int ptoState;
+  final int leftSolenoidState;
+  final int rightSolenoidState;
   final DateTime timestamp;
 
   const GPSPointData({
@@ -85,6 +103,8 @@ class GPSPointData {
     required this.flowRateLpm,
     required this.sprayMode,
     this.ptoState = 0,
+    this.leftSolenoidState = 0,
+    this.rightSolenoidState = 0,
     required this.timestamp,
   });
 }
