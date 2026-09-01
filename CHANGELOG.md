@@ -10,7 +10,7 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
-## [1.1.2] - 2026-08-26
+## [1.1.2] - 2026-08-31
 
 ### Added
 - Satellite/Normal map view toggle on the Map Plot create/edit screen,
