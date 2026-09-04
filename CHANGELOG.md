@@ -109,6 +109,14 @@ already written — see "Release process" at the bottom.
   log only covers actions taken in the admin site, not the regular API.
   New AuditLog now records user/timestamp/what was deleted for both
   endpoints, viewable (read-only) in Django admin. *(backend)*
+- A completed report's plot name/polygon/map link/snapshot image could
+  silently change after the fact if the control unit was later reassigned
+  to a different plot (e.g. while its just-ended session was still in
+  cooldown) — these were re-resolved live from the control unit's current
+  plot on every view instead of being fixed at report time. The plot's
+  data is now frozen into the report the moment it's generated, so
+  reassigning a control unit's plot afterward never alters an existing
+  report. *(backend)*
 
 ### Security
 - Login no longer prints the incoming email/password pair to the server
