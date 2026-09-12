@@ -10,7 +10,23 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
-## [1.1.3] - Unreleased
+## [1.1.3] - 2026-09-12
+
+### Added
+- **Investor Dashboard** — new aggregate, all-customers fleet dashboard at
+  `/investor-dashboard/`, meant to be pulled up live during investor
+  pitches: hero KPIs (area sprayed, spray volume applied, chemical saved,
+  devices deployed), fleet growth/traction charts, fleet health and
+  firmware-version distribution, spray-efficiency and coverage
+  distributions, operating cadence, and a live fleet map showing each
+  device's real GPS position — sourced from its own telemetry (a pulsing
+  marker while a session is actively transmitting, falling back to its
+  last-known fix or plot location when idle). Sign-in required; a new
+  investor-viewer account type can see only this dashboard and nothing
+  else admin-shaped — no Django admin, no other admin API. *(backend)*
+- **Public landing page** at `/` — a marketing/product page open to
+  anyone, no login required, separate from both the app and the
+  sign-in-gated Investor Dashboard it links to. *(backend)*
 
 ### Fixed
 - Report's Avg Flow Rate (L/min and L/acre) could show 0.00 despite a real,
@@ -29,6 +45,13 @@ already written — see "Release process" at the bottom.
   PTO On Dist. itself and make the Off calculation go negative and get
   silently hidden as 0.00. Left/Right Spray Distance is now only counted
   while PTO is on, matching how PTO On Dist. itself is tracked. *(backend)*
+- Investor Dashboard's live fleet map showed OpenStreetMap's "403 Access
+  blocked" tile error instead of the map — OSM's tile server actively
+  blocks embedded web apps that hit it directly without a distinguishing
+  User-Agent (which browser JS can't set on tile requests), so this was
+  never going to load reliably. Switched to the same Google tile source
+  already used everywhere else in the app (Monitoring, Report Details,
+  Plot Mapping). *(backend)*
 
 ## [1.1.2] - 2026-08-31
 
