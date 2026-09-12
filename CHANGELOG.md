@@ -10,6 +10,26 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.3] - Unreleased
+
+### Fixed
+- Report's Avg Flow Rate (L/min and L/acre) could show 0.00 despite a real,
+  nonzero Total Sprayed figure if the sprayer device rebooted near the end
+  of a session — it was calculated from the tank sensor's final reading
+  minus its initial reading, and that sensor's counter resets to ~0 on a
+  device reboot, so a reboot right before the session ended could zero out
+  the whole calculation even though the flow sensor had correctly recorded
+  real spraying. Now calculated from the same accumulated total already
+  shown in Total Sprayed (which isn't affected by a reboot), so it always
+  reflects the real average. *(backend)*
+- Left Sol. Off / Right Sol. Off could show 0.00 even when the report's
+  Left/Right heatmap visibly showed spraying gaps — Left/Right Spray
+  Distance was accumulating distance whenever a solenoid read as on, even
+  during PTO-off stretches (e.g. headland turns), which could push it past
+  PTO On Dist. itself and make the Off calculation go negative and get
+  silently hidden as 0.00. Left/Right Spray Distance is now only counted
+  while PTO is on, matching how PTO On Dist. itself is tracked. *(backend)*
+
 ## [1.1.2] - 2026-08-31
 
 ### Added
