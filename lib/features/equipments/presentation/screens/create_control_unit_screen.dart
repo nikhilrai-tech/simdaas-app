@@ -726,7 +726,7 @@ class _CreateControlUnitScreenState
                                 'Distance b/w sensor and nozzle center',
                                 style: TextStyle(
                                     fontSize: 13,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.normal,
                                     color: Colors.black87),
                               ),
                               const SizedBox(height: 6),
@@ -799,7 +799,7 @@ class _CreateControlUnitScreenState
                                 'Mount height of LIDAR',
                                 style: TextStyle(
                                     fontSize: 13,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.normal,
                                     color: Colors.black87),
                               ),
                               const SizedBox(height: 6),
@@ -922,7 +922,7 @@ class _CreateControlUnitScreenState
                                 'Distance of US sensor from center line',
                                 style: TextStyle(
                                     fontSize: 13,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.normal,
                                     color: Colors.black87),
                               ),
                               const SizedBox(height: 6),
