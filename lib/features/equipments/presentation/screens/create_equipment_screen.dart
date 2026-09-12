@@ -190,9 +190,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         const SizedBox(height: 6),
                         TextFormField(
                             controller: _hingeToAxle,
-                            decoration: const InputDecoration(
-                                labelText:
-                                    'Distance between hinge point and axle'),
+                            decoration:
+                                const InputDecoration(labelText: 'Distance'),
                             keyboardType:
                                 TextInputType.numberWithOptions(decimal: true)),
                       ],
@@ -223,9 +222,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         const SizedBox(height: 6),
                         TextFormField(
                             controller: _hingeToNozzle,
-                            decoration: const InputDecoration(
-                                labelText:
-                                    'Distance between hinge point and nozzle'),
+                            decoration:
+                                const InputDecoration(labelText: 'Distance'),
                             keyboardType:
                                 TextInputType.numberWithOptions(decimal: true)),
                       ],
@@ -257,9 +255,8 @@ class _CreateEquipmentScreenState extends ConsumerState<CreateEquipmentScreen> {
                         const SizedBox(height: 6),
                         TextFormField(
                             controller: _hingeToControlUnit,
-                            decoration: const InputDecoration(
-                                labelText:
-                                    'Distance between hinge point and control unit mounting'),
+                            decoration:
+                                const InputDecoration(labelText: 'Distance'),
                             keyboardType:
                                 TextInputType.numberWithOptions(decimal: true)),
                       ],

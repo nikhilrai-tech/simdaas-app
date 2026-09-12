@@ -500,6 +500,14 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                const Text(
+                                  'Distance between hinge point and axle',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.normal,
+                                      color: Colors.black87),
+                                ),
+                                const SizedBox(height: 6),
                                 Row(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -508,10 +516,8 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                         child: TextFormField(
                                           controller: _hingeToAxle,
                                           decoration: const InputDecoration(
-                                              labelText:
-                                                  'Distance between hinge point and axle',
-                                              hintText:
-                                                  'Distance between hinge point and axle'),
+                                              labelText: 'Distance',
+                                              hintText: 'Distance'),
                                           keyboardType:
                                               TextInputType.numberWithOptions(
                                                   decimal: true),
@@ -570,6 +576,14 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                const Text(
+                                  'Distance between hinge point and nozzle',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.normal,
+                                      color: Colors.black87),
+                                ),
+                                const SizedBox(height: 6),
                                 Row(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -578,10 +592,8 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                         child: TextFormField(
                                           controller: _hingeToNozzle,
                                           decoration: const InputDecoration(
-                                              labelText:
-                                                  'Distance between hinge point and nozzle',
-                                              hintText:
-                                                  'Distance between hinge point and nozzle'),
+                                              labelText: 'Distance',
+                                              hintText: 'Distance'),
                                           keyboardType:
                                               TextInputType.numberWithOptions(
                                                   decimal: true),
@@ -640,6 +652,14 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
+                                const Text(
+                                  'Distance between hinge point and control unit mounting',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.normal,
+                                      color: Colors.black87),
+                                ),
+                                const SizedBox(height: 6),
                                 Row(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -648,10 +668,8 @@ class _CreateSprayerScreenState extends ConsumerState<CreateSprayerScreen> {
                                         child: TextFormField(
                                           controller: _hingeToControlUnit,
                                           decoration: const InputDecoration(
-                                              labelText:
-                                                  'Distance between hinge point and control unit mounting',
-                                              hintText:
-                                                  'Distance between hinge point and control unit mounting'),
+                                              labelText: 'Distance',
+                                              hintText: 'Distance'),
                                           keyboardType:
                                               TextInputType.numberWithOptions(
                                                   decimal: true),
