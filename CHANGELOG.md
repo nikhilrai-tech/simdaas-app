@@ -27,6 +27,10 @@ already written — see "Release process" at the bottom.
 - **Public landing page** at `/` — a marketing/product page open to
   anyone, no login required, separate from both the app and the
   sign-in-gated Investor Dashboard it links to. *(backend)*
+- Report Details' "Additional Details" card now has a third editable field,
+  Agrochemical, alongside Driver Name and Fertilizers Used — free-text,
+  defaults to "N/A" until filled in, editable any time after the report is
+  generated. *(backend)*
 
 ### Fixed
 - Report's Avg Flow Rate (L/min and L/acre) could show 0.00 despite a real,
