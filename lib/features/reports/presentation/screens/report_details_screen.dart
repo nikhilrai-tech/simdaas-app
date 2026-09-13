@@ -354,7 +354,6 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     'Fertilizers Used',
                     report.fertilizersUsed,
                     const Color(0xFF558B2F),
-                    isLast: true,
                     onTap: () => _editReportField(
                       context: context,
                       title: 'Fertilizers Used',
@@ -362,6 +361,21 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       multiline: true,
                       onSave: (value) =>
                           _saveReportField(fertilizersUsed: value),
+                    ),
+                  ),
+                  _editableRow(
+                    Icons.science_outlined,
+                    'Agrochemical',
+                    report.agrochemicalUsed,
+                    const Color(0xFF6D4C41),
+                    isLast: true,
+                    onTap: () => _editReportField(
+                      context: context,
+                      title: 'Agrochemical',
+                      currentValue: report.agrochemicalUsed,
+                      multiline: true,
+                      onSave: (value) =>
+                          _saveReportField(agrochemicalUsed: value),
                     ),
                   ),
                 ],
@@ -702,8 +716,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   // Same visual style as _equipRow, but tappable — used for the
-  // user-editable Driver Name / Fertilizers Used fields. Shows "N/A" until
-  // the user fills a value in.
+  // user-editable Driver Name / Fertilizers Used / Agrochemical fields.
+  // Shows "N/A" until the user fills a value in.
   Widget _editableRow(
       IconData icon, String label, String? value, Color accentColor,
       {required VoidCallback onTap, bool isLast = false}) {
@@ -790,12 +804,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     await onSave(result);
   }
 
-  Future<void> _saveReportField({String? driverName, String? fertilizersUsed}) async {
+  Future<void> _saveReportField(
+      {String? driverName,
+      String? fertilizersUsed,
+      String? agrochemicalUsed}) async {
     try {
       await ref.read(reportRepoProvider).updateReportDetails(
             widget.report.id,
             driverName: driverName,
             fertilizersUsed: fertilizersUsed,
+            agrochemicalUsed: agrochemicalUsed,
           );
       ref.invalidate(reportDetailProvider(widget.report.id));
       if (context.mounted) showSuccessSnackBar(context, 'Saved');

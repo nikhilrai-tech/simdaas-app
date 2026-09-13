@@ -25,8 +25,12 @@ class ReportRepositoryImpl implements ReportRepository {
 
   @override
   Future<Report> updateReportDetails(String id,
-      {String? driverName, String? fertilizersUsed}) async {
+      {String? driverName,
+      String? fertilizersUsed,
+      String? agrochemicalUsed}) async {
     return await remoteDataSource.updateReportDetails(id,
-        driverName: driverName, fertilizersUsed: fertilizersUsed);
+        driverName: driverName,
+        fertilizersUsed: fertilizersUsed,
+        agrochemicalUsed: agrochemicalUsed);
   }
 }

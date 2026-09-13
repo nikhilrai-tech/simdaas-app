@@ -5,5 +5,5 @@ abstract class ReportRepository {
   Future<Report> getReport(String id);
   Future<void> deleteReport(String id);
   Future<Report> updateReportDetails(String id,
-      {String? driverName, String? fertilizersUsed});
+      {String? driverName, String? fertilizersUsed, String? agrochemicalUsed});
 }
