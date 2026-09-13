@@ -24,6 +24,7 @@ class Report {
   // generated — not computed from telemetry. Null/blank shows as "N/A".
   final String? driverName;
   final String? fertilizersUsed;
+  final String? agrochemicalUsed;
   final String? controlUnitId;
   final String? controlUnitName;
   final String? linkedSprayerName;
@@ -82,6 +83,7 @@ class Report {
     this.gpsUnavailableNote,
     this.driverName,
     this.fertilizersUsed,
+    this.agrochemicalUsed,
   });
 }
 
