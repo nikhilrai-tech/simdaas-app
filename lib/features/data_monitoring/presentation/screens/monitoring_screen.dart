@@ -1948,6 +1948,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       currentColor = null;
     }
 
+    // Tolerate a couple of consecutive "inside" readings before treating it
+    // as a genuine re-entry — same GPS-jitter fix as
+    // RowLineCoverage.buildHeatmapCoverageBands(). Near a boundary, ordinary
+    // GPS noise can flip device_in_plot/point-in-polygon for a reading or
+    // two even while the device is still physically outside, which was
+    // flushing (breaking) the outside track every time and made it look
+    // like a scribble of disconnected dashes instead of one line.
+    const maxJitterStreak = 2;
+    int inPlotStreak = 0;
+
     for (var i = 0; i < pos.length; i++) {
       final p = pos[i];
       final lat = (p['lat'] as num?)?.toDouble();
@@ -1965,11 +1975,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             devInPlot?.toString() == '1';
       }
 
-      // Inside plot → no trajectory line; flush any open outside segment.
       if (isInPlot) {
-        flush();
+        inPlotStreak++;
+        // Skip this point either way (it reads as inside, so it shouldn't
+        // anchor an outside-track segment) — only flush once it's been
+        // "inside" for more than the jitter tolerance.
+        if (inPlotStreak > maxJitterStreak) {
+          flush();
+        }
         continue;
       }
+      inPlotStreak = 0;
 
       // Outside plot → draw colored line.
       final Color color;

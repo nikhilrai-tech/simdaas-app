@@ -987,6 +987,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       currentColor = null;
     }
 
+    // Tolerate a couple of consecutive "inside" readings before treating it
+    // as a genuine re-entry — same GPS-jitter fix as
+    // RowLineCoverage.buildHeatmapCoverageBands(). Near a boundary, ordinary
+    // GPS noise can flip point-in-polygon for a reading or two even while
+    // the device is still physically outside, which was flushing (breaking)
+    // the outside track every time and made it look like a scribble of
+    // disconnected dashes instead of one line.
+    const maxJitterStreak = 2;
+    int inPlotStreak = 0;
+
     for (var i = 0; i < trajectory.length; i++) {
       final p = trajectory[i];
       final point = LatLng(p.lat, p.lon);
@@ -997,9 +1007,13 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       }
 
       if (isInPlot) {
-        flush();
+        inPlotStreak++;
+        if (inPlotStreak > maxJitterStreak) {
+          flush();
+        }
         continue;
       }
+      inPlotStreak = 0;
 
       if (i > 0) {
         final prev = trajectory[i - 1];
@@ -1388,6 +1402,16 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
       currentColor = null;
     }
 
+    // Tolerate a couple of consecutive "inside" readings before treating it
+    // as a genuine re-entry — same GPS-jitter fix as
+    // RowLineCoverage.buildHeatmapCoverageBands(). Near a boundary, ordinary
+    // GPS noise can flip point-in-polygon for a reading or two even while
+    // the device is still physically outside, which was flushing (breaking)
+    // the outside track every time and made it look like a scribble of
+    // disconnected dashes instead of one line.
+    const maxJitterStreak = 2;
+    int inPlotStreak = 0;
+
     for (var i = 0; i < trajectory.length; i++) {
       final p = trajectory[i];
       final point = LatLng(p.lat, p.lon);
@@ -1398,9 +1422,13 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
       }
 
       if (isInPlot) {
-        flush();
+        inPlotStreak++;
+        if (inPlotStreak > maxJitterStreak) {
+          flush();
+        }
         continue;
       }
+      inPlotStreak = 0;
 
       if (i > 0) {
         final prev = trajectory[i - 1];
