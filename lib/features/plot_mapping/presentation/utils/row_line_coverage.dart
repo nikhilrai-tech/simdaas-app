@@ -117,6 +117,20 @@ class RowLineCoverage {
     if (rowLines.length < 2) return const [];
     final bands = <Polygon>[];
 
+    // Precompute every corridor's geometry up front (instead of inline,
+    // inside the loop below) so that while processing corridor `ri` we can
+    // also check its immediate neighbors — needed for the "nearest row
+    // wins" rule further down.
+    //
+    // halfWidth is derived from the ACTUAL current distance between this
+    // specific pair of row lines, not the plot's single configured
+    // rowSpacing. Manually dragging one row line to correct a real-world
+    // field irregularity changes the true gap at that spot; if every
+    // corridor kept using the same fixed rowSpacing/2 tolerance regardless,
+    // a manually-widened or narrowed corridor would paint incorrectly (too
+    // little, or points from an even-further row bleeding in).
+    final corridors = List<_CorridorGeometry?>.filled(
+        rowLines.length - 1, null);
     for (int ri = 0; ri < rowLines.length - 1; ri++) {
       final rowA = rowLines[ri];
       final rowB = rowLines[ri + 1];
@@ -132,7 +146,31 @@ class RowLineCoverage {
 
       final numSub =
           (segLen / subSegmentLengthMeters).ceil().clamp(1, 1000).toInt();
-      final halfWidth = rowSpacing / 2;
+
+      final gapStart =
+          RowLineGenerator.pointToSegmentInfo(rowA[0], rowB[0], rowB[0])
+              .distance;
+      final gapEnd =
+          RowLineGenerator.pointToSegmentInfo(rowA[1], rowB[1], rowB[1])
+              .distance;
+      final actualWidth = (gapStart + gapEnd) / 2;
+      final halfWidth = actualWidth > 0.1 ? actualWidth / 2 : rowSpacing / 2;
+
+      corridors[ri] = _CorridorGeometry(
+        midStart: midStart,
+        midEnd: midEnd,
+        halfWidth: halfWidth,
+        numSub: numSub,
+      );
+    }
+
+    for (int ri = 0; ri < corridors.length; ri++) {
+      final geo = corridors[ri];
+      if (geo == null) continue;
+      final midStart = geo.midStart;
+      final midEnd = geo.midEnd;
+      final halfWidth = geo.halfWidth;
+      final numSub = geo.numSub;
 
       // Spray: accumulate flow rates + counts for averaging. GPS: track the
       // highest-priority color ever seen (never downgrades). Speed/Left-
@@ -176,6 +214,38 @@ class RowLineCoverage {
           outOfCorridorStreak++;
           if (outOfCorridorStreak > maxJitterStreak) {
             prevIdxInCorridor = null; // genuinely left; reset interpolation anchor
+          }
+          continue;
+        }
+
+        // Nearest-row wins: with tight row spacing (e.g. 2m rows -> only 1m
+        // halfWidth each), ordinary GPS jitter of a couple of metres can
+        // land a point inside THIS corridor's tolerance while it's actually
+        // closer to a neighboring row — without this check it would get
+        // painted into the wrong row instead of its true one. Only check
+        // the immediate left/right neighbors; a point can never genuinely
+        // be closer to a row two or more rows away.
+        var closerNeighborExists = false;
+        for (final nb in [ri - 1, ri + 1]) {
+          if (nb < 0 || nb >= corridors.length) continue;
+          final nbGeo = corridors[nb];
+          if (nbGeo == null) continue;
+          final nbInfo = RowLineGenerator.pointToSegmentInfo(
+              pt.position, nbGeo.midStart, nbGeo.midEnd);
+          if (nbInfo.distance <= nbGeo.halfWidth &&
+              nbInfo.distance < info.distance) {
+            closerNeighborExists = true;
+            break;
+          }
+        }
+        if (closerNeighborExists) {
+          // Belongs to a neighbor instead — that corridor's own pass over
+          // insidePoints will pick it up. Treat it the same as "outside my
+          // corridor" here so this row's own gap-fill/streak logic stays
+          // consistent.
+          outOfCorridorStreak++;
+          if (outOfCorridorStreak > maxJitterStreak) {
+            prevIdxInCorridor = null;
           }
           continue;
         }
@@ -324,4 +394,24 @@ class RowLineCoverage {
     if (passes <= 1) return Colors.grey.shade400.withAlpha(160);  // single pass
     return Colors.grey.shade800.withAlpha(220);                    // double / more
   }
+}
+
+/// Precomputed per-corridor geometry for [RowLineCoverage.buildHeatmapCoverageBands].
+///
+/// halfWidth is derived from the actual current distance between this
+/// corridor's two row lines (not the plot's single configured rowSpacing),
+/// so a manually-shifted row line still gets a tolerance matching its real
+/// current gap to its neighbor.
+class _CorridorGeometry {
+  final LatLng midStart;
+  final LatLng midEnd;
+  final double halfWidth;
+  final int numSub;
+
+  const _CorridorGeometry({
+    required this.midStart,
+    required this.midEnd,
+    required this.halfWidth,
+    required this.numSub,
+  });
 }
