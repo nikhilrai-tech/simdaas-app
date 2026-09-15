@@ -129,6 +129,15 @@ class RowLineCoverage {
     // corridor kept using the same fixed rowSpacing/2 tolerance regardless,
     // a manually-widened or narrowed corridor would paint incorrectly (too
     // little, or points from an even-further row bleeding in).
+    //
+    // For a tapering (e.g. triangular) field, the two row lines bounding a
+    // corridor are often nowhere near parallel — one end of this exact plot
+    // measured 14.4m apart while the other end was only 4.7m apart. A
+    // single averaged halfWidth for the whole corridor is far too wide at
+    // the narrow end (rows bleeding into each other there) — so halfWidth
+    // is tracked separately for the start and end and interpolated by
+    // position (t) along the corridor for every point, instead of one flat
+    // number.
     final corridors = List<_CorridorGeometry?>.filled(
         rowLines.length - 1, null);
     for (int ri = 0; ri < rowLines.length - 1; ri++) {
@@ -153,13 +162,15 @@ class RowLineCoverage {
       final gapEnd =
           RowLineGenerator.pointToSegmentInfo(rowA[1], rowB[1], rowB[1])
               .distance;
-      final actualWidth = (gapStart + gapEnd) / 2;
-      final halfWidth = actualWidth > 0.1 ? actualWidth / 2 : rowSpacing / 2;
+      final fallback = rowSpacing / 2;
+      final halfWidthStart = gapStart > 0.1 ? gapStart / 2 : fallback;
+      final halfWidthEnd = gapEnd > 0.1 ? gapEnd / 2 : fallback;
 
       corridors[ri] = _CorridorGeometry(
         midStart: midStart,
         midEnd: midEnd,
-        halfWidth: halfWidth,
+        halfWidthStart: halfWidthStart,
+        halfWidthEnd: halfWidthEnd,
         numSub: numSub,
       );
     }
@@ -207,25 +218,56 @@ class RowLineCoverage {
     // adjacent rows instead of one continuous row. Switching which row is
     // credited now requires several consecutive points to agree — a real
     // move to the next row, not a blip.
-    const maxJitterStreak = 2;
+    //
+    // Tuned against a real recorded session on a tapering field (Anjanadri):
+    // at 2, sustained GPS noise right at a shared boundary between two rows
+    // could still exceed the tolerance for 3+ points at a time, so the row
+    // credit flip-flopped back and forth for tens of points. 7 consecutive
+    // points (i.e. streak > 6) was high enough to fully settle that, while
+    // still catching every genuine multi-row move in the same session (each
+    // held for 30+ points before the sprayer actually moved on).
+    const maxJitterStreak = 6;
     int? currentRow;
     int? pendingRow; // candidate row (or null = "outside every corridor")
     int pendingStreak = 0;
 
     for (final pt in insidePoints) {
-      // Nearest row that this point actually falls within the tolerance of
-      // (not just "some" row — the closest one among those it qualifies for).
+      // Home-row advantage: if this point still satisfies the CURRENT row's
+      // own tolerance, stay there — don't even look at other corridors.
+      // Without this, a point near the shared boundary between two
+      // corridors (common with wide row spacing, e.g. ~4.7m halfWidth) can
+      // be only fractionally closer to the neighbor's midline than to its
+      // own row's — comfortably inside its own row's tolerance either way —
+      // and pure "nearest wins" would start treating that as a candidate
+      // switch purely from that tiny, meaningless difference, letting
+      // ordinary jitter right at a boundary flip-flop the credited row back
+      // and forth. Only once the point genuinely falls outside its current
+      // row's own tolerance do we look for the best match among every
+      // corridor (still subject to the streak-confirmation below).
       int? nearestRow;
       double? nearestDist;
-      for (int ri = 0; ri < n; ri++) {
-        final geo = corridors[ri];
-        if (geo == null) continue;
-        final info =
-            RowLineGenerator.pointToSegmentInfo(pt.position, geo.midStart, geo.midEnd);
-        if (info.distance > geo.halfWidth) continue;
-        if (nearestDist == null || info.distance < nearestDist) {
-          nearestDist = info.distance;
-          nearestRow = ri;
+      if (currentRow != null) {
+        final curGeo = corridors[currentRow];
+        if (curGeo != null) {
+          final curInfo = RowLineGenerator.pointToSegmentInfo(
+              pt.position, curGeo.midStart, curGeo.midEnd);
+          if (curInfo.distance <= curGeo.halfWidthAt(curInfo.t)) {
+            nearestRow = currentRow;
+            nearestDist = curInfo.distance;
+          }
+        }
+      }
+      if (nearestRow == null) {
+        for (int ri = 0; ri < n; ri++) {
+          final geo = corridors[ri];
+          if (geo == null) continue;
+          final info = RowLineGenerator.pointToSegmentInfo(
+              pt.position, geo.midStart, geo.midEnd);
+          if (info.distance > geo.halfWidthAt(info.t)) continue;
+          if (nearestDist == null || info.distance < nearestDist) {
+            nearestDist = info.distance;
+            nearestRow = ri;
+          }
         }
       }
 
@@ -317,11 +359,7 @@ class RowLineCoverage {
       if (geo == null) continue;
       final midStart = geo.midStart;
       final midEnd = geo.midEnd;
-      final halfWidth = geo.halfWidth;
       final numSub = geo.numSub;
-
-      final perp = _perpendicularOffsetLatLng(midStart, midEnd, halfWidth);
-      if (perp == null) continue;
 
       for (int i = 0; i < numSub; i++) {
         final passCount = subBandMaxPass[ri][i];
@@ -358,6 +396,13 @@ class RowLineCoverage {
         final t1 = (i + 1) / numSub;
         final p0 = _lerp(midStart, midEnd, t0);
         final p1 = _lerp(midStart, midEnd, t1);
+        // Local half-width for this specific sub-band, not one flat value
+        // for the whole corridor — matches the tapering tolerance used
+        // above so a wedge-shaped field's band drawing narrows visually
+        // the same place its real row spacing does.
+        final perp = _perpendicularOffsetLatLng(
+            midStart, midEnd, geo.halfWidthAt((t0 + t1) / 2));
+        if (perp == null) continue;
         bands.add(Polygon(
           points: [
             LatLng(p0.latitude + perp.latitude,
@@ -424,20 +469,30 @@ class RowLineCoverage {
 
 /// Precomputed per-corridor geometry for [RowLineCoverage.buildHeatmapCoverageBands].
 ///
-/// halfWidth is derived from the actual current distance between this
-/// corridor's two row lines (not the plot's single configured rowSpacing),
-/// so a manually-shifted row line still gets a tolerance matching its real
-/// current gap to its neighbor.
+/// halfWidthStart/halfWidthEnd are derived from the actual current distance
+/// between this corridor's two row lines at each end (not the plot's single
+/// configured rowSpacing), so a manually-shifted row line still gets a
+/// tolerance matching its real current gap to its neighbor. They're tracked
+/// separately (rather than one averaged halfWidth) because a tapering field
+/// can have a corridor that's much wider at one end than the other — using
+/// [halfWidthAt] to interpolate by position keeps the tolerance accurate
+/// along the whole length instead of too generous at the narrow end.
 class _CorridorGeometry {
   final LatLng midStart;
   final LatLng midEnd;
-  final double halfWidth;
+  final double halfWidthStart;
+  final double halfWidthEnd;
   final int numSub;
 
   const _CorridorGeometry({
     required this.midStart,
     required this.midEnd,
-    required this.halfWidth,
+    required this.halfWidthStart,
+    required this.halfWidthEnd,
     required this.numSub,
   });
+
+  /// Corridor half-width at position [t] (0 = start, 1 = end) along its length.
+  double halfWidthAt(double t) =>
+      halfWidthStart + (halfWidthEnd - halfWidthStart) * t.clamp(0.0, 1.0);
 }
