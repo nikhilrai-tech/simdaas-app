@@ -155,14 +155,31 @@ class RowLineCoverage {
       // point — GPS samples are sparse and often skip 1-2 sub-bands.
       int? prevIdxInCorridor;
 
+      // Ordinary GPS noise (a couple of metres of jitter, normal for any
+      // consumer GPS) can knock a single reading just outside halfWidth even
+      // while the sprayer is still physically in this row — worse the
+      // tighter the row spacing (e.g. 2m rows -> only 1m halfWidth). Without
+      // this, that one noisy point reset prevIdxInCorridor, so the very next
+      // (perfectly normal) in-corridor point started a "new pass" instead of
+      // continuing the old one, leaving an unpainted gap at that exact spot.
+      // Tolerating a couple of consecutive out-of-corridor points before
+      // treating it as a genuine exit (e.g. a real headland turn) fixes the
+      // gap without changing which points count as "in this corridor".
+      const maxJitterStreak = 2;
+      int outOfCorridorStreak = 0;
+
       for (int k = 0; k < insidePoints.length; k++) {
         final pt = insidePoints[k];
         final info =
             RowLineGenerator.pointToSegmentInfo(pt.position, midStart, midEnd);
         if (info.distance > halfWidth) {
-          prevIdxInCorridor = null; // left corridor; reset interpolation anchor
+          outOfCorridorStreak++;
+          if (outOfCorridorStreak > maxJitterStreak) {
+            prevIdxInCorridor = null; // genuinely left; reset interpolation anchor
+          }
           continue;
         }
+        outOfCorridorStreak = 0;
 
         if (prevIdxInCorridor == null) {
           corridorPassCount++; // entered (or re-entered) the corridor
