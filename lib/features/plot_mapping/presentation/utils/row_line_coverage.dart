@@ -164,7 +164,155 @@ class RowLineCoverage {
       );
     }
 
-    for (int ri = 0; ri < corridors.length; ri++) {
+    final n = corridors.length;
+
+    // Per-corridor accumulators — allocated once up front (not per-corridor
+    // inside a loop) because the point-processing pass below is now a
+    // single temporal sweep shared across all corridors: only whichever
+    // corridor is "currently active" gets painted for a given point, so its
+    // state has to persist across the whole sweep, not just one corridor's
+    // turn.
+    final accumulated = <List<double>>[
+      for (final geo in corridors) List<double>.filled(geo?.numSub ?? 0, 0.0)
+    ];
+    final accumulatedCount = <List<int>>[
+      for (final geo in corridors) List<int>.filled(geo?.numSub ?? 0, 0)
+    ];
+    final latestColor = <List<Color?>>[
+      for (final geo in corridors) List<Color?>.filled(geo?.numSub ?? 0, null)
+    ];
+    final subBandMaxPass = <List<int>>[
+      for (final geo in corridors) List<int>.filled(geo?.numSub ?? 0, 0)
+    ];
+    // GPS heatmap only: highest gpsPriority ever recorded for each
+    // sub-band, so a later lower-priority sample (e.g. Auto -> PTO off)
+    // can't repaint it backwards — see HeatmapColorUtils.gpsPriority.
+    final gpsMaxPriority = <List<int>>[
+      for (final geo in corridors) List<int>.filled(geo?.numSub ?? 0, -1)
+    ];
+    final corridorPassCount = List<int>.filled(n, 0);
+    // Track last index in each corridor so a re-pass fills the gap to the
+    // next point instead of leaving a blank stripe — GPS samples are sparse
+    // and often skip 1-2 sub-bands.
+    final prevIdxInCorridor = List<int?>.filled(n, null);
+
+    // Which corridor is "currently" credited with the sprayer's position,
+    // for this whole continuous pass — not just this one point. A single
+    // noisy GPS reading (a couple of metres of jitter, normal for any
+    // consumer GPS — worse with tight row spacing, e.g. 2m rows -> only 1m
+    // tolerance each) can momentarily read as nearer to a neighboring row
+    // than the row the sprayer is actually driving down. Without this
+    // "sticky" tracking, that single stray point got instantly credited to
+    // the neighbor, scattering small painted patches across several
+    // adjacent rows instead of one continuous row. Switching which row is
+    // credited now requires several consecutive points to agree — a real
+    // move to the next row, not a blip.
+    const maxJitterStreak = 2;
+    int? currentRow;
+    int? pendingRow; // candidate row (or null = "outside every corridor")
+    int pendingStreak = 0;
+
+    for (final pt in insidePoints) {
+      // Nearest row that this point actually falls within the tolerance of
+      // (not just "some" row — the closest one among those it qualifies for).
+      int? nearestRow;
+      double? nearestDist;
+      for (int ri = 0; ri < n; ri++) {
+        final geo = corridors[ri];
+        if (geo == null) continue;
+        final info =
+            RowLineGenerator.pointToSegmentInfo(pt.position, geo.midStart, geo.midEnd);
+        if (info.distance > geo.halfWidth) continue;
+        if (nearestDist == null || info.distance < nearestDist) {
+          nearestDist = info.distance;
+          nearestRow = ri;
+        }
+      }
+
+      if (currentRow == null && nearestRow != null) {
+        // Nothing established yet for this pass — accept the first match
+        // immediately, no streak needed.
+        currentRow = nearestRow;
+      } else if (nearestRow != currentRow) {
+        if (currentRow == null && nearestRow == null) {
+          continue; // still nothing to paint
+        }
+        if (pendingRow == nearestRow) {
+          pendingStreak++;
+        } else {
+          pendingRow = nearestRow;
+          pendingStreak = 1;
+        }
+        if (pendingStreak > maxJitterStreak) {
+          // Confirmed: the sprayer genuinely moved to a different row (or
+          // left every row). Reset the old row's gap-fill anchor so a much
+          // later real re-pass over it starts a fresh pass count instead of
+          // bridging today's visit to a visit from ages ago.
+          if (currentRow != null) prevIdxInCorridor[currentRow] = null;
+          currentRow = nearestRow;
+          pendingRow = null;
+          pendingStreak = 0;
+        } else {
+          continue; // not confirmed yet — treat as a tolerated blip, skip
+        }
+      } else {
+        // Reaffirms the current row — cancel any pending switch.
+        pendingRow = null;
+        pendingStreak = 0;
+      }
+
+      if (currentRow == null) continue; // confirmed outside every corridor
+
+      final ri = currentRow;
+      final geo = corridors[ri]!;
+      final info =
+          RowLineGenerator.pointToSegmentInfo(pt.position, geo.midStart, geo.midEnd);
+
+      if (prevIdxInCorridor[ri] == null) {
+        corridorPassCount[ri]++; // entered (or re-entered) the corridor
+      }
+
+      final idx = (info.t * geo.numSub).floor().clamp(0, geo.numSub - 1);
+      final color = heatmapType == HeatmapType.spraying
+          ? null
+          : HeatmapColorUtils.getColorForInsidePoint(pt, heatmapType);
+
+      // Fill every sub-band from the previous in-corridor index to this one
+      // so that GPS sampling gaps don't leave blank stripes.
+      final prev = prevIdxInCorridor[ri];
+      final lo = prev != null ? math.min(prev, idx) : idx;
+      final hi = prev != null ? math.max(prev, idx) : idx;
+
+      for (int s = lo; s <= hi; s++) {
+        subBandMaxPass[ri][s] =
+            math.max(subBandMaxPass[ri][s], corridorPassCount[ri]);
+        if (heatmapType == HeatmapType.spraying) {
+          accumulated[ri][s] += pt.flowRate ?? 0.0;
+          accumulatedCount[ri][s]++;
+        } else if (heatmapType == HeatmapType.gps) {
+          // Never downgrade: a sub-band that reached Auto must stay Auto
+          // even if a later sample here is PTO-off/Manual (GPS jitter, a
+          // momentary pause) — only an equal-or-higher priority sample
+          // updates the shown color.
+          final priority =
+              HeatmapColorUtils.gpsPriority(ptoOn: pt.ptoOn, isAuto: pt.isAuto);
+          if (priority >= gpsMaxPriority[ri][s]) {
+            gpsMaxPriority[ri][s] = priority;
+            latestColor[ri][s] = color;
+          }
+        } else {
+          // Latest-write wins for Speed/Left-Right heatmaps — a re-pass
+          // over the same sub-band reflects the sprayer's current state
+          // there. Only the Spray heatmap accumulates on re-pass, and
+          // only the GPS heatmap has a no-downgrade priority rule.
+          latestColor[ri][s] = color;
+        }
+      }
+
+      prevIdxInCorridor[ri] = idx;
+    }
+
+    for (int ri = 0; ri < n; ri++) {
       final geo = corridors[ri];
       if (geo == null) continue;
       final midStart = geo.midStart;
@@ -172,157 +320,35 @@ class RowLineCoverage {
       final halfWidth = geo.halfWidth;
       final numSub = geo.numSub;
 
-      // Spray: accumulate flow rates + counts for averaging. GPS: track the
-      // highest-priority color ever seen (never downgrades). Speed/Left-
-      // Right: track latest color.
-      // subBandMaxPass: highest corridor-entry number that touched each sub-band.
-      //   corridorPassCount increments each time the sprayer re-enters this corridor
-      //   (prevIdxInCorridor null → non-null transition). This detects re-passes
-      //   reliably regardless of GPS sampling rate.
-      final accumulated = List<double>.filled(numSub, 0.0);
-      final accumulatedCount = List<int>.filled(numSub, 0);
-      final latestColor = List<Color?>.filled(numSub, null);
-      final subBandMaxPass = List<int>.filled(numSub, 0);
-      // GPS heatmap only: highest gpsPriority ever recorded for each
-      // sub-band, so a later lower-priority sample (e.g. Auto -> PTO off)
-      // can't repaint it backwards — see HeatmapColorUtils.gpsPriority.
-      final gpsMaxPriority = List<int>.filled(numSub, -1);
-      int corridorPassCount = 0;
-
-      // Track last index in this corridor so we can fill the gap to the next
-      // point — GPS samples are sparse and often skip 1-2 sub-bands.
-      int? prevIdxInCorridor;
-
-      // Ordinary GPS noise (a couple of metres of jitter, normal for any
-      // consumer GPS) can knock a single reading just outside halfWidth even
-      // while the sprayer is still physically in this row — worse the
-      // tighter the row spacing (e.g. 2m rows -> only 1m halfWidth). Without
-      // this, that one noisy point reset prevIdxInCorridor, so the very next
-      // (perfectly normal) in-corridor point started a "new pass" instead of
-      // continuing the old one, leaving an unpainted gap at that exact spot.
-      // Tolerating a couple of consecutive out-of-corridor points before
-      // treating it as a genuine exit (e.g. a real headland turn) fixes the
-      // gap without changing which points count as "in this corridor".
-      const maxJitterStreak = 2;
-      int outOfCorridorStreak = 0;
-
-      for (int k = 0; k < insidePoints.length; k++) {
-        final pt = insidePoints[k];
-        final info =
-            RowLineGenerator.pointToSegmentInfo(pt.position, midStart, midEnd);
-        if (info.distance > halfWidth) {
-          outOfCorridorStreak++;
-          if (outOfCorridorStreak > maxJitterStreak) {
-            prevIdxInCorridor = null; // genuinely left; reset interpolation anchor
-          }
-          continue;
-        }
-
-        // Nearest-row wins: with tight row spacing (e.g. 2m rows -> only 1m
-        // halfWidth each), ordinary GPS jitter of a couple of metres can
-        // land a point inside THIS corridor's tolerance while it's actually
-        // closer to a neighboring row — without this check it would get
-        // painted into the wrong row instead of its true one. Only check
-        // the immediate left/right neighbors; a point can never genuinely
-        // be closer to a row two or more rows away.
-        var closerNeighborExists = false;
-        for (final nb in [ri - 1, ri + 1]) {
-          if (nb < 0 || nb >= corridors.length) continue;
-          final nbGeo = corridors[nb];
-          if (nbGeo == null) continue;
-          final nbInfo = RowLineGenerator.pointToSegmentInfo(
-              pt.position, nbGeo.midStart, nbGeo.midEnd);
-          if (nbInfo.distance <= nbGeo.halfWidth &&
-              nbInfo.distance < info.distance) {
-            closerNeighborExists = true;
-            break;
-          }
-        }
-        if (closerNeighborExists) {
-          // Belongs to a neighbor instead — that corridor's own pass over
-          // insidePoints will pick it up. Treat it the same as "outside my
-          // corridor" here so this row's own gap-fill/streak logic stays
-          // consistent.
-          outOfCorridorStreak++;
-          if (outOfCorridorStreak > maxJitterStreak) {
-            prevIdxInCorridor = null;
-          }
-          continue;
-        }
-        outOfCorridorStreak = 0;
-
-        if (prevIdxInCorridor == null) {
-          corridorPassCount++; // entered (or re-entered) the corridor
-        }
-
-        final idx = (info.t * numSub).floor().clamp(0, numSub - 1);
-        final color = heatmapType == HeatmapType.spraying
-            ? null
-            : HeatmapColorUtils.getColorForInsidePoint(pt, heatmapType);
-
-        // Fill every sub-band from the previous in-corridor index to this one
-        // so that GPS sampling gaps don't leave blank stripes.
-        final prev = prevIdxInCorridor;
-        final lo = prev != null ? math.min(prev, idx) : idx;
-        final hi = prev != null ? math.max(prev, idx) : idx;
-
-        for (int s = lo; s <= hi; s++) {
-          subBandMaxPass[s] = math.max(subBandMaxPass[s], corridorPassCount);
-          if (heatmapType == HeatmapType.spraying) {
-            accumulated[s] += pt.flowRate ?? 0.0;
-            accumulatedCount[s]++;
-          } else if (heatmapType == HeatmapType.gps) {
-            // Never downgrade: a sub-band that reached Auto must stay Auto
-            // even if a later sample here is PTO-off/Manual (GPS jitter, a
-            // momentary pause) — only an equal-or-higher priority sample
-            // updates the shown color.
-            final priority =
-                HeatmapColorUtils.gpsPriority(ptoOn: pt.ptoOn, isAuto: pt.isAuto);
-            if (priority >= gpsMaxPriority[s]) {
-              gpsMaxPriority[s] = priority;
-              latestColor[s] = color;
-            }
-          } else {
-            // Latest-write wins for Speed/Left-Right heatmaps — a re-pass
-            // over the same sub-band reflects the sprayer's current state
-            // there. Only the Spray heatmap accumulates on re-pass, and
-            // only the GPS heatmap has a no-downgrade priority rule.
-            latestColor[s] = color;
-          }
-        }
-
-        prevIdxInCorridor = idx;
-      }
-
-      prevIdxInCorridor = null; // reset for next corridor
-
       final perp = _perpendicularOffsetLatLng(midStart, midEnd, halfWidth);
       if (perp == null) continue;
 
       for (int i = 0; i < numSub; i++) {
-        final passCount = subBandMaxPass[i];
+        final passCount = subBandMaxPass[ri][i];
         if (passCount == 0) continue; // sub-band never visited
 
         Color bandColor;
         int alpha;
 
         if (heatmapType == HeatmapType.spraying) {
-          if (accumulated[i] <= 0.0 || accumulatedCount[i] == 0) continue;
+          if (accumulated[ri][i] <= 0.0 || accumulatedCount[ri][i] == 0) {
+            continue;
+          }
           // Divide raw accumulated flow by the expected samples-per-sub-band at
           // normal speed. This is equivalent to avgPerSample × passCount for a
           // moving device (each pass contributes ~samplesPerPass samples), but
           // also correctly darkens a sub-band when the device is stationary:
           // many samples at the same spot accumulate a large sum which pushes
           // the colour from light-blue all the way to black.
-          final totalFlow = accumulated[i] / samplesPerPass;
+          final totalFlow = accumulated[ri][i] / samplesPerPass;
           bandColor = HeatmapColorUtils.getColorForSpray(totalFlow);
           alpha = 200;
         } else {
           // GPS heatmap: highest-priority state ever recorded (never
           // downgrades). Speed/Left-Right: most recent state (updated on
           // every re-pass). Both are just whatever's currently in
-          // latestColor[i] at this point.
-          final c = latestColor[i];
+          // latestColor[ri][i] at this point.
+          final c = latestColor[ri][i];
           if (c == null) continue;
           bandColor = c;
           alpha = 200;
