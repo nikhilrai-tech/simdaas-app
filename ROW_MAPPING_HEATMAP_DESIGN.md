@@ -4,8 +4,10 @@
 > currently decide "which row is the sprayer in" for the coverage heatmap, what we
 > just fixed, what's still fragile, and how the agricultural industry's own
 > standard (ISOBUS Section Control) solves the same problem differently.
-> **Status:** Current approach is implemented and shipped. The "Open Risks"
-> section is *not yet* implemented — it's the discussion point.
+> **Status:** Both the heatmap fix (§5) and the row-editing constraints that
+> close the "dragged far out of sequence" risk (§7) are implemented and
+> shipped. §8-10 (the design tension and the ISOBUS comparison) remain the
+> open discussion points.
 
 ---
 
@@ -183,11 +185,11 @@ traversal across the field — no more flip-flopping at any single spot.
 
 ---
 
-## 7. Open risk: a row dragged far out of sequence
+## 7. Closed risk: a row dragged far out of sequence
 
-Everything above assumes a manual edit is a **small, local correction** — a
-farmer nudging a row a metre or two to match what they see in the image. It
-does **not** protect against a row being dragged much further, into
+Everything above originally assumed a manual edit was a **small, local
+correction** — a farmer nudging a row a metre or two to match what they see
+in the image. Nothing stopped a row being dragged much further, into
 territory that logically belongs to a completely different row:
 
 ```mermaid
@@ -208,10 +210,42 @@ it; only its coordinates do. So a wild edit doesn't just mis-place one row —
 it can silently corrupt the tolerance calculation for its two neighboring
 corridors, in a way that isn't obvious just from looking at the map.
 
-**Not yet implemented, worth discussing:** cap the computed tolerance at some
-multiple of the plot's configured `row_spacing` (e.g. never exceed ~2x) — a
-believable local taper stays exact, but an extreme edit falls back to the
-safe, fixed value instead of ballooning.
+**Fixed — by construction, not a cap.** Rather than capping the *derived*
+tolerance after a bad edit already happened (which still leaves the row's
+own geometry broken, just bounds the damage), the drag handler itself
+(`row_line_screen.dart`) now makes both failure modes structurally
+impossible:
+
+```mermaid
+flowchart LR
+    subgraph Length["Length lock"]
+        direction TB
+        P["Fixed end<br/>(pivot)"] -."circle, radius = row's<br/>original length".- D1["Dragged end can slide<br/>anywhere on this circle —<br/>sideways/taper is free"]
+    end
+    subgraph Cross["No crossing"]
+        direction TB
+        N1["Neighbor below"] --- Ax["allowed range<br/>(5% margin each side)"] --- N2["Neighbor above"]
+    end
+```
+
+1. **Length lock** — the dragged endpoint is held on a circle of the row's
+   original length around its other (fixed) end, every frame of the drag.
+   It can move freely *sideways* (so tapering — closer to one neighbor at
+   one end than the other, a real field shape) still works exactly as
+   before, but the row can never become longer or shorter, which is what
+   let one endpoint travel arbitrarily far in the first place.
+2. **No crossing** — the endpoint can never pass the matching endpoint of an
+   immediate neighboring row (a small margin so they can't even touch). Its
+   sideways deviation is preserved exactly; only the position *along* the
+   neighbor-to-neighbor line gets pulled back if it would cross.
+
+Together, a row can never end up sitting in territory that logically
+belongs to a different row — so the "Row 5 lands where Row 9 was" scenario,
+and the coincidental-overlap failure it caused, can't happen at all anymore.
+A tolerance cap was considered instead, but rejected: capping just the
+*width* after a bad edit still leaves the corridor's *midline* computed from
+broken geometry — locking the geometry itself, so it can't go bad in the
+first place, is the more complete fix.
 
 ---
 
@@ -288,7 +322,7 @@ Key structural differences from this app:
 | Row/section identity | Independently-editable line per row | Fixed offset from one guidance line |
 | Handles irregular/curved fields | Yes — draw/edit each row to match reality | Limited — assumes fairly uniform parallel geometry |
 | Needs a tolerance zone at all | Yes — GPS noise vs. row width is a real tension | Rarely — precision is high enough to avoid it |
-| Risk from human error | A bad manual edit can corrupt tolerance for two corridors, invisibly | None — no manual per-row editing exists |
+| Risk from human error | Structurally prevented now (length lock + no-crossing on drag) | None — no manual per-row editing exists |
 | GPS precision required | Consumer-grade (metres) is workable, with care | RTK/DGPS (centimetres) expected |
 | Engineering cost | Lower — no special hardware, but more edge cases to defend against | Higher — RTK infrastructure, certified fixed geometry |
 
@@ -296,8 +330,8 @@ Key structural differences from this app:
 
 ## 11. Discussion points for the manager
 
-1. **Ship the safety cap now** (§7) — low effort, directly closes the worst
-   failure mode of the current design, keeps everything else unchanged.
+1. ~~Ship the safety cap~~ — done (§7), but as a structural constraint on
+   editing itself rather than a cap on the derived tolerance.
 2. **Decide the target GPS precision.** If devices are expected to stay on
    consumer-grade GPS long-term, some tolerance-zone approach (what we have)
    is unavoidable — the real question is how much more hardening it needs.
