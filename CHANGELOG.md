@@ -10,7 +10,7 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
-## [1.1.3] - 2026-09-12
+## [1.1.3] - 2026-09-17
 
 ### Added
 - **Investor Dashboard** — new aggregate, all-customers fleet dashboard at
@@ -56,6 +56,33 @@ already written — see "Release process" at the bottom.
   never going to load reliably. Switched to the same Google tile source
   already used everywhere else in the app (Monitoring, Report Details,
   Plot Mapping). *(backend)*
+- Control Unit setup screen's measurement captions (distance between sensor
+  and nozzle center, LIDAR mount height, ultrasonic sensor distance) were
+  bolder than the input field below them and could clip on small phone
+  screens — now normal weight, matching the rest of the form.
+- Sprayer and Tractor/Equipment setup screens' hinge-distance labels
+  (hinge→axle, hinge→nozzle, hinge→control unit mounting) could get cut off
+  on small phone screens — the full description now wraps as a caption
+  above the field, with a short "Distance" label inside the field itself.
+- Coverage heatmap (GPS, Speed, and Left/Right views on Monitoring and
+  Report Details) could show small gaps along a row the sprayer drove
+  continuously — ordinary GPS jitter of a couple of metres, worse with
+  tight row spacing, was enough to momentarily read as just outside the
+  row and break the paint job at that exact spot. The same issue affected
+  the red "outside the plot" boundary track. Both now tolerate a few
+  consecutive stray readings before treating it as a real exit.
+- Coverage heatmap could scatter one continuous pass down a single row
+  across several neighboring columns instead — most noticeable on fields
+  with wide or tapering row spacing, where ordinary GPS jitter could read
+  as fractionally closer to a neighboring row for an isolated reading. The
+  heatmap now credits one row per continuous pass and only switches once
+  several consecutive readings genuinely agree on a different row.
+- Manually dragging a row line's endpoint (Row Lines screen) could stretch
+  or shrink the row, or drag it past a neighboring row entirely — either
+  could silently corrupt the heatmap's row-width calculation for that area
+  of the field. An endpoint now stays locked to the row's original length
+  when dragged (it can still angle sideways, e.g. to match a real tapering
+  field) and can never cross past a neighboring row.
 
 ## [1.1.2] - 2026-08-31
 
