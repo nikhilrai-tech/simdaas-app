@@ -37,6 +37,16 @@ already written — see "Release process" at the bottom.
   consecutive readings needed before crediting a genuine row change), so
   Area Covered % stays accurate on tapering fields and after a row line is
   manually edited or deleted. *(backend)*
+- A device registered twice with its MAC address in different letter case
+  (e.g. `d4:…` and `D4:…`) made the firmware update check fail with
+  "Device did not respond" — the backend crashed on the duplicate match and
+  the reply never reached the app. A device whose MAC was stored in a
+  different case than the one it transmits with could also silently record
+  no sessions, GPS track, or reports at all, while still appearing Online.
+  MAC addresses are now stored uppercase (existing ones are normalized on
+  deploy; any pair that is still a true duplicate is left untouched and
+  logged for manual cleanup), and the OTA handlers no longer crash if a
+  duplicate is ever found. *(backend)*
 
 ## [1.1.3] - 2026-09-17
 
