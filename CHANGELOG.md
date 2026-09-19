@@ -10,6 +10,34 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-18
+
+### Added
+- Row Lines screen: a manual row line can now be deleted individually — a
+  small red delete button appears at each row's midpoint in Manual mode,
+  removing just that one row without needing to reset and regenerate every
+  row from the guide line.
+
+### Fixed
+- Manually dragging a row line's endpoint sideways (Row Lines screen) could
+  still make the row cross a neighboring row somewhere along its length,
+  even though the endpoint itself never crossed the neighbor's matching
+  endpoint — most visible on tapering fields, where the diagonal connecting
+  a moved endpoint to the row's fixed other end could slice through a
+  neighboring row in the middle. The drag now checks the whole line for an
+  actual crossing and holds at the last valid position instead of letting
+  it pass through.
+- Report's Area Covered % (and the completion percentage derived from it)
+  used a fixed, plot-wide row-spacing tolerance for every row corridor and
+  reset instantly on a single stray GPS reading — the same flat-tolerance,
+  no-tapering-support, no-jitter-tolerance issues already fixed in the
+  Monitoring/Report coverage heatmap display, just not carried over to this
+  calculation. It now mirrors the same fixed logic (each corridor's
+  tolerance from its own real current gap, tapering support, and a few
+  consecutive readings needed before crediting a genuine row change), so
+  Area Covered % stays accurate on tapering fields and after a row line is
+  manually edited or deleted. *(backend)*
+
 ## [1.1.3] - 2026-09-17
 
 ### Added

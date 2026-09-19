@@ -238,6 +238,46 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     );
   }
 
+  /// Catches the case _preventCrossing's axis-clamp misses: on a tapering
+  /// field, the two endpoints of a row can each individually stay clear of
+  /// their same-side neighbor endpoint, yet the diagonal *connecting* them
+  /// still slices through a neighboring row's line somewhere in the middle.
+  /// Rather than re-projecting (which would pull the point off the
+  /// length-lock circle), an invalid move is simply rejected for this frame
+  /// — the drag holds at the last valid position, so it "stops" right at
+  /// the neighboring line instead of jumping past it.
+  bool _wouldCrossNeighborSegment(int rowIdx, LatLng candidate) {
+    if (_dragPivot == null) return false;
+    final pivot = _dragPivot!;
+    bool crosses(List<LatLng> neighbor) {
+      if (neighbor.length < 2) return false;
+      return _segmentsIntersect(pivot, candidate, neighbor[0], neighbor[1]);
+    }
+
+    if (rowIdx > 0 && crosses(_rowLines[rowIdx - 1])) return true;
+    if (rowIdx < _rowLines.length - 1 && crosses(_rowLines[rowIdx + 1])) {
+      return true;
+    }
+    return false;
+  }
+
+  /// True if open segments p1→p2 and q1→q2 cross at an interior point of
+  /// both (shared endpoints / touching don't count as crossing).
+  bool _segmentsIntersect(LatLng p1, LatLng p2, LatLng q1, LatLng q2) {
+    final rLat = p2.latitude - p1.latitude;
+    final rLon = p2.longitude - p1.longitude;
+    final sLat = q2.latitude - q1.latitude;
+    final sLon = q2.longitude - q1.longitude;
+    final denom = rLat * sLon - rLon * sLat;
+    if (denom.abs() < 1e-18) return false; // parallel
+    final qpLat = q1.latitude - p1.latitude;
+    final qpLon = q1.longitude - p1.longitude;
+    final t = (qpLat * sLon - qpLon * sLat) / denom;
+    final u = (qpLat * rLon - qpLon * rLat) / denom;
+    const eps = 1e-9;
+    return t > eps && t < 1 - eps && u > eps && u < 1 - eps;
+  }
+
   // ── Boundary snapping helpers ────────────────────────────────────────────
 
   LatLng _clampToBoundary(LatLng point, List<LatLng> polygon) {
@@ -362,6 +402,13 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                   // 2. No crossing — never let this endpoint pass a
                   // neighboring row's matching endpoint.
                   moved = _preventCrossing(rowIdx, endIdx, moved);
+                  // 3. Full-line crossing — if the diagonal from the fixed
+                  // pivot to this new position would still slice through a
+                  // neighboring row somewhere in the middle, reject this
+                  // frame's move and hold the last valid position instead.
+                  if (_wouldCrossNeighborSegment(rowIdx, moved)) {
+                    moved = newSeg[endIdx];
+                  }
                   newSeg[endIdx] = _clampToBoundary(moved, widget.plot.polygon);
                   _rowLines = List<List<LatLng>>.from(_rowLines)..[rowIdx] = newSeg;
                   _lastPointerPos = ev.position;
@@ -396,6 +443,44 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           ),
         ));
       }
+    }
+    return markers;
+  }
+
+  List<Marker> _buildRowDeleteMarkers() {
+    if (_mode != _Mode.manual) return [];
+    final markers = <Marker>[];
+    for (int r = 0; r < _rowLines.length; r++) {
+      final seg = _rowLines[r];
+      if (seg.length < 2) continue;
+      final mid = LatLng(
+        (seg[0].latitude + seg[1].latitude) / 2,
+        (seg[0].longitude + seg[1].longitude) / 2,
+      );
+      final rowIdx = r;
+      markers.add(Marker(
+        point: mid,
+        width: 26,
+        height: 26,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() {
+            _draggingRow = null;
+            _draggingEnd = null;
+            final newLines = List<List<LatLng>>.from(_rowLines)
+              ..removeAt(rowIdx);
+            _rowLines = newLines;
+          }),
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.red.withAlpha(230),
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: const Icon(Icons.close, size: 16, color: Colors.white),
+          ),
+        ),
+      ));
     }
     return markers;
   }
@@ -471,6 +556,9 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                   if (_guideEnd != null)
                     _dotMarker(_guideEnd!, Colors.redAccent, 'E'),
                 ]),
+              // Row delete buttons (midpoint of each row)
+              if (_rowLines.isNotEmpty)
+                MarkerLayer(markers: _buildRowDeleteMarkers()),
               // Row endpoint drag handles
               if (_rowLines.isNotEmpty)
                 MarkerLayer(markers: _buildRowEndpointMarkers()),
@@ -576,7 +664,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           child: Text(
             _rowLines.isEmpty
                 ? 'Switch to Guide Line mode to generate rows first.'
-                : 'Drag orange handles to adjust individual row endpoints.',
+                : 'Drag orange handles to adjust endpoints. Tap the red ✕ to delete a row.',
             style: const TextStyle(fontSize: 13),
           ),
         ),
