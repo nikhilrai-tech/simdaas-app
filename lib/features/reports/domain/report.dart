@@ -51,6 +51,13 @@ class Report {
   // data was merged into an already-finished session; `amendedNote` says why.
   final bool amended;
   final String? amendedNote;
+  // 'server' (Automatic) | 'device' (Manual) | null if the session is gone.
+  final String? sessionMode;
+  // True while this report may still be missing data from a connectivity
+  // gap: its session was force-closed by a watchdog timeout rather than a
+  // clean end, and no backfill has corrected it yet. Flips back to false on
+  // its own once `amended` becomes true.
+  final bool pendingNetworkData;
 
   const Report({
     this.plotId,
@@ -87,6 +94,8 @@ class Report {
     this.gpsUnavailableNote,
     this.amended = false,
     this.amendedNote,
+    this.sessionMode,
+    this.pendingNetworkData = false,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,
