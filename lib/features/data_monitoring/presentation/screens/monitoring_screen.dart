@@ -282,6 +282,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         if (message != null) {
           _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
         }
+        // The device's own ack is the fastest signal that a session really
+        // started/ended — it can arrive well before the heartbeat that would
+        // otherwise create/close the JobSession row and fire session_event
+        // (deviceSessionEventStream above). Without this, the "Start
+        // Session" idle bar / "End session" menu item can keep showing the
+        // stale state for a while after the device has already confirmed.
+        const realTransition = {'session_started', 'session_closed', 'previous_session_closed'};
+        if (realTransition.contains(ack.status)) {
+          final uid = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+          ref.invalidate(eq_provs.controlUnitsProvider(uid));
+          ref.invalidate(activeSessionsListProvider);
+        }
       });
       _reportAmendedSub = svc.deviceReportAmendedStream(normId).listen((e) {
         if (!mounted) return;
@@ -666,8 +678,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     int? resolvedActiveSessionId;
     bool isManualMode = false;
     try {
-      final cuList = controlUnitsAsync.asData?.value;
-      final sessions = sessionsAsync.asData?.value;
+      final cuList = controlUnitsAsync.valueOrNull;
+      final sessions = sessionsAsync.valueOrNull;
       final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
 
       if (normId != null && cuList != null) {
@@ -701,6 +713,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
       }
     } catch (_) {}
+
+    // Shared with the top-left L/R card and the legend below it, so both
+    // shift down instead of being covered when a top banner is showing.
+    final manualIdleBarVisible = isManualMode &&
+        resolvedActiveSessionId == null &&
+        latestTelemetry != null &&
+        !(_cooldownState?.isInCooldown ?? false) &&
+        !_cooldownBannerVisible;
+    final cooldownBannerShown = _cooldownBannerVisible &&
+        _cooldownState != null &&
+        _cooldownState!.status == DeviceLifecycleStatus.cooldown;
+    final topBannerVisible = manualIdleBarVisible || cooldownBannerShown;
 
     // Compute simple state indicators from the latest telemetry snapshot.
     final t0 = latestTelemetry;
@@ -1011,7 +1035,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               if (v == 'tank_level') {
                                 try {
                                   _toggleTankLevelOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -1021,7 +1045,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               } else if (v == 'spray_on_off') {
                                 try {
                                   _toggleSolenoidOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -1031,7 +1055,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               } else if (v == 'sensor_data') {
                                 try {
                                   _toggleSensorOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -1284,11 +1308,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             ),
 
             // ── Manual mode: online but no session running ─────────────────
-            if (isManualMode &&
-                resolvedActiveSessionId == null &&
-                latestTelemetry != null &&
-                !(_cooldownState?.isInCooldown ?? false) &&
-                !_cooldownBannerVisible)
+            if (manualIdleBarVisible)
               Positioned(
                 top: 0,
                 left: 0,
@@ -1299,9 +1319,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             // ── Cooldown / offline-pending banner ──────────────────────────
             // Shown briefly at the top when a cooldown begins, then auto
             // dismisses after 5 s. The cooldown itself keeps running.
-            if (_cooldownBannerVisible &&
-                _cooldownState != null &&
-                _cooldownState!.status == DeviceLifecycleStatus.cooldown)
+            if (cooldownBannerShown)
               Positioned(
                 top: 0,
                 left: 0,
@@ -1315,8 +1333,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             // so the two never overlap on small screens. Only one of the
             // three overlays can be visible at a time (see the _toggle*
             // methods), so at most one extra card appears here.
+            // top offset shifts down when a top banner (idle bar / cooldown)
+            // is showing, so it stays stacked below the L/R card instead of
+            // being covered by the banner.
             Positioned(
-              top: 80,
+              top: topBannerVisible ? 132 : 80,
               left: 12,
               child: SafeArea(
                 child: ConstrainedBox(
@@ -1334,11 +1355,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                             _showSolenoidOverlay ||
                             _showSensorOverlay)
                           const SizedBox(height: 8),
-                        _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
+                        _buildTankLevelOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
-                        _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
+                        _buildSolenoidOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
-                        _buildSensorOverlay(controlUnitsAsync.asData?.value,
+                        _buildSensorOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
                       ],
                     ),
@@ -1349,7 +1370,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
             // ── Top-left L/R nozzle indicators (left/right) ───────────────
             Positioned(
-              top: 12,
+              top: topBannerVisible ? 64 : 12,
               left: 12,
               child: SafeArea(
                 child: Card(

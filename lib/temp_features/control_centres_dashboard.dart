@@ -315,6 +315,10 @@ class _ControlUnitsListScreenState
   // here and unsubscribe in dispose(), navigating away from this screen
   // closes the WebSocket channels and breaks the dashboard's
   // `activeDevicesProvider` (it goes empty → "All Offline").
+  //
+  // Listening (not subscribing) to the already-open session-event stream is
+  // fine to start/stop here though — it doesn't touch those channels.
+  final List<StreamSubscription> _sessionEventSubs = [];
 
   @override
   void initState() {
@@ -337,6 +341,34 @@ class _ControlUnitsListScreenState
         }
       }
     });
+
+    // Manual devices: `cu.activeSessionId` (drives the "SESSION OPEN ·
+    // OFFLINE" badge via computeDeviceStatus) only comes from
+    // controlUnitsProvider, which nothing here refetches on its own. Without
+    // this, starting/ending a Manual session while this screen isn't the one
+    // that did it (or was open at the time) leaves the badge stale until a
+    // manual pull-to-refresh. Refetch on every session_event, same as the
+    // Monitoring screen already does for its own device.
+    final userId = ref.read(authServiceProvider).currentUserId ?? '';
+    final svc = ref.read(telemetryServiceProvider);
+    for (final cu in widget.items) {
+      final deviceId = extractDeviceId(cu);
+      if (deviceId.isEmpty) continue;
+      _sessionEventSubs.add(
+        svc.deviceSessionEventStream(deviceId).listen((_) {
+          if (!mounted) return;
+          ref.invalidate(eq_provs.controlUnitsProvider(userId));
+        }),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final sub in _sessionEventSubs) {
+      sub.cancel();
+    }
+    super.dispose();
   }
 
   @override

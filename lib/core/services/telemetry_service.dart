@@ -7,6 +7,7 @@ import 'ws_channel_stub.dart'
     if (dart.library.io) 'ws_channel_io.dart'
     if (dart.library.html) 'ws_channel_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../config.dart';
 import '../utils/mac_utils.dart';
 import 'api_service.dart';
 import 'auth_service.dart' show apiServiceProvider;
@@ -1234,9 +1235,11 @@ class _LatLonEntry {
 }
 
 final telemetryServiceProvider = Provider<TelemetryService>((ref) {
-  // Use provided base URL; default to ws://13.201.0.34:8001
+  // Derived from apiBaseUrl (see core/config.dart) so the live WebSocket
+  // always talks to the same backend as REST calls — was hardcoded to
+  // prod here before, independent of apiBaseUrl's staging/prod toggle.
   final svc = TelemetryService(
-    baseUrl: 'ws://3.108.218.140:8001',
+    baseUrl: wsBaseUrl,
     apiService: ref.watch(apiServiceProvider),
   );
   ref.onDispose(() => svc.dispose());
