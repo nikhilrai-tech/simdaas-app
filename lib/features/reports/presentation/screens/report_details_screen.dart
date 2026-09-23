@@ -175,6 +175,35 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
             const SizedBox(height: 24),
 
+            if (report.amended) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.cloud_sync_outlined,
+                        color: Colors.blue.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        report.amendedNote ??
+                            'Updated after network data was recovered from a connectivity gap.',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.blue.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             if (report.gpsUnavailableNote != null) ...[
               Container(
                 width: double.infinity,

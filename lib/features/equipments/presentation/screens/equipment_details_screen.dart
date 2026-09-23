@@ -390,6 +390,8 @@ class _EquipmentDetailsScreenState
                 value: _demoOn,
                 onChanged: (v) => setState(() => _demoOn = v),
               ),
+              const SizedBox(height: 12),
+              _SessionModeCard(equipment: displayedEquipment),
             ],
             const SizedBox(height: 24),
           ],
@@ -825,6 +827,187 @@ class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
                 value: widget.value,
                 onChanged: _toggle,
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Automatic vs Manual session mode for a control unit.
+///
+/// Automatic = the backend starts/ends sessions by itself (how every device
+/// behaved before this card existed). Manual = the sprayer owns the session:
+/// start/stop it on the device (or from the Monitoring screen) and data
+/// recorded while offline is kept and merged later. The mode is stored on the
+/// backend per control unit — the backend has to know it to route telemetry.
+class _SessionModeCard extends ConsumerStatefulWidget {
+  final EquipmentEntity equipment;
+  const _SessionModeCard({required this.equipment});
+
+  @override
+  ConsumerState<_SessionModeCard> createState() => _SessionModeCardState();
+}
+
+class _SessionModeCardState extends ConsumerState<_SessionModeCard> {
+  late String _mode = widget.equipment.sessionMode ?? 'server';
+  bool _loading = false;
+
+  // Manual needs firmware that sends session-aware heartbeats. Unknown (null)
+  // is treated as unsupported until the backend has seen one.
+  bool get _manualSupported => widget.equipment.deviceSessionsSupported == true;
+
+  Future<void> _select(String mode) async {
+    if (mode == _mode || _loading) return;
+
+    if (mode == 'device') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Switch to Manual mode?'),
+          content: const Text(
+            'In Manual mode a session starts and ends only when you start/stop '
+            'it — with the button on the sprayer or from the Monitoring screen. '
+            'Nothing is recorded as a session until you start one.\n\n'
+            'In return, data recorded while the network is down is kept safely '
+            'and added to the same session when the device reconnects.',
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Switch to Manual')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      await ref
+          .read(equipmentControllerProvider)
+          .setSessionMode(widget.equipment.id, mode: mode);
+      if (mounted) setState(() => _mode = mode);
+    } catch (err) {
+      if (mounted) await _showError(err);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Backend errors carry a stable `code` (see ControlUnitSessionModeView).
+  Future<void> _showError(Object err) async {
+    String? code;
+    String? message;
+    if (err is ApiException && err.body != null) {
+      try {
+        final body = json.decode(err.body!);
+        if (body is Map) {
+          code = body['code']?.toString();
+          message = body['error']?.toString();
+        }
+      } catch (_) {}
+    }
+
+    if (code == 'session_active') {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('A session is running'),
+          content: const Text(
+              'End the current session first, then change the session mode.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final text = switch (code) {
+      'firmware_unsupported' =>
+        'This device\'s firmware doesn\'t support Manual mode yet. Update the firmware first.',
+      'feature_disabled' => 'Manual mode isn\'t enabled on the server yet.',
+      _ => message ?? 'Could not change session mode: $err',
+    };
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isManual = _mode == 'device';
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Session Mode',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w500),
+                  ),
+                ),
+                if (_loading)
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: [
+                  const ButtonSegment(value: 'server', label: Text('Automatic')),
+                  ButtonSegment(
+                    value: 'device',
+                    label: const Text('Manual'),
+                    // Only blocks *switching to* Manual; a unit already on
+                    // Manual must always be able to go back.
+                    enabled: _manualSupported || isManual,
+                  ),
+                ],
+                selected: {_mode},
+                onSelectionChanged:
+                    _loading ? null : (selection) => _select(selection.first),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              isManual
+                  ? 'Manual — you start and stop each session (button on the sprayer, '
+                      'or Start/End Session on the Monitoring screen). Data recorded '
+                      'while offline is kept and merged into the same session.'
+                  : 'Automatic — sessions start and end by themselves. Best when the '
+                      'sprayer always has network.',
+              style: theme.textTheme.bodySmall,
+            ),
+            if (!_manualSupported && !isManual) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Manual mode needs newer firmware — it becomes available once this '
+                'device reports it supports it.',
+                style: theme.textTheme.bodySmall?.copyWith(color: Colors.orange.shade800),
+              ),
+            ],
           ],
         ),
       ),

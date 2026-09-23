@@ -47,6 +47,10 @@ class Report {
   // sent lat=lon=0.0 throughout) — distanceTravelledKm/areaCoveredSqm are
   // 0 because there was no usable position data, not because nothing happened.
   final String? gpsUnavailableNote;
+  // True when the report was recomputed after recovered (offline-buffered)
+  // data was merged into an already-finished session; `amendedNote` says why.
+  final bool amended;
+  final String? amendedNote;
 
   const Report({
     this.plotId,
@@ -81,6 +85,8 @@ class Report {
     this.endedAt,
     this.trajectory = const [],
     this.gpsUnavailableNote,
+    this.amended = false,
+    this.amendedNote,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,

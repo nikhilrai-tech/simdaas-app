@@ -35,6 +35,8 @@ class ReportModel extends Report {
     super.endedAt,
     super.trajectory = const [],
     super.gpsUnavailableNote,
+    super.amended,
+    super.amendedNote,
     super.driverName,
     super.fertilizersUsed,
     super.agrochemicalUsed,
@@ -117,6 +119,8 @@ class ReportModel extends Report {
               .toList() ??
           [],
       gpsUnavailableNote: json['gps_unavailable_note']?.toString(),
+      amended: json['amended'] == true,
+      amendedNote: json['amended_note']?.toString(),
       driverName: json['driver_name']?.toString(),
       fertilizersUsed: json['fertilizers_used']?.toString(),
       agrochemicalUsed: json['agrochemical_used']?.toString(),

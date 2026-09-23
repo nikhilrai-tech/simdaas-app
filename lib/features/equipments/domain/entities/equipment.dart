@@ -28,6 +28,12 @@ class EquipmentEntity {
   final String? linkedTractorId;
   final String? linkedPlotId;
   final int? activeSessionId;
+  // Session ownership — control-unit only. 'server' = Automatic (the backend
+  // infers sessions), 'device' = Manual (the sprayer starts/ends them).
+  final String? sessionMode;
+  // True once the hardware has sent a session-aware heartbeat, i.e. the
+  // firmware can actually drive Manual mode.
+  final bool? deviceSessionsSupported;
   // OTA firmware update (RFC-004) — control-unit only
   final String? firmwareVersion;
   final String? firmwareAvailableVersion;
@@ -64,6 +70,8 @@ class EquipmentEntity {
     this.linkedTractorId,
     this.linkedPlotId,
     this.activeSessionId,
+    this.sessionMode,
+    this.deviceSessionsSupported,
     this.firmwareVersion,
     this.firmwareAvailableVersion,
     this.rightFrontOffset,
@@ -75,6 +83,10 @@ class EquipmentEntity {
     this.createdAt,
     this.updatedAt,
   });
+
+  /// Manual mode: the sprayer owns the session (start/stop on the device or
+  /// from the app); anything else is Automatic.
+  bool get isManualSessionMode => sessionMode == 'device';
 }
 
 class TractorEntity extends EquipmentEntity {
@@ -121,6 +133,8 @@ class ControlUnitEntity extends EquipmentEntity {
     super.linkedTractorId,
     super.linkedPlotId,
     super.activeSessionId,
+    super.sessionMode,
+    super.deviceSessionsSupported,
     super.lastSeenAt,
     super.firmwareVersion,
     super.firmwareAvailableVersion,
