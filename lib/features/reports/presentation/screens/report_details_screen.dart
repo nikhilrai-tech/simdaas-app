@@ -175,6 +175,68 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
             const SizedBox(height: 24),
 
+            if (report.sessionMode != null) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: report.sessionMode == 'device'
+                        ? Colors.teal.shade50
+                        : Colors.indigo.shade50,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: report.sessionMode == 'device'
+                          ? Colors.teal.shade200
+                          : Colors.indigo.shade200,
+                    ),
+                  ),
+                  child: Text(
+                    report.sessionMode == 'device' ? 'Manual' : 'Automatic',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: report.sessionMode == 'device'
+                          ? Colors.teal.shade800
+                          : Colors.indigo.shade800,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            if (report.pendingNetworkData) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.wifi_off_rounded,
+                        color: Colors.orange.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'This report may be incomplete — the session ended '
+                        'after a long connectivity gap. It will update '
+                        'automatically if the device sends recovered data.',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.orange.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             if (report.amended) ...[
               Container(
                 width: double.infinity,

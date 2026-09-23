@@ -173,6 +173,31 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                               const Icon(Icons.chevron_right, color: Colors.grey),
                             ],
                           ),
+                          if (r.sessionMode != null ||
+                              r.pendingNetworkData ||
+                              r.amended) ...[
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                if (r.sessionMode != null)
+                                  _reportBadge(
+                                    r.sessionMode == 'device'
+                                        ? 'Manual'
+                                        : 'Automatic',
+                                    r.sessionMode == 'device'
+                                        ? Colors.teal
+                                        : Colors.indigo,
+                                  ),
+                                if (r.pendingNetworkData)
+                                  _reportBadge('Pending network data',
+                                      Colors.orange),
+                                if (r.amended)
+                                  _reportBadge('Updated', Colors.blue),
+                              ],
+                            ),
+                          ],
                           const Divider(height: 24),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -292,6 +317,25 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
         const SizedBox(height: 2),
         Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
       ],
+    );
+  }
+
+  Widget _reportBadge(String label, MaterialColor color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.shade50,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.shade200),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: color.shade800,
+        ),
+      ),
     );
   }
 }
