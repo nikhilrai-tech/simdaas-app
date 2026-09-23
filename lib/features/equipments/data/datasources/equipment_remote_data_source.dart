@@ -11,7 +11,10 @@ abstract class EquipmentRemoteDataSource {
   Future<List<EquipmentEntity>> getTractors(String userId);
   Future<List<EquipmentEntity>> getSprayers(String userId);
   Future<List<EquipmentEntity>> getControlUnits(String userId);
-  Future<void> endSession(int sessionId);
+  Future<Map<String, dynamic>> endSession(int sessionId, {bool force = false});
+  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode});
+  Future<Map<String, dynamic>> startDeviceSession(String mac);
+  Future<Map<String, dynamic>> stopDeviceSession(String mac);
   Future<void> pushDemoConfig(String id, {required bool demo});
 }
 
@@ -396,9 +399,33 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
     }
   }
 
+  /// Returns the backend's reply. Automatic devices answer 200 `{status:
+  /// success}` (session already closed, cooldown started); Manual devices
+  /// answer 202 `{status: requested}` — the device closes the session itself.
   @override
-  Future<void> endSession(int sessionId) async {
-    await api.postJson('/jobs/api/sessions/$sessionId/end/');
+  Future<Map<String, dynamic>> endSession(int sessionId, {bool force = false}) async {
+    final res = await api.postJson('/jobs/api/sessions/$sessionId/end/',
+        jsonBody: force ? {'force': true} : null);
+    return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+  }
+
+  @override
+  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode}) async {
+    final res = await api.postJson('/api/control-units/$controlUnitId/session-mode/',
+        jsonBody: {'mode': mode});
+    return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+  }
+
+  @override
+  Future<Map<String, dynamic>> startDeviceSession(String mac) async {
+    final res = await api.postJson('/jobs/api/devices/${Uri.encodeComponent(mac)}/session/start/');
+    return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+  }
+
+  @override
+  Future<Map<String, dynamic>> stopDeviceSession(String mac) async {
+    final res = await api.postJson('/jobs/api/devices/${Uri.encodeComponent(mac)}/session/stop/');
+    return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
   }
 
   @override

@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signal_strength_indicator/signal_strength_indicator.dart';
+import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -86,6 +88,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   // before the cooldown event lands. Cleared automatically once the cooldown
   // ends (state transitions out of `cooldown`), so the next session can show.
   bool _sessionEndedManually = false;
+
+  // ── Manual (device-managed) session mode ─────────────────────────────────
+  // In Manual mode the sprayer owns the session: these listeners keep the
+  // screen in sync with the device's START/END, its acks of our virtual
+  // start/stop, and reports amended by recovered (offline) data.
+  StreamSubscription<SessionEvent>? _sessionEventSub;
+  StreamSubscription<SessionAckEvent>? _sessionAckSub;
+  StreamSubscription<ReportAmendedEvent>? _reportAmendedSub;
+  // True while a virtual start/stop request is in flight.
+  bool _manualBusy = false;
 
   @override
   void initState() {
@@ -246,6 +258,55 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         debugPrint('stack: $st');
       }
 
+      // ── Manual-mode session events (no-ops for Automatic devices, which
+      // never receive them) ──────────────────────────────────────────────
+      _sessionEventSub = svc.deviceSessionEventStream(normId).listen((e) {
+        if (!mounted) return;
+        // Re-resolve which session is running from the backend.
+        final uid = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+        ref.invalidate(eq_provs.controlUnitsProvider(uid));
+        ref.invalidate(activeSessionsListProvider);
+        setState(() => _manualBusy = false);
+      });
+      _sessionAckSub = svc.deviceSessionAckStream(normId).listen((ack) {
+        if (!mounted || ack.messageType != 'session') return;
+        setState(() => _manualBusy = false);
+        final message = switch (ack.status) {
+          'session_started' => 'Session started on the device',
+          'session_closed' => 'Session stopped on the device',
+          'previous_session_closed' => 'Previous session closed, new session started',
+          'already_inactive' => 'The device had no running session',
+          'invalid_payload' => 'The device rejected the command',
+          _ => null,
+        };
+        if (message != null) {
+          _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
+        }
+        // The device's own ack is the fastest signal that a session really
+        // started/ended — it can arrive well before the heartbeat that would
+        // otherwise create/close the JobSession row and fire session_event
+        // (deviceSessionEventStream above). Without this, the "Start
+        // Session" idle bar / "End session" menu item can keep showing the
+        // stale state for a while after the device has already confirmed.
+        const realTransition = {'session_started', 'session_closed', 'previous_session_closed'};
+        if (realTransition.contains(ack.status)) {
+          final uid = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+          ref.invalidate(eq_provs.controlUnitsProvider(uid));
+          ref.invalidate(activeSessionsListProvider);
+        }
+      });
+      _reportAmendedSub = svc.deviceReportAmendedStream(normId).listen((e) {
+        if (!mounted) return;
+        _messengerKey.currentState?.showSnackBar(SnackBar(
+          content: Text(e.note ?? 'A report was updated with recovered data.'),
+          duration: const Duration(seconds: 8),
+          action: SnackBarAction(
+            label: 'View',
+            onPressed: () => appNavKey.currentState?.pushNamed('/job_reports'),
+          ),
+        ));
+      });
+
       // ── Subscribe to cooldown / lifecycle status events ──────────────
       // Seed from existing state (in case cooldown started before screen mounted).
       final existing = svc.getCooldownState(normId);
@@ -377,6 +438,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     WidgetsBinding.instance.removeObserver(this);
     _deviceSub?.cancel();
     _cooldownSub?.cancel();
+    _sessionEventSub?.cancel();
+    _sessionAckSub?.cancel();
+    _reportAmendedSub?.cancel();
     _countdownTimer?.cancel();
     _cooldownBannerDismissTimer?.cancel();
     super.dispose();
@@ -425,6 +489,83 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       _messengerKey.currentState?.hideCurrentSnackBar();
       _outOfPlotSnackVisible = false;
     }
+  }
+
+  // ── Manual (device-managed) mode helpers ───────────────────────────────────
+
+  /// Virtual start button. The session itself appears when the device confirms
+  /// (its START heartbeat / ack), so this only sends the request.
+  Future<void> _startManualSession() async {
+    final mac = widget.deviceId;
+    if (mac == null || mac.isEmpty || _manualBusy) return;
+    setState(() => _manualBusy = true);
+    try {
+      await ref.read(eq_provs.equipmentControllerProvider).startDeviceSession(mac);
+      _messengerKey.currentState?.showSnackBar(
+          const SnackBar(content: Text('Start sent to the device…')));
+      // Safety: never leave the button spinning if the device never answers.
+      Future.delayed(const Duration(seconds: 20), () {
+        if (mounted && _manualBusy) setState(() => _manualBusy = false);
+      });
+    } catch (err) {
+      if (mounted) setState(() => _manualBusy = false);
+      _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(_manualErrorText(err))));
+    }
+  }
+
+  String _manualErrorText(Object err) {
+    if (err is ApiException && err.body != null) {
+      try {
+        final body = json.decode(err.body!);
+        if (body is Map) {
+          switch (body['code']?.toString()) {
+            case 'session_active':
+              return 'A session is already running on this device.';
+            case 'not_manual_mode':
+              return 'This device is not in Manual mode.';
+            case 'no_active_session':
+              return 'No session is running on this device.';
+          }
+          if (body['error'] != null) return body['error'].toString();
+        }
+      } catch (_) {}
+    }
+    return 'Request failed: $err';
+  }
+
+  /// Shown at the top for Manual devices that are online but have no session.
+  Widget _buildManualIdleBar() {
+    return Container(
+      color: Colors.blueGrey.shade800.withValues(alpha: 0.95),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            const Icon(Icons.pan_tool_alt_outlined, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                'Manual mode — no session running.\nStart one here, or hold the RIGHT button on the sprayer for 5 s.',
+                style: TextStyle(color: Colors.white, fontSize: 12, height: 1.3),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: _manualBusy ? null : _startManualSession,
+              icon: _manualBusy
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.play_arrow_rounded, size: 18),
+              label: const Text('Start Session'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ── Cooldown banner widget ───────────────────────────────────────────────
@@ -535,9 +676,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     // back to the generic label.
     String? resolvedControlUnitName;
     int? resolvedActiveSessionId;
+    bool isManualMode = false;
     try {
-      final cuList = controlUnitsAsync.asData?.value;
-      final sessions = sessionsAsync.asData?.value;
+      final cuList = controlUnitsAsync.valueOrNull;
+      final sessions = sessionsAsync.valueOrNull;
       final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
 
       if (normId != null && cuList != null) {
@@ -546,6 +688,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           if (candidate.isNotEmpty && canonicalizeMac(candidate) == normId) {
             resolvedControlUnitName = cu.name;
             resolvedActiveSessionId = cu.activeSessionId;
+            isManualMode = cu.isManualSessionMode;
             _backendLastSeenAt = cu.lastSeenAt;
             break;
           }
@@ -570,6 +713,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
       }
     } catch (_) {}
+
+    // Shared with the top-left L/R card and the legend below it, so both
+    // shift down instead of being covered when a top banner is showing.
+    final manualIdleBarVisible = isManualMode &&
+        resolvedActiveSessionId == null &&
+        latestTelemetry != null &&
+        !(_cooldownState?.isInCooldown ?? false) &&
+        !_cooldownBannerVisible;
+    final cooldownBannerShown = _cooldownBannerVisible &&
+        _cooldownState != null &&
+        _cooldownState!.status == DeviceLifecycleStatus.cooldown;
+    final topBannerVisible = manualIdleBarVisible || cooldownBannerShown;
 
     // Compute simple state indicators from the latest telemetry snapshot.
     final t0 = latestTelemetry;
@@ -607,6 +762,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(resolvedControlUnitName ?? 'Data Monitoring', style: const TextStyle(fontSize: 18)),
+                if (isManualMode)
+                  const Text('MANUAL',
+                      style: TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold)),
                 if (_cooldownState?.isInCooldown ?? false)
                   Builder(builder: (_) {
                     final cd = _cooldownState!;
@@ -874,7 +1035,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               if (v == 'tank_level') {
                                 try {
                                   _toggleTankLevelOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -884,7 +1045,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               } else if (v == 'spray_on_off') {
                                 try {
                                   _toggleSolenoidOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -894,7 +1055,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               } else if (v == 'sensor_data') {
                                 try {
                                   _toggleSensorOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -974,8 +1135,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     context: context,
                                     builder: (ctx) => AlertDialog(
                                           title: const Text('End Session?'),
-                                          content: Text(
-                                              'Are you sure you want to end the active session for ${resolvedControlUnitName ?? "this device"}?'),
+                                          content: Text(isManualMode
+                                              ? 'Stop the running session on ${resolvedControlUnitName ?? "this device"}? The stop is sent to the sprayer and the session ends when it confirms.'
+                                              : 'Are you sure you want to end the active session for ${resolvedControlUnitName ?? "this device"}?'),
                                           actions: [
                                             TextButton(
                                                 onPressed: () => Navigator.pop(ctx, false),
@@ -988,9 +1150,37 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 if (confirmed == true) {
                                   try {
                                     final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
-                                    await ref
+                                    final endedNow = await ref
                                         .read(eq_provs.equipmentControllerProvider)
                                         .endSession(sessionIdToEnd, deviceId: deviceMac);
+
+                                    // Manual mode: only a stop was *requested* — the sprayer
+                                    // closes its own session, so nothing is cleared or put into
+                                    // cooldown here; the session_event / report_ready that
+                                    // follows updates the screen. Offer the escape hatch for a
+                                    // device that can't be reached.
+                                    if (!endedNow) {
+                                      final endingId = sessionIdToEnd;
+                                      _messengerKey.currentState?.showSnackBar(SnackBar(
+                                        content: const Text('Stop sent to the device…'),
+                                        duration: const Duration(seconds: 15),
+                                        action: SnackBarAction(
+                                          label: 'Device offline? Force end',
+                                          onPressed: () async {
+                                            try {
+                                              await ref
+                                                  .read(eq_provs.equipmentControllerProvider)
+                                                  .endSession(endingId,
+                                                      deviceId: deviceMac, force: true);
+                                            } catch (err) {
+                                              _messengerKey.currentState?.showSnackBar(
+                                                  SnackBar(content: Text(_manualErrorText(err))));
+                                            }
+                                          },
+                                        ),
+                                      ));
+                                      return;
+                                    }
 
                                     // 1. Block telemetry on this screen until the cooldown ends
                                     //    (cleared automatically when the cooldown stream emits an
@@ -1097,12 +1287,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 PopupMenuItem(
                                   value: 'end_session',
                                   child: Row(
-                                    children: const [
-                                      Icon(Icons.stop_circle_outlined,
+                                    children: [
+                                      const Icon(Icons.stop_circle_outlined,
                                           color: Colors.redAccent, size: 20),
-                                      SizedBox(width: 8),
-                                      Text('End active device',
-                                          style: TextStyle(color: Colors.redAccent)),
+                                      const SizedBox(width: 8),
+                                      Text(isManualMode ? 'End session' : 'End active device',
+                                          style: const TextStyle(color: Colors.redAccent)),
                                     ],
                                   ),
                                 ),
@@ -1117,12 +1307,19 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               ),
             ),
 
+            // ── Manual mode: online but no session running ─────────────────
+            if (manualIdleBarVisible)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: _buildManualIdleBar(),
+              ),
+
             // ── Cooldown / offline-pending banner ──────────────────────────
             // Shown briefly at the top when a cooldown begins, then auto
             // dismisses after 5 s. The cooldown itself keeps running.
-            if (_cooldownBannerVisible &&
-                _cooldownState != null &&
-                _cooldownState!.status == DeviceLifecycleStatus.cooldown)
+            if (cooldownBannerShown)
               Positioned(
                 top: 0,
                 left: 0,
@@ -1136,8 +1333,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             // so the two never overlap on small screens. Only one of the
             // three overlays can be visible at a time (see the _toggle*
             // methods), so at most one extra card appears here.
+            // top offset shifts down when a top banner (idle bar / cooldown)
+            // is showing, so it stays stacked below the L/R card instead of
+            // being covered by the banner.
             Positioned(
-              top: 80,
+              top: topBannerVisible ? 132 : 80,
               left: 12,
               child: SafeArea(
                 child: ConstrainedBox(
@@ -1155,11 +1355,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                             _showSolenoidOverlay ||
                             _showSensorOverlay)
                           const SizedBox(height: 8),
-                        _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
+                        _buildTankLevelOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
-                        _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
+                        _buildSolenoidOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
-                        _buildSensorOverlay(controlUnitsAsync.asData?.value,
+                        _buildSensorOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
                       ],
                     ),
@@ -1170,7 +1370,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
             // ── Top-left L/R nozzle indicators (left/right) ───────────────
             Positioned(
-              top: 12,
+              top: topBannerVisible ? 64 : 12,
               left: 12,
               child: SafeArea(
                 child: Card(

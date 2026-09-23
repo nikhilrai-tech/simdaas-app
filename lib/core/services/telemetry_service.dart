@@ -7,6 +7,7 @@ import 'ws_channel_stub.dart'
     if (dart.library.io) 'ws_channel_io.dart'
     if (dart.library.html) 'ws_channel_html.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../config.dart';
 import '../utils/mac_utils.dart';
 import 'api_service.dart';
 import 'auth_service.dart' show apiServiceProvider;
@@ -126,6 +127,65 @@ class OtaVersionStatusEvent {
   final String? liveVersion;
 
   const OtaVersionStatusEvent({required this.deviceId, this.liveVersion});
+}
+
+/// A session started or ended on a device (backend `session_event` WS event).
+/// `source` is `server` (Automatic), `device` (Manual) or `backfill` (recovered
+/// from the device's offline buffer). Emitted via
+/// [TelemetryService.deviceSessionEventStream].
+class SessionEvent {
+  final String deviceId;
+  final int sessionId;
+  final int? deviceSessionId;
+  final String event; // START | END
+  final String? source;
+
+  const SessionEvent({
+    required this.deviceId,
+    required this.sessionId,
+    required this.event,
+    this.deviceSessionId,
+    this.source,
+  });
+
+  bool get isStart => event == 'START';
+  bool get isEnd => event == 'END';
+}
+
+/// The device's acknowledgement of a virtual start/stop (`messageType`
+/// "session") or plot command ("controlunit"). `data` is the device's raw
+/// reply, e.g. `{session_id, event: START, status: session_started, ...}`.
+class SessionAckEvent {
+  final String deviceId;
+  final String messageType;
+  final Map<String, dynamic> data;
+
+  const SessionAckEvent({
+    required this.deviceId,
+    required this.messageType,
+    required this.data,
+  });
+
+  String? get status => data['status']?.toString();
+  String? get event => data['event']?.toString();
+}
+
+/// A finished session's report was recomputed (or a session was recovered)
+/// after the device's offline buffer arrived. Unlike `report_ready` this does
+/// NOT mean the device went offline. Emitted via
+/// [TelemetryService.deviceReportAmendedStream].
+class ReportAmendedEvent {
+  final String deviceId;
+  final int sessionId;
+  final int reportId;
+  final String? note;
+
+  const ReportAmendedEvent({
+    required this.deviceId,
+    required this.sessionId,
+    required this.reportId,
+    this.note,
+  });
 }
 
 class TelemetryData {
@@ -385,6 +445,32 @@ class TelemetryService {
   final _otaStatusController = StreamController<OtaStatusEvent>.broadcast();
   final _otaVersionStatusController =
       StreamController<OtaVersionStatusEvent>.broadcast();
+  final _sessionEventController = StreamController<SessionEvent>.broadcast();
+  final _sessionAckController = StreamController<SessionAckEvent>.broadcast();
+  final _reportAmendedController =
+      StreamController<ReportAmendedEvent>.broadcast();
+
+  /// Session START/END events for [deviceId] (Manual mode's source of truth
+  /// for "a session is / is not running on the sprayer").
+  Stream<SessionEvent> deviceSessionEventStream(String deviceId) {
+    final norm = canonicalizeMac(deviceId);
+    return _sessionEventController.stream
+        .where((e) => canonicalizeMac(e.deviceId) == norm);
+  }
+
+  /// Device acks of virtual start/stop and plot commands for [deviceId].
+  Stream<SessionAckEvent> deviceSessionAckStream(String deviceId) {
+    final norm = canonicalizeMac(deviceId);
+    return _sessionAckController.stream
+        .where((e) => canonicalizeMac(e.deviceId) == norm);
+  }
+
+  /// "Report updated with recovered data" events for [deviceId].
+  Stream<ReportAmendedEvent> deviceReportAmendedStream(String deviceId) {
+    final norm = canonicalizeMac(deviceId);
+    return _reportAmendedController.stream
+        .where((e) => canonicalizeMac(e.deviceId) == norm);
+  }
 
   /// Stream of OTA progress/terminal status events for [deviceId]. The
   /// Firmware Update Workspace screen drives its whole state machine off
@@ -639,6 +725,44 @@ class TelemetryService {
             _otaVersionStatusController.add(OtaVersionStatusEvent(
               deviceId: rawId,
               liveVersion: data['live_version']?.toString(),
+            ));
+            return;
+          }
+
+          // ── Device-managed sessions + offline backfill ────────────────────
+          // Top-level events like status_change/report_ready above (see
+          // telemetry/consumers.py's session_event / session_ack /
+          // report_amended handlers on the backend).
+          if (msgType == 'session_event') {
+            _sessionEventController.add(SessionEvent(
+              deviceId: data['device_id']?.toString() ?? deviceId,
+              sessionId: int.tryParse(data['session_id']?.toString() ?? '') ?? 0,
+              deviceSessionId:
+                  int.tryParse(data['device_session_id']?.toString() ?? ''),
+              event: data['event']?.toString() ?? '',
+              source: data['source']?.toString(),
+            ));
+            return;
+          }
+
+          if (msgType == 'session_ack') {
+            final payload = data['data'];
+            _sessionAckController.add(SessionAckEvent(
+              deviceId: data['device_id']?.toString() ?? deviceId,
+              messageType: data['message_type']?.toString() ?? 'session',
+              data: payload is Map
+                  ? Map<String, dynamic>.from(payload)
+                  : <String, dynamic>{},
+            ));
+            return;
+          }
+
+          if (msgType == 'report_amended') {
+            _reportAmendedController.add(ReportAmendedEvent(
+              deviceId: data['device_id']?.toString() ?? deviceId,
+              sessionId: int.tryParse(data['session_id']?.toString() ?? '') ?? 0,
+              reportId: int.tryParse(data['report_id']?.toString() ?? '') ?? 0,
+              note: data['note']?.toString(),
             ));
             return;
           }
@@ -1074,6 +1198,9 @@ class TelemetryService {
     } catch (_) {}
     try {
       _otaStatusController.close();
+      _sessionEventController.close();
+      _sessionAckController.close();
+      _reportAmendedController.close();
     } catch (_) {}
     try {
       _otaVersionStatusController.close();
@@ -1108,9 +1235,11 @@ class _LatLonEntry {
 }
 
 final telemetryServiceProvider = Provider<TelemetryService>((ref) {
-  // Use provided base URL; default to ws://13.201.0.34:8001
+  // Derived from apiBaseUrl (see core/config.dart) so the live WebSocket
+  // always talks to the same backend as REST calls — was hardcoded to
+  // prod here before, independent of apiBaseUrl's staging/prod toggle.
   final svc = TelemetryService(
-    baseUrl: 'ws://3.108.218.140:8001',
+    baseUrl: wsBaseUrl,
     apiService: ref.watch(apiServiceProvider),
   );
   ref.onDispose(() => svc.dispose());

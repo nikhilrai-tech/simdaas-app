@@ -114,11 +114,21 @@ class EquipmentController {
     }
   }
 
-  Future<void> endSession(int sessionId, {String? deviceId}) async {
+  /// Ends a session from the app.
+  ///
+  /// Returns `true` when the backend closed it right away (Automatic devices:
+  /// a cooldown starts). Returns `false` when it only *requested* the stop
+  /// (Manual devices): the sprayer closes its own session, so nothing is
+  /// cleared locally — the app waits for the `session_event` / `report_ready`
+  /// that follows. `force` closes a Manual session on the server when the
+  /// device can't be reached.
+  Future<bool> endSession(int sessionId,
+      {String? deviceId, bool force = false}) async {
     final repo = ref.read(equipmentRepoProvider);
-    await repo.endSession(sessionId);
+    final result = await repo.endSession(sessionId, force: force);
+    final requestedOnly = result['status'] == 'requested';
 
-    if (deviceId != null) {
+    if (!requestedOnly && deviceId != null) {
       ref.read(telemetryServiceProvider).clearCache(deviceId);
     }
 
@@ -126,6 +136,29 @@ class EquipmentController {
         ref.read(authServiceProvider).currentUserId ?? 'demo_user';
     ref.invalidate(equipmentsListProvider(currentUserId));
     ref.invalidate(controlUnitsProvider(currentUserId));
+    return !requestedOnly;
+  }
+
+  /// Switches a control unit between Automatic (`server`) and Manual
+  /// (`device`) session mode. Throws an [ApiException] whose body carries a
+  /// stable `code` (session_active / firmware_unsupported / feature_disabled).
+  Future<void> setSessionMode(String controlUnitId, {required String mode}) async {
+    final repo = ref.read(equipmentRepoProvider);
+    await repo.setSessionMode(controlUnitId, mode: mode);
+    final currentUserId =
+        ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+    ref.invalidate(equipmentsListProvider(currentUserId));
+    ref.invalidate(controlUnitsProvider(currentUserId));
+  }
+
+  /// Virtual start button (Manual mode). The session appears once the device confirms.
+  Future<void> startDeviceSession(String mac) async {
+    await ref.read(equipmentRepoProvider).startDeviceSession(mac);
+  }
+
+  /// Virtual stop button (Manual mode). The session ends when the device confirms.
+  Future<void> stopDeviceSession(String mac) async {
+    await ref.read(equipmentRepoProvider).stopDeviceSession(mac);
   }
 
   Future<void> pushDemoConfig(String id, {required bool demo}) async {
