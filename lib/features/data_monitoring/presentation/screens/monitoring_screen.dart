@@ -570,7 +570,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   // ── Cooldown banner widget ───────────────────────────────────────────────
   Widget _buildCooldownBanner(CooldownState state) {
-    final isManual = state.cooldownType == 'manual_end';
+    // 'manual_end' = Automatic mode's app End button; 'device_end' = a
+    // device-managed (Manual mode) session ending. Neither is "session mode"
+    // Manual -- both just mean "a session was explicitly ended", as opposed
+    // to the watchdog timing a device out.
+    final isManual = state.cooldownType == 'manual_end' || state.cooldownType == 'device_end';
     final label = isManual
         ? 'Session ended — report generating'
         : 'Device offline — report generating';
