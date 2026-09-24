@@ -681,6 +681,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     String? resolvedControlUnitName;
     int? resolvedActiveSessionId;
     bool isManualMode = false;
+    // True once a control unit matching widget.deviceId is found, whether or
+    // not it currently has an active session -- a device sitting idle (no
+    // session right now) is a normal, common state, not "we don't know which
+    // device this is". The job/only-active-session fallbacks below exist for
+    // when deviceId itself couldn't identify a control unit at all; gating
+    // them on resolvedActiveSessionId alone used to let them fire for an
+    // idle-but-identified device too, overwriting resolvedControlUnitName
+    // with a DIFFERENT device's session the moment exactly one happened to
+    // be active elsewhere in the account (e.g. right after this device's
+    // Manual-mode cooldown clears and it goes idle) -- the screen would
+    // appear to "switch devices" out from under the user.
+    bool matchedByDeviceId = false;
     try {
       final cuList = controlUnitsAsync.valueOrNull;
       final sessions = sessionsAsync.valueOrNull;
@@ -694,13 +706,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             resolvedActiveSessionId = cu.activeSessionId;
             isManualMode = cu.isManualSessionMode;
             _backendLastSeenAt = cu.lastSeenAt;
+            matchedByDeviceId = true;
             break;
           }
         }
       }
 
       // If still null, try to find by jobId if provided
-      if (resolvedActiveSessionId == null && widget.jobId != null && sessions != null) {
+      if (!matchedByDeviceId && resolvedActiveSessionId == null && widget.jobId != null && sessions != null) {
         for (final s in sessions) {
           if (s['job']?.toString() == widget.jobId) {
             resolvedActiveSessionId = s['id'] as int?;
@@ -711,7 +724,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       }
 
       // If still null and there's only one active session, use it
-      if (resolvedActiveSessionId == null && sessions != null && sessions.length == 1) {
+      if (!matchedByDeviceId && resolvedActiveSessionId == null && sessions != null && sessions.length == 1) {
         final s = sessions.first;
         resolvedActiveSessionId = s['id'] as int?;
         resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
