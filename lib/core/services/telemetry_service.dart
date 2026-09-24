@@ -734,8 +734,25 @@ class TelemetryService {
           // telemetry/consumers.py's session_event / session_ack /
           // report_amended handlers on the backend).
           if (msgType == 'session_event') {
+            final eventDeviceId = data['device_id']?.toString() ?? deviceId;
+            if (data['event']?.toString() == 'START') {
+              // A device-managed (Manual) session can legitimately start
+              // again while this device is still inside the post-end
+              // Cooldown window above -- unlike Automatic mode, where the
+              // backend's own cooldown blocks a new session from being
+              // created at all, so this branch is a no-op there. Without
+              // clearing the stale cooldown flag here, the suppression check
+              // below would keep dropping this brand-new session's live
+              // telemetry for the rest of the 2-minute window.
+              final normEventId = canonicalizeMac(eventDeviceId);
+              if (_cooldownStates.remove(normEventId) != null) {
+                _cooldownController.add(
+                  CooldownState(deviceId: eventDeviceId, status: DeviceLifecycleStatus.online),
+                );
+              }
+            }
             _sessionEventController.add(SessionEvent(
-              deviceId: data['device_id']?.toString() ?? deviceId,
+              deviceId: eventDeviceId,
               sessionId: int.tryParse(data['session_id']?.toString() ?? '') ?? 0,
               deviceSessionId:
                   int.tryParse(data['device_session_id']?.toString() ?? ''),
