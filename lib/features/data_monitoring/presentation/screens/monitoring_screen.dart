@@ -57,6 +57,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   StreamSubscription<CooldownState>? _cooldownSub;
   // Ticks every second to refresh the MM:SS countdown label.
   Timer? _countdownTimer;
+  // Kept in sync from build()'s isManualMode -- _waitingSecondsRemaining()
+  // needs it outside of build() (the timer callback, and this is a
+  // StatefulWidget field so it survives rebuilds between ticks).
+  bool _isManualMode = false;
 
   // Top notification banner is only visible for ~5 s after a cooldown
   // begins. The cooldown itself still runs to completion in the background.
@@ -412,6 +416,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   int _waitingSecondsRemaining() {
+    // Manual (device-managed) mode has no "waiting" concept at all -- the
+    // sprayer decides when it restarts, unlike Automatic's 60-min watchdog
+    // assumption. Automatic mode is completely unaffected: _isManualMode is
+    // only ever true for a device-managed control unit.
+    if (_isManualMode) return 0;
     if (widget.deviceId == null) return 0;
     if (_cooldownState?.isInCooldown ?? false) return 0;
     if (_cooldownState?.status == DeviceLifecycleStatus.offline) return 0;
@@ -730,6 +739,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
       }
     } catch (_) {}
+    _isManualMode = isManualMode;
 
     // Shared with the top-left L/R card and the legend below it, so both
     // shift down instead of being covered when a top banner is showing.
