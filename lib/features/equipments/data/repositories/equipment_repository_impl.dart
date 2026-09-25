@@ -20,14 +20,12 @@ class EquipmentRepositoryImpl {
       remote.getSprayers(userId);
   Future<List<EquipmentEntity>> getControlUnits(String userId) =>
       remote.getControlUnits(userId);
-  Future<Map<String, dynamic>> endSession(int sessionId, {bool force = false, String? pin}) =>
-      remote.endSession(sessionId, force: force, pin: pin);
-  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode}) =>
-      remote.setSessionMode(controlUnitId, mode: mode);
-  Future<Map<String, dynamic>> startDeviceSession(String mac, {String? pin}) =>
-      remote.startDeviceSession(mac, pin: pin);
-  Future<Map<String, dynamic>> stopDeviceSession(String mac, {String? pin}) =>
-      remote.stopDeviceSession(mac, pin: pin);
+  Future<Map<String, dynamic>> endSession(int sessionId, {bool force = false}) =>
+      remote.endSession(sessionId, force: force);
+  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode, String? pin}) =>
+      remote.setSessionMode(controlUnitId, mode: mode, pin: pin);
+  Future<Map<String, dynamic>> startDeviceSession(String mac) => remote.startDeviceSession(mac);
+  Future<Map<String, dynamic>> stopDeviceSession(String mac) => remote.stopDeviceSession(mac);
   Future<void> pushDemoConfig(String id, {required bool demo}) =>
       remote.pushDemoConfig(id, demo: demo);
 }
