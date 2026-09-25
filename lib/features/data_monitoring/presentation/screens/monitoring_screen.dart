@@ -747,6 +747,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final cooldownBannerShown = _cooldownBannerVisible &&
         _cooldownState != null &&
         _cooldownState!.status == DeviceLifecycleStatus.cooldown;
+    // Manual mode only: without a live heartbeat there's no way for a Stop
+    // command to actually reach the device, and no Force End escape hatch to
+    // fall back on if it never confirms -- so don't let the tap go nowhere.
+    // Automatic mode is unaffected: its End always closes the session in the
+    // DB immediately regardless of reachability.
+    final endSessionUnreachable = isManualMode && latestTelemetry == null;
+    final endSessionColor = endSessionUnreachable ? Colors.grey : Colors.redAccent;
     final topBannerVisible = manualIdleBarVisible || cooldownBannerShown;
 
     // Compute simple state indicators from the latest telemetry snapshot.
@@ -1293,13 +1300,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'end_session',
+                                  enabled: !endSessionUnreachable,
                                   child: Row(
                                     children: [
-                                      const Icon(Icons.stop_circle_outlined,
-                                          color: Colors.redAccent, size: 20),
+                                      Icon(Icons.stop_circle_outlined, color: endSessionColor, size: 20),
                                       const SizedBox(width: 8),
-                                      Text(isManualMode ? 'End session' : 'End active device',
-                                          style: const TextStyle(color: Colors.redAccent)),
+                                      Text(
+                                        isManualMode ? 'End session' : 'End active device',
+                                        style: TextStyle(color: endSessionColor),
+                                      ),
+                                      if (endSessionUnreachable) ...[
+                                        const SizedBox(width: 8),
+                                        const Tooltip(
+                                          message: 'Device unreachable — no live heartbeat',
+                                          child: Icon(Icons.info_outline, color: Colors.grey, size: 16),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),
