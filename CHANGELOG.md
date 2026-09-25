@@ -48,6 +48,11 @@ already written — see "Release process" at the bottom.
   `88A35AC5E658-29`, the device's own session counter) next to the
   Automatic/Manual badge — live on the Monitoring screen title while a
   session is running, and on the report afterwards. *(backend)*
+- Optional Session PIN for Manual mode's Start/End Session — an
+  admin-set 4-6 digit PIN (Django admin only, not self-service) that a
+  farmer's account can require before a Manual session starts or ends.
+  Off by default for every account; only prompts once an admin has
+  actually set one. *(backend)*
 
 ### Fixed
 - The live WebSocket connection (telemetry, session status, cooldown,
