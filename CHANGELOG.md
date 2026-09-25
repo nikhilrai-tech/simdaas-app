@@ -68,6 +68,14 @@ already written — see "Release process" at the bottom.
   before. A "Prefilled" badge now appears on a report that includes any
   backfill-recovered data, next to the Automatic/Manual badge, on both
   the reports list and report details screens. *(backend)*
+- Backend groundwork for a "Verified" report state: a Prefilled report
+  can now be cross-checked against the sprayer's own on-SD-card log once
+  it's back online, instead of trusting the recovered (backfill) numbers
+  indefinitely — matching totals flip the report to Verified, a real
+  mismatch or a log that can't be retrieved flips it to Needs Review.
+  Backend-only so far and shipped switched off — no Verified/Needs
+  Review badge in the app yet; this just lays the groundwork for one.
+  *(backend)*
 
 ### Fixed
 - The live WebSocket connection (telemetry, session status, cooldown,
