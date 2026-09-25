@@ -599,6 +599,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   polylines:
                       _buildHeatmapPolylines(report.trajectory, report.plot),
                 ),
+                PolylineLayer(
+                  polylines: _buildRecoveredOverlaySegments(report.trajectory),
+                ),
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -968,6 +971,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         ];
         break;
     }
+    if (widget.report.trajectory.any((p) => p.isBuffered)) {
+      items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1073,6 +1079,35 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         rightSolenoidOn: p.rightSolenoidState == 1,
       ));
     }
+    return result;
+  }
+
+  /// Highlights the parts of the track recovered via /backfill after a
+  /// connectivity gap, on top of whichever heatmap mode is selected --
+  /// deliberately independent of HeatmapType/RowLineCoverage's coverage-band
+  /// logic so this can't affect that (already carefully tuned) rendering.
+  List<Polyline> _buildRecoveredOverlaySegments(List<GPSPointData> trajectory) {
+    final List<Polyline> result = [];
+    List<LatLng> current = [];
+    void flush() {
+      if (current.length >= 2) {
+        result.add(Polyline(
+          points: List<LatLng>.from(current),
+          strokeWidth: 6.0,
+          color: Colors.deepPurpleAccent,
+        ));
+      }
+      current = [];
+    }
+
+    for (final p in trajectory) {
+      if (p.isBuffered) {
+        current.add(LatLng(p.lat, p.lon));
+      } else {
+        flush();
+      }
+    }
+    flush();
     return result;
   }
 
@@ -1275,6 +1310,9 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
               PolylineLayer(
                 polylines: _buildHeatmapPolylines(report.trajectory, report.plot),
               ),
+              PolylineLayer(
+                polylines: _buildRecoveredOverlaySegments(report.trajectory),
+              ),
               if (points.isNotEmpty)
                 MarkerLayer(
                   markers: [
@@ -1395,6 +1433,9 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         ];
         break;
     }
+    if (widget.report.trajectory.any((p) => p.isBuffered)) {
+      items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -1488,6 +1529,35 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         rightSolenoidOn: p.rightSolenoidState == 1,
       ));
     }
+    return result;
+  }
+
+  /// Highlights the parts of the track recovered via /backfill after a
+  /// connectivity gap, on top of whichever heatmap mode is selected --
+  /// deliberately independent of HeatmapType/RowLineCoverage's coverage-band
+  /// logic so this can't affect that (already carefully tuned) rendering.
+  List<Polyline> _buildRecoveredOverlaySegments(List<GPSPointData> trajectory) {
+    final List<Polyline> result = [];
+    List<LatLng> current = [];
+    void flush() {
+      if (current.length >= 2) {
+        result.add(Polyline(
+          points: List<LatLng>.from(current),
+          strokeWidth: 6.0,
+          color: Colors.deepPurpleAccent,
+        ));
+      }
+      current = [];
+    }
+
+    for (final p in trajectory) {
+      if (p.isBuffered) {
+        current.add(LatLng(p.lat, p.lon));
+      } else {
+        flush();
+      }
+    }
+    flush();
     return result;
   }
 

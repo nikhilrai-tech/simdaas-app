@@ -119,6 +119,7 @@ class ReportModel extends Report {
                         (e['right_solenoid_state'] as num?)?.toInt() ?? 0,
                     timestamp: DateTime.tryParse(e['timestamp'] ?? '')?.toLocal() ??
                         DateTime.now(),
+                    isBuffered: e['is_buffered'] == true,
                   ))
               .toList() ??
           [],

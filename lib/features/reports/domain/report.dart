@@ -119,6 +119,9 @@ class GPSPointData {
   final int leftSolenoidState;
   final int rightSolenoidState;
   final DateTime timestamp;
+  // True when this point was recovered from the device's offline buffer
+  // (/backfill) after a connectivity gap, instead of arriving live.
+  final bool isBuffered;
 
   const GPSPointData({
     required this.lat,
@@ -130,5 +133,6 @@ class GPSPointData {
     this.leftSolenoidState = 0,
     this.rightSolenoidState = 0,
     required this.timestamp,
+    this.isBuffered = false,
   });
 }
