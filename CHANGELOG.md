@@ -10,6 +10,58 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-09-25
+
+### Added
+- **Manual (device-managed) session mode** — a new Session Mode toggle
+  (Automatic / Manual) on each device's Equipment Details screen.
+  Automatic keeps today's behavior (the backend infers session start/end
+  from telemetry). In Manual, the sprayer firmware owns the session: it
+  starts and ends only when you start/stop it — the button on the
+  sprayer, or Start/End Session on the Monitoring screen. Data recorded
+  while the device is offline mid-session is kept on the device and
+  merged into the same session once it reconnects, instead of being
+  lost to a network gap. Switching to Manual is blocked with a clear
+  reason if the server-side feature isn't enabled yet, the device's
+  firmware doesn't support it yet, or a session is currently active.
+  *(backend)*
+- Monitoring screen: a MANUAL title chip, an idle banner ("Manual mode —
+  no session running") with its own Start Session button when a Manual
+  device is online with nothing running, and End-session dialog copy
+  that explains the Manual flow (stop is sent to the sprayer; the
+  session ends once it confirms).
+- Active Devices dashboard: a new "Session Open" filter/status, separate
+  from "Waiting" — a Manual device that's gone unreachable mid-session
+  (still recording locally, no timeout, no countdown) is a different
+  situation from Automatic's 60-minute watchdog and is no longer grouped
+  with it. *(backend)*
+- Reports: a small Automatic/Manual badge, and an "Updated" badge/banner
+  when a report was recomputed after offline-recovered data was merged
+  in from a reconnecting device, plus a "may be incomplete — pending
+  network data" badge for a report whose session was force-closed after
+  a long connectivity gap and hasn't been corrected yet. *(backend)*
+
+### Fixed
+- The live WebSocket connection (telemetry, session status, cooldown,
+  report-ready) always pointed at production, regardless of which
+  backend the REST API (`apiBaseUrl`) was actually configured for — so
+  pointing the app at staging silently left all *live* updates talking
+  to production instead. Now derived from the same host as `apiBaseUrl`.
+- Monitoring screen could briefly flicker or lose live data (the Manual
+  idle banner, tank/solenoid/sensor overlays) on any background provider
+  refresh — a loading state was being treated as "no data" instead of
+  keeping the last known value until fresh data arrived.
+- A device sitting idle in Manual mode (online, no session running right
+  now) could suddenly start showing a *different* device's name and
+  session on its own Monitoring screen, whenever exactly one other
+  device in the account happened to have an active session at that
+  moment.
+- A Manual-mode device going offline showed the same 60-minute "Waiting"
+  countdown Automatic mode uses — Manual mode has no such concept, since
+  the sprayer (not a timeout) decides when it reconnects.
+- The top-left L/R nozzle indicator card overlapped the Manual "Start
+  Session" banner when both were visible at once.
+
 ## [1.1.4] - 2026-09-18
 
 ### Added
