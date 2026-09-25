@@ -54,6 +54,12 @@ already written — see "Release process" at the bottom.
   mode changes either direction. Off by default for every account;
   only prompts once an admin has actually set one. Start/End Session
   itself is unaffected. *(backend)*
+- Report map now highlights track segments recovered via backfill
+  after a connectivity gap in a distinct color, on top of whichever
+  heatmap mode (GPS/Speed/Spray/L-R) is selected, with a matching
+  legend entry — so it's clear which part of a session's data filled
+  in after the device reconnected. Report-only, not shown live on the
+  Monitoring screen. *(backend)*
 
 ### Fixed
 - The live WebSocket connection (telemetry, session status, cooldown,
