@@ -44,6 +44,10 @@ already written — see "Release process" at the bottom.
   in from a reconnecting device, plus a "may be incomplete — pending
   network data" badge for a report whose session was force-closed after
   a long connectivity gap and hasn't been corrected yet. *(backend)*
+- Manual sessions now show a compact MAC-SessionID identifier (e.g.
+  `88A35AC5E658-29`, the device's own session counter) next to the
+  Automatic/Manual badge — live on the Monitoring screen title while a
+  session is running, and on the report afterwards. *(backend)*
 
 ### Fixed
 - The live WebSocket connection (telemetry, session status, cooldown,
