@@ -123,9 +123,9 @@ class EquipmentController {
   /// that follows. `force` closes a Manual session on the server when the
   /// device can't be reached.
   Future<bool> endSession(int sessionId,
-      {String? deviceId, bool force = false}) async {
+      {String? deviceId, bool force = false, String? pin}) async {
     final repo = ref.read(equipmentRepoProvider);
-    final result = await repo.endSession(sessionId, force: force);
+    final result = await repo.endSession(sessionId, force: force, pin: pin);
     final requestedOnly = result['status'] == 'requested';
 
     if (!requestedOnly && deviceId != null) {
@@ -152,13 +152,13 @@ class EquipmentController {
   }
 
   /// Virtual start button (Manual mode). The session appears once the device confirms.
-  Future<void> startDeviceSession(String mac) async {
-    await ref.read(equipmentRepoProvider).startDeviceSession(mac);
+  Future<void> startDeviceSession(String mac, {String? pin}) async {
+    await ref.read(equipmentRepoProvider).startDeviceSession(mac, pin: pin);
   }
 
   /// Virtual stop button (Manual mode). The session ends when the device confirms.
-  Future<void> stopDeviceSession(String mac) async {
-    await ref.read(equipmentRepoProvider).stopDeviceSession(mac);
+  Future<void> stopDeviceSession(String mac, {String? pin}) async {
+    await ref.read(equipmentRepoProvider).stopDeviceSession(mac, pin: pin);
   }
 
   Future<void> pushDemoConfig(String id, {required bool demo}) async {

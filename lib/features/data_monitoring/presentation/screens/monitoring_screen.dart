@@ -24,6 +24,10 @@ import 'package:simdaas/core/services/connectivity_service.dart';
 import '../../../reports/presentation/providers/session_providers.dart';
 import 'package:simdaas/main.dart' show appNavKey;
 
+/// Thrown internally when the user backs out of the session-PIN prompt --
+/// caught to abort the in-flight Start/End action quietly, not as an error.
+class _PinCancelled implements Exception {}
+
 class MonitoringScreen extends ConsumerStatefulWidget {
   final String? plotId;
   final String? jobId;
@@ -509,17 +513,93 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     if (mac == null || mac.isEmpty || _manualBusy) return;
     setState(() => _manualBusy = true);
     try {
-      await ref.read(eq_provs.equipmentControllerProvider).startDeviceSession(mac);
+      await _runWithPinRetry((pin) => ref
+          .read(eq_provs.equipmentControllerProvider)
+          .startDeviceSession(mac, pin: pin));
       _messengerKey.currentState?.showSnackBar(
           const SnackBar(content: Text('Start sent to the device…')));
       // Safety: never leave the button spinning if the device never answers.
       Future.delayed(const Duration(seconds: 20), () {
         if (mounted && _manualBusy) setState(() => _manualBusy = false);
       });
+    } on _PinCancelled {
+      if (mounted) setState(() => _manualBusy = false);
     } catch (err) {
       if (mounted) setState(() => _manualBusy = false);
       _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(_manualErrorText(err))));
     }
+  }
+
+  /// Runs [action] with no PIN first (the common case: no PIN set for this
+  /// user — see userauth/admin.py). If the backend comes back with
+  /// pin_required/invalid_pin, prompts for it and retries, looping on a
+  /// wrong entry rather than making the user re-tap Start/End. Throws
+  /// [_PinCancelled] if the user backs out of the prompt.
+  Future<T> _runWithPinRetry<T>(Future<T> Function(String? pin) action) async {
+    String? pin;
+    while (true) {
+      try {
+        return await action(pin);
+      } on ApiException catch (err) {
+        final code = _errorCode(err);
+        if (code != 'pin_required' && code != 'invalid_pin') rethrow;
+        if (!mounted) throw _PinCancelled();
+        final entered = await _promptSessionPin(
+          errorText: code == 'invalid_pin' ? 'Incorrect PIN. Try again.' : null,
+        );
+        if (entered == null || entered.isEmpty) throw _PinCancelled();
+        pin = entered;
+      }
+    }
+  }
+
+  String? _errorCode(ApiException err) {
+    if (err.body == null) return null;
+    try {
+      final body = json.decode(err.body!);
+      if (body is Map) return body['code']?.toString();
+    } catch (_) {}
+    return null;
+  }
+
+  Future<String?> _promptSessionPin({String? errorText}) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enter Session PIN'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('This device requires a PIN to start or end a session.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: InputDecoration(
+                labelText: 'PIN',
+                errorText: errorText,
+                counterText: '',
+              ),
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _manualErrorText(Object err) {
@@ -534,6 +614,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               return 'This device is not in Manual mode.';
             case 'no_active_session':
               return 'No session is running on this device.';
+            case 'pin_required':
+            case 'invalid_pin':
+              return 'Incorrect or missing session PIN.';
           }
           if (body['error'] != null) return body['error'].toString();
         }
@@ -1175,6 +1258,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                   }
                                   return;
                                 }
+                                // Captured into a final local so the closure below (passed to
+                                // _runWithPinRetry) can still see it as non-null -- Dart's flow
+                                // promotion of the `sessionIdToEnd == null` check above doesn't
+                                // survive into a closure over that mutable variable.
+                                final int confirmedSessionId = sessionIdToEnd;
                                 final confirmed = await showDialog<bool>(
                                     context: context,
                                     builder: (ctx) => AlertDialog(
@@ -1194,9 +1282,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 if (confirmed == true) {
                                   try {
                                     final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
-                                    final endedNow = await ref
-                                        .read(eq_provs.equipmentControllerProvider)
-                                        .endSession(sessionIdToEnd, deviceId: deviceMac);
+                                    final endedNow = await _runWithPinRetry(
+                                      (pin) => ref
+                                          .read(eq_provs.equipmentControllerProvider)
+                                          .endSession(confirmedSessionId,
+                                              deviceId: deviceMac, pin: pin),
+                                    );
 
                                     // Manual mode: only a stop was *requested* — the sprayer
                                     // closes its own session, so nothing is cleared or put into
@@ -1257,6 +1348,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
                                     // The top cooldown banner already conveys this; no extra
                                     // snackbar so we don't get duplicate notifications.
+                                  } on _PinCancelled {
+                                    // User backed out of the PIN prompt -- no error, just stop.
                                   } catch (err) {
                                     if (context.mounted) {
                                       ScaffoldMessenger.of(context)
