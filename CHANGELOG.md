@@ -29,7 +29,11 @@ already written — see "Release process" at the bottom.
   no session running") with its own Start Session button when a Manual
   device is online with nothing running, and End-session dialog copy
   that explains the Manual flow (stop is sent to the sprayer; the
-  session ends once it confirms).
+  session ends once it confirms). Live values (flow rate, speed, PTO,
+  tank level, GPS) keep showing on this screen even while idle — the
+  sprayer keeps sending heartbeats whether or not a session is running,
+  and these reflect that directly, independent of the session-only
+  totals (distance, area covered, spray used).
 - Active Devices dashboard: a new "Session Open" filter/status, separate
   from "Waiting" — a Manual device that's gone unreachable mid-session
   (still recording locally, no timeout, no countdown) is a different
