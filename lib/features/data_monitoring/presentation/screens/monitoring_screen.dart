@@ -579,11 +579,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   // ── Cooldown banner widget ───────────────────────────────────────────────
   Widget _buildCooldownBanner(CooldownState state) {
-    // 'manual_end' = Automatic mode's app End button; 'device_end' = a
-    // device-managed (Manual mode) session ending. Neither is "session mode"
-    // Manual -- both just mean "a session was explicitly ended", as opposed
-    // to the watchdog timing a device out.
-    final isManual = state.cooldownType == 'manual_end' || state.cooldownType == 'device_end';
+    final isManual = state.cooldownType == 'manual_end';
     final label = isManual
         ? 'Session ended — report generating'
         : 'Device offline — report generating';
@@ -1184,27 +1180,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     // Manual mode: only a stop was *requested* — the sprayer
                                     // closes its own session, so nothing is cleared or put into
                                     // cooldown here; the session_event / report_ready that
-                                    // follows updates the screen. Offer the escape hatch for a
-                                    // device that can't be reached.
+                                    // follows updates the screen.
                                     if (!endedNow) {
-                                      final endingId = sessionIdToEnd;
-                                      _messengerKey.currentState?.showSnackBar(SnackBar(
-                                        content: const Text('Stop sent to the device…'),
-                                        duration: const Duration(seconds: 15),
-                                        action: SnackBarAction(
-                                          label: 'Device offline? Force end',
-                                          onPressed: () async {
-                                            try {
-                                              await ref
-                                                  .read(eq_provs.equipmentControllerProvider)
-                                                  .endSession(endingId,
-                                                      deviceId: deviceMac, force: true);
-                                            } catch (err) {
-                                              _messengerKey.currentState?.showSnackBar(
-                                                  SnackBar(content: Text(_manualErrorText(err))));
-                                            }
-                                          },
-                                        ),
+                                      _messengerKey.currentState?.showSnackBar(const SnackBar(
+                                        content: Text('Stop sent to the device…'),
+                                        duration: Duration(seconds: 5),
                                       ));
                                       return;
                                     }
