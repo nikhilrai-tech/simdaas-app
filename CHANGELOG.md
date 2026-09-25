@@ -61,6 +61,11 @@ already written — see "Release process" at the bottom.
   the sprayer (not a timeout) decides when it reconnects.
 - The top-left L/R nozzle indicator card overlapped the Manual "Start
   Session" banner when both were visible at once.
+- "End session" could be tapped on a Manual device with no live
+  heartbeat (gone unreachable mid-session) — the Stop command it sends
+  has no way to reach the device and no way to ever confirm, so the tap
+  went nowhere. Now greyed out and disabled for a Manual device that
+  isn't currently sending live telemetry, with a tooltip explaining why.
 
 ## [1.1.4] - 2026-09-18
 
