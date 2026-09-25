@@ -39,6 +39,8 @@ class ReportModel extends Report {
     super.amendedNote,
     super.sessionMode,
     super.pendingNetworkData,
+    super.deviceSessionId,
+    super.controlUnitMac,
     super.driverName,
     super.fertilizersUsed,
     super.agrochemicalUsed,
@@ -125,6 +127,10 @@ class ReportModel extends Report {
       amendedNote: json['amended_note']?.toString(),
       sessionMode: json['session_mode']?.toString(),
       pendingNetworkData: json['pending_network_data'] == true,
+      deviceSessionId: json['device_session_id'] is int
+          ? json['device_session_id'] as int
+          : int.tryParse(json['device_session_id']?.toString() ?? ''),
+      controlUnitMac: json['control_unit_mac']?.toString(),
       driverName: json['driver_name']?.toString(),
       fertilizersUsed: json['fertilizers_used']?.toString(),
       agrochemicalUsed: json['agrochemical_used']?.toString(),

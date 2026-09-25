@@ -798,6 +798,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                           color: Colors.orangeAccent,
                           fontSize: 10,
                           fontWeight: FontWeight.bold)),
+                if (isManualMode &&
+                    resolvedActiveSessionId != null &&
+                    formatDeviceSessionLabel(widget.deviceId,
+                            latestTelemetry?.deviceSessionId) !=
+                        null)
+                  Text(
+                    formatDeviceSessionLabel(widget.deviceId,
+                        latestTelemetry?.deviceSessionId)!,
+                    style: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 9,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 if (_cooldownState?.isInCooldown ?? false)
                   Builder(builder: (_) {
                     final cd = _cooldownState!;

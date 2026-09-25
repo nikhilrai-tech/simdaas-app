@@ -216,6 +216,9 @@ class TelemetryData {
   // packet's value) so cached "last known" stats aren't shown stale across
   // the boundary — see monitoring_screen.dart's telemetry listener.
   final double? uptimeSec;
+  // Device-managed (Manual) mode only: the firmware's own session counter
+  // (heartbeat idx 19), null for Automatic and null while idle.
+  final int? deviceSessionId;
 
   TelemetryData({
     required this.deviceId,
@@ -241,6 +244,7 @@ class TelemetryData {
     this.flowRateLpm,
     this.flowInLitres,
     this.uptimeSec,
+    this.deviceSessionId,
   });
 
   /// Parse telemetry JSON. Returns null when required fields (device_id
@@ -370,6 +374,11 @@ class TelemetryData {
       uptimeSec: json['uptime_sec'] is num
           ? (json['uptime_sec'] as num).toDouble()
           : null,
+      deviceSessionId: json['device_session_id'] is int
+          ? json['device_session_id']
+          : (json['device_session_id'] != null
+              ? int.tryParse(json['device_session_id'].toString())
+              : null),
     );
   }
 }

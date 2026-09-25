@@ -58,6 +58,11 @@ class Report {
   // clean end, and no backfill has corrected it yet. Flips back to false on
   // its own once `amended` becomes true.
   final bool pendingNetworkData;
+  // Manual (device-managed) mode only: the firmware's own session counter,
+  // null for Automatic. Combine with controlUnitMac via
+  // core/utils/mac_utils.dart's formatDeviceSessionLabel().
+  final int? deviceSessionId;
+  final String? controlUnitMac;
 
   const Report({
     this.plotId,
@@ -96,6 +101,8 @@ class Report {
     this.amendedNote,
     this.sessionMode,
     this.pendingNetworkData = false,
+    this.deviceSessionId,
+    this.controlUnitMac,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,

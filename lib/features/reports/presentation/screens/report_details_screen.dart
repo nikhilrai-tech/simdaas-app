@@ -5,6 +5,7 @@ import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
+import 'package:simdaas/core/utils/mac_utils.dart';
 import '../../domain/report.dart';
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
@@ -176,33 +177,50 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             const SizedBox(height: 24),
 
             if (report.sessionMode != null) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: report.sessionMode == 'device'
-                        ? Colors.teal.shade50
-                        : Colors.indigo.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
                       color: report.sessionMode == 'device'
-                          ? Colors.teal.shade200
-                          : Colors.indigo.shade200,
+                          ? Colors.teal.shade50
+                          : Colors.indigo.shade50,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: report.sessionMode == 'device'
+                            ? Colors.teal.shade200
+                            : Colors.indigo.shade200,
+                      ),
+                    ),
+                    child: Text(
+                      report.sessionMode == 'device' ? 'Manual' : 'Automatic',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: report.sessionMode == 'device'
+                            ? Colors.teal.shade800
+                            : Colors.indigo.shade800,
+                      ),
                     ),
                   ),
-                  child: Text(
-                    report.sessionMode == 'device' ? 'Manual' : 'Automatic',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: report.sessionMode == 'device'
-                          ? Colors.teal.shade800
-                          : Colors.indigo.shade800,
+                  if (report.sessionMode == 'device' &&
+                      formatDeviceSessionLabel(
+                              report.controlUnitMac, report.deviceSessionId) !=
+                          null)
+                    Text(
+                      formatDeviceSessionLabel(
+                          report.controlUnitMac, report.deviceSessionId)!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
               const SizedBox(height: 12),
             ],
