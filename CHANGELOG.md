@@ -60,6 +60,11 @@ already written — see "Release process" at the bottom.
   legend entry — so it's clear which part of a session's data filled
   in after the device reconnected. Report-only, not shown live on the
   Monitoring screen. *(backend)*
+- A "STAGING" ribbon now shows on every screen for any build pointed at
+  the staging backend, so an APK handed to the testing team is never
+  mistaken for a production build. Derived automatically from
+  `apiBaseUrl` — no separate flag to remember to flip, and no risk of
+  it staying wrong after `apiBaseUrl` is switched.
 
 ### Fixed
 - The live WebSocket connection (telemetry, session status, cooldown,
