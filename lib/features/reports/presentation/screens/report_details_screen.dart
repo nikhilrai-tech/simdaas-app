@@ -220,6 +220,24 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
+                  if (report.verificationStatus == 'prefilled')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Text(
+                        'Prefilled',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.amber.shade900,
+                        ),
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 12),

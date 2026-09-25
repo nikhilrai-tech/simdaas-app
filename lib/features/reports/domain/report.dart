@@ -63,6 +63,10 @@ class Report {
   // core/utils/mac_utils.dart's formatDeviceSessionLabel().
   final int? deviceSessionId;
   final String? controlUnitMac;
+  // 'live' | 'prefilled' | 'verifying' | 'verified' | 'needs_review'.
+  // 'prefilled' means the report includes recovered (backfilled) data that
+  // hasn't yet been cross-checked against the device's own log file.
+  final String? verificationStatus;
 
   const Report({
     this.plotId,
@@ -103,6 +107,7 @@ class Report {
     this.pendingNetworkData = false,
     this.deviceSessionId,
     this.controlUnitMac,
+    this.verificationStatus,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,

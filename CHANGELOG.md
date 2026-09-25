@@ -60,6 +60,14 @@ already written — see "Release process" at the bottom.
   legend entry — so it's clear which part of a session's data filled
   in after the device reconnected. Report-only, not shown live on the
   Monitoring screen. *(backend)*
+- Manual session reports now show the sprayer's own start/end time
+  (from the firmware, converted to local time) instead of the time the
+  server happened to receive the data — so a session recovered late via
+  backfill shows when it actually ran, not when it reconnected.
+  Automatic reports are unaffected and keep showing server time as
+  before. A "Prefilled" badge now appears on a report that includes any
+  backfill-recovered data, next to the Automatic/Manual badge, on both
+  the reports list and report details screens. *(backend)*
 
 ### Fixed
 - The live WebSocket connection (telemetry, session status, cooldown,

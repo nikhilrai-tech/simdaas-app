@@ -41,6 +41,7 @@ class ReportModel extends Report {
     super.pendingNetworkData,
     super.deviceSessionId,
     super.controlUnitMac,
+    super.verificationStatus,
     super.driverName,
     super.fertilizersUsed,
     super.agrochemicalUsed,
@@ -132,6 +133,7 @@ class ReportModel extends Report {
           ? json['device_session_id'] as int
           : int.tryParse(json['device_session_id']?.toString() ?? ''),
       controlUnitMac: json['control_unit_mac']?.toString(),
+      verificationStatus: json['verification_status']?.toString(),
       driverName: json['driver_name']?.toString(),
       fertilizersUsed: json['fertilizers_used']?.toString(),
       agrochemicalUsed: json['agrochemical_used']?.toString(),
