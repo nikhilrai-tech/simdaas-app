@@ -561,79 +561,30 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     return 12 + (_topBannerHeight ?? 52);
   }
 
-  /// Compact Start/Ongoing+End control shown in the AppBar title itself
-  /// (Manual mode only) -- replaces the old full-width idle banner and the
-  /// End Session item buried in the overlay menu.
-  Widget _buildTitleSessionControl({
-    required bool idle,
-    required bool ongoing,
-    required bool endSessionUnreachable,
-    required Color endSessionColor,
-    required int? resolvedActiveSessionId,
-    required bool isManualMode,
-    required String? resolvedControlUnitName,
-  }) {
-    if (idle) {
-      return SizedBox(
-        height: 32,
-        child: FilledButton.icon(
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            textStyle: const TextStyle(fontSize: 12),
-          ),
-          onPressed: _manualBusy ? null : _startManualSession,
-          icon: _manualBusy
-              ? const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.play_arrow_rounded, size: 16),
-          label: const Text('Start'),
-        ),
-      );
-    }
-    if (ongoing) {
-      return Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.green.withAlpha(40),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.greenAccent, width: 1),
-          ),
-          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.circle, size: 8, color: Colors.greenAccent),
-            SizedBox(width: 4),
-            Text('Ongoing',
-                style: TextStyle(
-                    color: Colors.greenAccent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold)),
-          ]),
-        ),
-        SizedBox(
-          height: 32,
-          width: 32,
-          child: IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            tooltip: endSessionUnreachable ? 'Device unreachable' : 'End session',
-            icon: Icon(Icons.stop_circle_outlined, size: 20, color: endSessionColor),
-            onPressed: endSessionUnreachable
-                ? null
-                : () => _endSession(
-                      resolvedActiveSessionId: resolvedActiveSessionId,
-                      isManualMode: isManualMode,
-                      resolvedControlUnitName: resolvedControlUnitName,
-                    ),
-          ),
-        ),
-      ]);
-    }
-    return const SizedBox.shrink();
+  /// "Ongoing" status chip shown in the AppBar title itself (Manual mode,
+  /// session actually running) -- purely a status indicator, no action.
+  /// Start/End themselves are PopupMenuItems in the overlay menu (see
+  /// itemBuilder) so there's one consistent place ("the toggle button") for
+  /// the actions, with just the live state surfaced in the title.
+  Widget _buildTitleSessionStatus({required bool ongoing}) {
+    if (!ongoing) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.green.withAlpha(40),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.greenAccent, width: 1),
+      ),
+      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.circle, size: 8, color: Colors.greenAccent),
+        SizedBox(width: 4),
+        Text('Ongoing',
+            style: TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold)),
+      ]),
+    );
   }
 
   /// Requests a Stop on the device's active session (Manual) or ends it
@@ -951,8 +902,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     } catch (_) {}
     _isManualMode = isManualMode;
 
-    // Manual, online, no session running -- drives the "Start" control in
-    // the AppBar title (see _buildTitleSessionControl()).
+    // Manual, online, no session running -- shows a "Start session" item in
+    // the overlay menu (see itemBuilder).
     final manualIdleBarVisible = isManualMode &&
         resolvedActiveSessionId == null &&
         latestTelemetry != null &&
@@ -1082,22 +1033,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               ],
               ),
             ),
-            if (isManualMode) ...[
+            if (isManualMode && manualSessionOngoing) ...[
               const SizedBox(width: 8),
-              _buildTitleSessionControl(
-                idle: manualIdleBarVisible,
-                ongoing: manualSessionOngoing,
-                endSessionUnreachable: endSessionUnreachable,
-                endSessionColor: endSessionColor,
-                resolvedActiveSessionId: resolvedActiveSessionId,
-                isManualMode: isManualMode,
-                resolvedControlUnitName: resolvedControlUnitName,
-              ),
+              _buildTitleSessionStatus(ongoing: manualSessionOngoing),
             ],
             const Spacer(),
             if (latestTelemetry != null) ...[
-              // Signal/GPS status chip
-              Container(
+              // Signal/GPS status chip. Flexible+FittedBox so this shrinks
+              // instead of hard-overflowing on narrow phones now that the
+              // title row also carries the Manual session control.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: Colors.black.withAlpha(220), // Darker, more solid for contrast
@@ -1167,6 +1116,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                       );
                     }),
                   ],
+                ),
+                  ),
                 ),
               )
             ]
@@ -1374,10 +1325,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 setState(() {
                                   _selectedHeatmap = HeatmapType.gps;
                                 });
+                              } else if (v == 'start_session') {
+                                _startManualSession();
                               } else if (v == 'end_session') {
-                                // Manual mode's End now lives in the AppBar
-                                // title control instead -- this item only
-                                // remains for Automatic (see itemBuilder).
                                 await _endSession(
                                   resolvedActiveSessionId: resolvedActiveSessionId,
                                   isManualMode: isManualMode,
@@ -1429,11 +1379,28 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               const PopupMenuItem(
                                   value: 'spray_on_off',
                                   child: Text('Spray on/off view')),
-                              // Manual mode's End is now the title control
-                              // (_buildTitleSessionControl) -- this item
-                              // stays for Automatic only.
-                              if (!isManualMode &&
-                                  (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0)) ...[
+                              // Start/End session actions live here (Manual
+                              // idle -> Start, either mode with something
+                              // running -> End) -- the title only shows the
+                              // live "Ongoing" state, not the actions
+                              // themselves.
+                              if (manualIdleBarVisible) ...[
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'start_session',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.play_arrow_rounded,
+                                          color: Colors.green, size: 20),
+                                      const SizedBox(width: 8),
+                                      const Text('Start session'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              if ((isManualMode && manualSessionOngoing) ||
+                                  (!isManualMode &&
+                                      (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0))) ...[
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'end_session',
@@ -1442,7 +1409,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     children: [
                                       Icon(Icons.stop_circle_outlined, color: endSessionColor, size: 20),
                                       const SizedBox(width: 8),
-                                      const Text('End active device'),
+                                      Text(isManualMode ? 'End session' : 'End active device'),
                                       if (endSessionUnreachable) ...[
                                         const SizedBox(width: 8),
                                         const Tooltip(
@@ -1464,9 +1431,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               ),
             ),
 
-            // Manual idle state (Start Session) now lives in the AppBar title
-            // instead of a full-width banner here -- see
-            // _buildTitleSessionControl().
+            // Manual idle state (Start Session) is a menu item in the
+            // overlay menu instead of a full-width banner here.
 
             // ── Cooldown / offline-pending banner ──────────────────────────
             // Shown briefly at the top when a cooldown begins, then auto
