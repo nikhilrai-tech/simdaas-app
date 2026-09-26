@@ -17,21 +17,43 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
   @override
   Future<List<ReportModel>> getReports() async {
     try {
-      final response = await api.getJson('/jobs/api/reports/?page_size=200');
-      // Backend now returns a paginated dict: { count, next, previous, results }.
-      // Fall back to a plain list for forward/backwards compatibility.
-      if (response is Map && response['results'] is List) {
-        final results = response['results'] as List;
-        return results.map((e) => ReportModel.fromJson(e)).toList();
+      final reports = <ReportModel>[];
+      // Walk the backend's own pagination (page_size=50, matching its
+      // default) instead of asking for everything in one page_size=200
+      // request -- with enough reports on an account that single request
+      // gets slow enough to hit "Failed to fetch" outright. Smaller pages
+      // keep every individual request fast and reliable.
+      String? path = '/jobs/api/reports/?page_size=50';
+      while (path != null) {
+        final response = await api.getJson(path);
+        // Backend now returns a paginated dict: { count, next, previous,
+        // results }. Fall back to a plain list for forward/backwards
+        // compatibility.
+        if (response is Map && response['results'] is List) {
+          final results = response['results'] as List;
+          reports.addAll(results.map((e) => ReportModel.fromJson(e)));
+          final next = response['next'];
+          path = next is String ? _relativePath(next) : null;
+        } else if (response is List) {
+          reports.addAll(response.map((e) => ReportModel.fromJson(e)));
+          path = null;
+        } else {
+          path = null;
+        }
       }
-      if (response is List) {
-        return response.map((e) => ReportModel.fromJson(e)).toList();
-      }
-      return [];
+      return reports;
     } catch (e) {
       debugPrint('Error fetching reports: $e');
       rethrow;
     }
+  }
+
+  /// The backend's `next` link is an absolute URL (DRF's
+  /// build_absolute_uri()). ApiService.getJson always prepends its own
+  /// baseUrl, so only the path+query is passed back in for the next call.
+  String _relativePath(String nextUrl) {
+    final uri = Uri.parse(nextUrl);
+    return uri.query.isEmpty ? uri.path : '${uri.path}?${uri.query}';
   }
 
   @override
