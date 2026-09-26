@@ -52,6 +52,9 @@ class ReportDetailsScreen extends ConsumerStatefulWidget {
 class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   HeatmapType _heatmapType = HeatmapType.gps;
   bool _isSatelliteView = true;
+  // Recovered-via-backfill overlay: GPS heatmap only (a toggle there, not a
+  // whole separate mode like L/R) -- Speed/Spray/L-R never show it.
+  bool _showBackfillOverlay = true;
 
   @override
   Widget build(BuildContext context) {
@@ -1167,7 +1170,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         ];
         break;
     }
-    if (widget.report.trajectory.any((p) => p.isBuffered)) {
+    if (_heatmapType == HeatmapType.gps &&
+        _showBackfillOverlay &&
+        widget.report.trajectory.any((p) => p.isBuffered)) {
       items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
     }
 
@@ -1213,17 +1218,61 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   Widget _buildHeatmapToggles() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    final hasBackfill = widget.report.trajectory.any((p) => p.isBuffered);
+    return Column(
       children: [
-        _heatmapButton(HeatmapType.gps, 'GPS'),
-        const SizedBox(width: 8),
-        _heatmapButton(HeatmapType.speed, 'Speed'),
-        const SizedBox(width: 8),
-        _heatmapButton(HeatmapType.spraying, 'Spray'),
-        const SizedBox(width: 8),
-        _heatmapButton(HeatmapType.leftRight, 'L/R'),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _heatmapButton(HeatmapType.gps, 'GPS'),
+            const SizedBox(width: 8),
+            _heatmapButton(HeatmapType.speed, 'Speed'),
+            const SizedBox(width: 8),
+            _heatmapButton(HeatmapType.spraying, 'Spray'),
+            const SizedBox(width: 8),
+            _heatmapButton(HeatmapType.leftRight, 'L/R'),
+          ],
+        ),
+        if (_heatmapType == HeatmapType.gps && hasBackfill) ...[
+          const SizedBox(height: 8),
+          _backfillToggleChip(),
+        ],
       ],
+    );
+  }
+
+  Widget _backfillToggleChip() {
+    return InkWell(
+      onTap: () => setState(() => _showBackfillOverlay = !_showBackfillOverlay),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: _showBackfillOverlay
+              ? Colors.deepPurpleAccent.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.deepPurpleAccent),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _showBackfillOverlay ? Icons.visibility : Icons.visibility_off,
+              size: 14,
+              color: Colors.deepPurpleAccent,
+            ),
+            const SizedBox(width: 6),
+            const Text(
+              'Backfill',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.deepPurpleAccent,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1279,11 +1328,12 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   /// Highlights the parts of the track recovered via /backfill after a
-  /// connectivity gap, on top of whichever heatmap mode is selected --
+  /// connectivity gap -- GPS heatmap only (via the Backfill toggle),
   /// deliberately independent of HeatmapType/RowLineCoverage's coverage-band
   /// logic so this can't affect that (already carefully tuned) rendering.
   List<Polyline> _buildRecoveredOverlaySegments(List<GPSPointData> trajectory) {
     final List<Polyline> result = [];
+    if (_heatmapType != HeatmapType.gps || !_showBackfillOverlay) return result;
     List<LatLng> current = [];
     void flush() {
       if (current.length >= 2) {
@@ -1445,6 +1495,7 @@ class _FullScreenMapPage extends StatefulWidget {
 class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   late HeatmapType _heatmapType;
   late bool _isSatelliteView;
+  bool _showBackfillOverlay = true;
 
   @override
   void initState() {
@@ -1576,16 +1627,26 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
             bottom: MediaQuery.of(context).padding.bottom + 16,
             left: 0,
             right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _heatmapButton(HeatmapType.gps, 'GPS'),
-                const SizedBox(width: 8),
-                _heatmapButton(HeatmapType.speed, 'Speed'),
-                const SizedBox(width: 8),
-                _heatmapButton(HeatmapType.spraying, 'Spray'),
-                const SizedBox(width: 8),
-                _heatmapButton(HeatmapType.leftRight, 'L/R'),
+                if (_heatmapType == HeatmapType.gps &&
+                    widget.report.trajectory.any((p) => p.isBuffered)) ...[
+                  _backfillToggleChip(),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _heatmapButton(HeatmapType.gps, 'GPS'),
+                    const SizedBox(width: 8),
+                    _heatmapButton(HeatmapType.speed, 'Speed'),
+                    const SizedBox(width: 8),
+                    _heatmapButton(HeatmapType.spraying, 'Spray'),
+                    const SizedBox(width: 8),
+                    _heatmapButton(HeatmapType.leftRight, 'L/R'),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1629,7 +1690,9 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         ];
         break;
     }
-    if (widget.report.trajectory.any((p) => p.isBuffered)) {
+    if (_heatmapType == HeatmapType.gps &&
+        _showBackfillOverlay &&
+        widget.report.trajectory.any((p) => p.isBuffered)) {
       items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
     }
     return Container(
@@ -1700,6 +1763,44 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
     );
   }
 
+  Widget _backfillToggleChip() {
+    return GestureDetector(
+      onTap: () => setState(() => _showBackfillOverlay = !_showBackfillOverlay),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: _showBackfillOverlay
+              ? Colors.deepPurpleAccent.withOpacity(0.15)
+              : Colors.white.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.deepPurpleAccent),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _showBackfillOverlay ? Icons.visibility : Icons.visibility_off,
+              size: 14,
+              color: Colors.deepPurpleAccent,
+            ),
+            const SizedBox(width: 6),
+            const Text(
+              'Backfill',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.deepPurpleAccent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
@@ -1729,11 +1830,12 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   }
 
   /// Highlights the parts of the track recovered via /backfill after a
-  /// connectivity gap, on top of whichever heatmap mode is selected --
+  /// connectivity gap -- GPS heatmap only (via the Backfill toggle),
   /// deliberately independent of HeatmapType/RowLineCoverage's coverage-band
   /// logic so this can't affect that (already carefully tuned) rendering.
   List<Polyline> _buildRecoveredOverlaySegments(List<GPSPointData> trajectory) {
     final List<Polyline> result = [];
+    if (_heatmapType != HeatmapType.gps || !_showBackfillOverlay) return result;
     List<LatLng> current = [];
     void flush() {
       if (current.length >= 2) {
