@@ -351,20 +351,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             } else {
               setState(() { latestTelemetry = null; });
             }
-            if (state.reportId != null) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                _messengerKey.currentState?.showSnackBar(SnackBar(
-                  content: const Text('Report generated! Tap to view.'),
-                  duration: const Duration(seconds: 8),
-                  action: SnackBarAction(
-                    label: 'View',
-                    onPressed: () {
-                      appNavKey.currentState?.pushNamed('/job_reports');
-                    },
-                  ),
-                ));
-              });
-            }
           } else {
             // New session starting — clear previous session's data.
             setState(() => _clearSessionState());

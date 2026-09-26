@@ -122,6 +122,8 @@ already written — see "Release process" at the bottom.
   has no way to reach the device and no way to ever confirm, so the tap
   went nowhere. Now greyed out and disabled for a Manual device that
   isn't currently sending live telemetry, with a tooltip explaining why.
+- Removed the "Report generated! Tap to view." snackbar that popped up
+  on the Monitoring screen whenever a session ended.
 
 ## [1.1.4] - 2026-09-18
 
