@@ -176,7 +176,8 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                           ),
                           if (r.sessionMode != null ||
                               r.pendingNetworkData ||
-                              r.amended) ...[
+                              r.amended ||
+                              r.verificationStatus == 'prefilled') ...[
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 6,
@@ -196,6 +197,8 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                                       Colors.orange),
                                 if (r.amended)
                                   _reportBadge('Updated', Colors.blue),
+                                if (r.verificationStatus == 'prefilled')
+                                  _reportBadge('Prefilled', Colors.amber),
                                 if (r.sessionMode == 'device' &&
                                     formatDeviceSessionLabel(
                                             r.controlUnitMac,

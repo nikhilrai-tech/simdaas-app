@@ -60,6 +60,22 @@ already written — see "Release process" at the bottom.
   legend entry — so it's clear which part of a session's data filled
   in after the device reconnected. Report-only, not shown live on the
   Monitoring screen. *(backend)*
+- Manual session reports now show the sprayer's own start/end time
+  (from the firmware, converted to local time) instead of the time the
+  server happened to receive the data — so a session recovered late via
+  backfill shows when it actually ran, not when it reconnected.
+  Automatic reports are unaffected and keep showing server time as
+  before. A "Prefilled" badge now appears on a report that includes any
+  backfill-recovered data, next to the Automatic/Manual badge, on both
+  the reports list and report details screens. *(backend)*
+- Backend groundwork for a "Verified" report state: a Prefilled report
+  can now be cross-checked against the sprayer's own on-SD-card log once
+  it's back online, instead of trusting the recovered (backfill) numbers
+  indefinitely — matching totals flip the report to Verified, a real
+  mismatch or a log that can't be retrieved flips it to Needs Review.
+  Backend-only so far and shipped switched off — no Verified/Needs
+  Review badge in the app yet; this just lays the groundwork for one.
+  *(backend)*
 - A "STAGING" ribbon now shows on every screen for any build pointed at
   the staging backend, so an APK handed to the testing team is never
   mistaken for a production build. Derived automatically from
