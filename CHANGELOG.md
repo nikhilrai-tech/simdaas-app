@@ -78,6 +78,12 @@ already written — see "Release process" at the bottom.
   both the reports list and report details screens. Off by default per
   environment until the SD-card log pipeline is turned on there.
   *(backend)*
+- A Verified report now also gets a prominent green banner at the top of
+  the report details screen ("Verified — Matches the sprayer's own
+  on-device log"), not just the small badge. A new grey "Live" badge
+  appears on a Manual report that never needed backfill recovery at all
+  — Automatic reports are unaffected (every Automatic report is always
+  "live", so the badge would be pure noise there). *(backend)*
 - A "STAGING" ribbon now shows on every screen for any build pointed at
   the staging backend, so an APK handed to the testing team is never
   mistaken for a production build. Derived automatically from

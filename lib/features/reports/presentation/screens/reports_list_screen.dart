@@ -200,6 +200,12 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                                       Colors.orange),
                                 if (r.amended)
                                   _reportBadge('Updated', Colors.blue),
+                                // Manual only -- every Automatic report is
+                                // always 'live' (verification never runs on
+                                // it), so the badge would just be noise there.
+                                if (r.sessionMode == 'device' &&
+                                    r.verificationStatus == 'live')
+                                  _reportBadge('Live', Colors.grey),
                                 if (r.verificationStatus == 'prefilled')
                                   _reportBadge('Prefilled', Colors.amber),
                                 if (r.verificationStatus == 'verifying')
