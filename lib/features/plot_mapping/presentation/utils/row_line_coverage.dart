@@ -113,6 +113,13 @@ class RowLineCoverage {
     required List<HeatmapTrackPoint> insidePoints,
     required double rowSpacing,
     required HeatmapType heatmapType,
+    // Reuses the exact same corridor geometry and point-crediting pass
+    // below (jitter-streak handling, tapering row width, gap-fill) --
+    // only the colour rule and the finalization loop differ (see the
+    // dedicated branches gated on this flag in both places) -- so the
+    // GPS/Speed/Spray/Left-Right bands this function already produces are
+    // untouched either way, this is purely additive.
+    bool asBackfillOverlay = false,
   }) {
     if (rowLines.length < 2) return const [];
     final bands = <Polygon>[];
@@ -194,6 +201,12 @@ class RowLineCoverage {
     ];
     final subBandMaxPass = <List<int>>[
       for (final geo in corridors) List<int>.filled(geo?.numSub ?? 0, 0)
+    ];
+    // asBackfillOverlay only: whether ANY point crediting this sub-band was
+    // recovered via /backfill -- one bool per sub-band, independent of the
+    // per-heatmap-type colour tracking above.
+    final hasBuffered = <List<bool>>[
+      for (final geo in corridors) List<bool>.filled(geo?.numSub ?? 0, false)
     ];
     // GPS heatmap only: highest gpsPriority ever recorded for each
     // sub-band, so a later lower-priority sample (e.g. Auto -> PTO off)
@@ -328,6 +341,10 @@ class RowLineCoverage {
       for (int s = lo; s <= hi; s++) {
         subBandMaxPass[ri][s] =
             math.max(subBandMaxPass[ri][s], corridorPassCount[ri]);
+        if (asBackfillOverlay) {
+          if (pt.isBuffered) hasBuffered[ri][s] = true;
+          continue;
+        }
         if (heatmapType == HeatmapType.spraying) {
           accumulated[ri][s] += pt.flowRate ?? 0.0;
           accumulatedCount[ri][s]++;
@@ -368,7 +385,11 @@ class RowLineCoverage {
         Color bandColor;
         int alpha;
 
-        if (heatmapType == HeatmapType.spraying) {
+        if (asBackfillOverlay) {
+          if (!hasBuffered[ri][i]) continue;
+          bandColor = Colors.deepPurpleAccent;
+          alpha = 160;
+        } else if (heatmapType == HeatmapType.spraying) {
           if (accumulated[ri][i] <= 0.0 || accumulatedCount[ri][i] == 0) {
             continue;
           }

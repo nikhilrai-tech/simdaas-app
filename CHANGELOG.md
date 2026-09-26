@@ -54,13 +54,13 @@ already written — see "Release process" at the bottom.
   mode changes either direction. Off by default for every account;
   only prompts once an admin has actually set one. Start/End Session
   itself is unaffected. *(backend)*
-- Report map now highlights track segments recovered via backfill
-  after a connectivity gap in a distinct color, with a matching legend
-  entry — so it's clear which part of a session's data filled in after
-  the device reconnected. GPS heatmap only, with its own on/off toggle
-  there — previously showed on every heatmap mode (GPS/Speed/Spray/L-R)
-  unconditionally. Report-only, not shown live on the Monitoring screen.
-  *(backend)*
+- Report map now highlights the crop rows recovered via backfill after a
+  connectivity gap as a filled purple band (matching the width and style
+  of the other GPS heatmap bands, e.g. the orange "PTO Off" fill) instead
+  of a thin center-line trace, with a matching legend entry. GPS heatmap
+  only, with its own on/off toggle there — previously showed as a thin
+  line on every heatmap mode (GPS/Speed/Spray/L-R) unconditionally.
+  Report-only, not shown live on the Monitoring screen. *(backend)*
 - Manual session reports now show the sprayer's own start/end time
   (from the firmware, converted to local time) instead of the time the
   server happened to receive the data — so a session recovered late via
