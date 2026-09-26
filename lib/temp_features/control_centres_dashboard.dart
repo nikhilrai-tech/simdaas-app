@@ -451,6 +451,16 @@ class _ControlUnitsListScreenState
                           setState(() => _deviceFilter = 'waiting'),
                     ),
                     FilterChip(
+                      label: const Text('Session Open'),
+                      avatar: _deviceFilter == 'session_open'
+                          ? const Icon(Icons.check_circle, size: 16)
+                          : null,
+                      selected: _deviceFilter == 'session_open',
+                      selectedColor: Colors.deepOrange.withAlpha(50),
+                      onSelected: (s) =>
+                          setState(() => _deviceFilter = 'session_open'),
+                    ),
+                    FilterChip(
                       label: const Text('Cooldown'),
                       avatar: _deviceFilter == 'cooldown'
                           ? const Icon(Icons.check_circle, size: 16)
@@ -476,6 +486,8 @@ class _ControlUnitsListScreenState
                       return kind == DeviceStatusKind.online;
                     case 'waiting':
                       return kind == DeviceStatusKind.waiting;
+                    case 'session_open':
+                      return kind == DeviceStatusKind.sessionOpen;
                     case 'cooldown':
                       return kind == DeviceStatusKind.cooldown;
                   }
@@ -740,7 +752,11 @@ class _ControlUnitsListScreenState
 
 /// Coarse device status used by both the filter chips and each list row,
 /// so the two never disagree about what "Waiting" / "Cooldown" mean.
-enum DeviceStatusKind { online, waiting, cooldown, offline }
+/// `sessionOpen` is Manual (device-managed) mode's own state -- a device
+/// that's unreachable mid-session, not "waiting" against Automatic's 60-min
+/// timeout assumption (an outage never ends a Manual session), so it's kept
+/// out of the `waiting` bucket entirely to avoid exactly that confusion.
+enum DeviceStatusKind { online, waiting, sessionOpen, cooldown, offline }
 
 class DeviceStatusInfo {
   final DeviceStatusKind kind;
@@ -828,7 +844,7 @@ DeviceStatusInfo computeDeviceStatus(WidgetRef ref, dynamic cu) {
         cooldownState: cooldownState);
   } else if (manualSessionOpen) {
     return DeviceStatusInfo(
-        kind: DeviceStatusKind.waiting,
+        kind: DeviceStatusKind.sessionOpen,
         label: 'SESSION OPEN · OFFLINE',
         color: Colors.amber,
         isInCooldown: false,
@@ -908,7 +924,7 @@ class _DeviceListItem extends ConsumerWidget {
                 blurRadius: 4,
                 spreadRadius: 1,
               ),
-            if (isWaiting)
+            if (isWaiting || status.kind == DeviceStatusKind.sessionOpen)
               BoxShadow(
                 color: Colors.amber.withAlpha(120),
                 blurRadius: 4,

@@ -6,6 +6,7 @@ import 'package:simdaas/core/services/auth_service.dart';
 import '../providers/report_providers.dart';
 import 'package:simdaas/features/plot_mapping/presentation/providers/plot_providers.dart' as plot_provs;
 import 'package:simdaas/features/equipments/presentation/providers/equipment_providers.dart' as eq_provs;
+import 'package:simdaas/core/utils/mac_utils.dart';
 import 'report_details_screen.dart';
 
 class ReportsListScreen extends ConsumerStatefulWidget {
@@ -175,7 +176,8 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                           ),
                           if (r.sessionMode != null ||
                               r.pendingNetworkData ||
-                              r.amended) ...[
+                              r.amended ||
+                              r.verificationStatus == 'prefilled') ...[
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 6,
@@ -195,6 +197,24 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                                       Colors.orange),
                                 if (r.amended)
                                   _reportBadge('Updated', Colors.blue),
+                                if (r.verificationStatus == 'prefilled')
+                                  _reportBadge('Prefilled', Colors.amber),
+                                if (r.sessionMode == 'device' &&
+                                    formatDeviceSessionLabel(
+                                            r.controlUnitMac,
+                                            r.deviceSessionId) !=
+                                        null)
+                                  Text(
+                                    formatDeviceSessionLabel(
+                                        r.controlUnitMac, r.deviceSessionId)!,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[600],
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures()
+                                      ],
+                                    ),
+                                  ),
                               ],
                             ),
                           ],

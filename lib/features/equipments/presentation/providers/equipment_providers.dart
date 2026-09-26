@@ -141,10 +141,13 @@ class EquipmentController {
 
   /// Switches a control unit between Automatic (`server`) and Manual
   /// (`device`) session mode. Throws an [ApiException] whose body carries a
-  /// stable `code` (session_active / firmware_unsupported / feature_disabled).
-  Future<void> setSessionMode(String controlUnitId, {required String mode}) async {
+  /// stable `code` (session_active / firmware_unsupported / feature_disabled /
+  /// pin_required / invalid_pin). `pin` is only required once an admin has
+  /// set a session PIN for this user (userauth/admin.py).
+  Future<void> setSessionMode(String controlUnitId,
+      {required String mode, String? pin}) async {
     final repo = ref.read(equipmentRepoProvider);
-    await repo.setSessionMode(controlUnitId, mode: mode);
+    await repo.setSessionMode(controlUnitId, mode: mode, pin: pin);
     final currentUserId =
         ref.read(authServiceProvider).currentUserId ?? 'demo_user';
     ref.invalidate(equipmentsListProvider(currentUserId));

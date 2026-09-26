@@ -5,6 +5,7 @@ import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
+import 'package:simdaas/core/utils/mac_utils.dart';
 import '../../domain/report.dart';
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
@@ -176,33 +177,68 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             const SizedBox(height: 24),
 
             if (report.sessionMode != null) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: report.sessionMode == 'device'
-                        ? Colors.teal.shade50
-                        : Colors.indigo.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
                       color: report.sessionMode == 'device'
-                          ? Colors.teal.shade200
-                          : Colors.indigo.shade200,
+                          ? Colors.teal.shade50
+                          : Colors.indigo.shade50,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: report.sessionMode == 'device'
+                            ? Colors.teal.shade200
+                            : Colors.indigo.shade200,
+                      ),
+                    ),
+                    child: Text(
+                      report.sessionMode == 'device' ? 'Manual' : 'Automatic',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: report.sessionMode == 'device'
+                            ? Colors.teal.shade800
+                            : Colors.indigo.shade800,
+                      ),
                     ),
                   ),
-                  child: Text(
-                    report.sessionMode == 'device' ? 'Manual' : 'Automatic',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: report.sessionMode == 'device'
-                          ? Colors.teal.shade800
-                          : Colors.indigo.shade800,
+                  if (report.sessionMode == 'device' &&
+                      formatDeviceSessionLabel(
+                              report.controlUnitMac, report.deviceSessionId) !=
+                          null)
+                    Text(
+                      formatDeviceSessionLabel(
+                          report.controlUnitMac, report.deviceSessionId)!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  ),
-                ),
+                  if (report.verificationStatus == 'prefilled')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Text(
+                        'Prefilled',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.amber.shade900,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(height: 12),
             ],
@@ -581,6 +617,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   polylines:
                       _buildHeatmapPolylines(report.trajectory, report.plot),
                 ),
+                PolylineLayer(
+                  polylines: _buildRecoveredOverlaySegments(report.trajectory),
+                ),
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -950,6 +989,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         ];
         break;
     }
+    if (widget.report.trajectory.any((p) => p.isBuffered)) {
+      items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1055,6 +1097,35 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         rightSolenoidOn: p.rightSolenoidState == 1,
       ));
     }
+    return result;
+  }
+
+  /// Highlights the parts of the track recovered via /backfill after a
+  /// connectivity gap, on top of whichever heatmap mode is selected --
+  /// deliberately independent of HeatmapType/RowLineCoverage's coverage-band
+  /// logic so this can't affect that (already carefully tuned) rendering.
+  List<Polyline> _buildRecoveredOverlaySegments(List<GPSPointData> trajectory) {
+    final List<Polyline> result = [];
+    List<LatLng> current = [];
+    void flush() {
+      if (current.length >= 2) {
+        result.add(Polyline(
+          points: List<LatLng>.from(current),
+          strokeWidth: 6.0,
+          color: Colors.deepPurpleAccent,
+        ));
+      }
+      current = [];
+    }
+
+    for (final p in trajectory) {
+      if (p.isBuffered) {
+        current.add(LatLng(p.lat, p.lon));
+      } else {
+        flush();
+      }
+    }
+    flush();
     return result;
   }
 
@@ -1257,6 +1328,9 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
               PolylineLayer(
                 polylines: _buildHeatmapPolylines(report.trajectory, report.plot),
               ),
+              PolylineLayer(
+                polylines: _buildRecoveredOverlaySegments(report.trajectory),
+              ),
               if (points.isNotEmpty)
                 MarkerLayer(
                   markers: [
@@ -1377,6 +1451,9 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         ];
         break;
     }
+    if (widget.report.trajectory.any((p) => p.isBuffered)) {
+      items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -1470,6 +1547,35 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         rightSolenoidOn: p.rightSolenoidState == 1,
       ));
     }
+    return result;
+  }
+
+  /// Highlights the parts of the track recovered via /backfill after a
+  /// connectivity gap, on top of whichever heatmap mode is selected --
+  /// deliberately independent of HeatmapType/RowLineCoverage's coverage-band
+  /// logic so this can't affect that (already carefully tuned) rendering.
+  List<Polyline> _buildRecoveredOverlaySegments(List<GPSPointData> trajectory) {
+    final List<Polyline> result = [];
+    List<LatLng> current = [];
+    void flush() {
+      if (current.length >= 2) {
+        result.add(Polyline(
+          points: List<LatLng>.from(current),
+          strokeWidth: 6.0,
+          color: Colors.deepPurpleAccent,
+        ));
+      }
+      current = [];
+    }
+
+    for (final p in trajectory) {
+      if (p.isBuffered) {
+        current.add(LatLng(p.lat, p.lon));
+      } else {
+        flush();
+      }
+    }
+    flush();
     return result;
   }
 

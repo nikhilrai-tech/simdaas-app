@@ -58,6 +58,15 @@ class Report {
   // clean end, and no backfill has corrected it yet. Flips back to false on
   // its own once `amended` becomes true.
   final bool pendingNetworkData;
+  // Manual (device-managed) mode only: the firmware's own session counter,
+  // null for Automatic. Combine with controlUnitMac via
+  // core/utils/mac_utils.dart's formatDeviceSessionLabel().
+  final int? deviceSessionId;
+  final String? controlUnitMac;
+  // 'live' | 'prefilled' | 'verifying' | 'verified' | 'needs_review'.
+  // 'prefilled' means the report includes recovered (backfilled) data that
+  // hasn't yet been cross-checked against the device's own log file.
+  final String? verificationStatus;
 
   const Report({
     this.plotId,
@@ -96,6 +105,9 @@ class Report {
     this.amendedNote,
     this.sessionMode,
     this.pendingNetworkData = false,
+    this.deviceSessionId,
+    this.controlUnitMac,
+    this.verificationStatus,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,
@@ -112,6 +124,9 @@ class GPSPointData {
   final int leftSolenoidState;
   final int rightSolenoidState;
   final DateTime timestamp;
+  // True when this point was recovered from the device's offline buffer
+  // (/backfill) after a connectivity gap, instead of arriving live.
+  final bool isBuffered;
 
   const GPSPointData({
     required this.lat,
@@ -123,5 +138,6 @@ class GPSPointData {
     this.leftSolenoidState = 0,
     this.rightSolenoidState = 0,
     required this.timestamp,
+    this.isBuffered = false,
   });
 }

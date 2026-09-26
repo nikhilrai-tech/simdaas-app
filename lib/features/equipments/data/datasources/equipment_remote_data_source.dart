@@ -12,7 +12,7 @@ abstract class EquipmentRemoteDataSource {
   Future<List<EquipmentEntity>> getSprayers(String userId);
   Future<List<EquipmentEntity>> getControlUnits(String userId);
   Future<Map<String, dynamic>> endSession(int sessionId, {bool force = false});
-  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode});
+  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode, String? pin});
   Future<Map<String, dynamic>> startDeviceSession(String mac);
   Future<Map<String, dynamic>> stopDeviceSession(String mac);
   Future<void> pushDemoConfig(String id, {required bool demo});
@@ -409,10 +409,13 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
     return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
   }
 
+  /// `pin` is only required once an admin has set a session PIN for this
+  /// user (userauth/admin.py) — ignored server-side otherwise. Gates the
+  /// mode switch itself, not Start/End Session inside Manual mode.
   @override
-  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode}) async {
+  Future<Map<String, dynamic>> setSessionMode(String controlUnitId, {required String mode, String? pin}) async {
     final res = await api.postJson('/api/control-units/$controlUnitId/session-mode/',
-        jsonBody: {'mode': mode});
+        jsonBody: {'mode': mode, if (pin != null) 'pin': pin});
     return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
   }
 

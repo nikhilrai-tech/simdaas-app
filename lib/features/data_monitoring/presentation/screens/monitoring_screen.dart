@@ -57,6 +57,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   StreamSubscription<CooldownState>? _cooldownSub;
   // Ticks every second to refresh the MM:SS countdown label.
   Timer? _countdownTimer;
+  // Kept in sync from build()'s isManualMode -- _waitingSecondsRemaining()
+  // needs it outside of build() (the timer callback, and this is a
+  // StatefulWidget field so it survives rebuilds between ticks).
+  bool _isManualMode = false;
 
   // Top notification banner is only visible for ~5 s after a cooldown
   // begins. The cooldown itself still runs to completion in the background.
@@ -412,6 +416,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   int _waitingSecondsRemaining() {
+    // Manual (device-managed) mode has no "waiting" concept at all -- the
+    // sprayer decides when it restarts, unlike Automatic's 60-min watchdog
+    // assumption. Automatic mode is completely unaffected: _isManualMode is
+    // only ever true for a device-managed control unit.
+    if (_isManualMode) return 0;
     if (widget.deviceId == null) return 0;
     if (_cooldownState?.isInCooldown ?? false) return 0;
     if (_cooldownState?.status == DeviceLifecycleStatus.offline) return 0;
@@ -570,11 +579,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   // ── Cooldown banner widget ───────────────────────────────────────────────
   Widget _buildCooldownBanner(CooldownState state) {
-    // 'manual_end' = Automatic mode's app End button; 'device_end' = a
-    // device-managed (Manual mode) session ending. Neither is "session mode"
-    // Manual -- both just mean "a session was explicitly ended", as opposed
-    // to the watchdog timing a device out.
-    final isManual = state.cooldownType == 'manual_end' || state.cooldownType == 'device_end';
+    final isManual = state.cooldownType == 'manual_end';
     final label = isManual
         ? 'Session ended — report generating'
         : 'Device offline — report generating';
@@ -681,6 +686,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     String? resolvedControlUnitName;
     int? resolvedActiveSessionId;
     bool isManualMode = false;
+    // True once a control unit matching widget.deviceId is found, whether or
+    // not it currently has an active session -- a device sitting idle (no
+    // session right now) is a normal, common state, not "we don't know which
+    // device this is". The job/only-active-session fallbacks below exist for
+    // when deviceId itself couldn't identify a control unit at all; gating
+    // them on resolvedActiveSessionId alone used to let them fire for an
+    // idle-but-identified device too, overwriting resolvedControlUnitName
+    // with a DIFFERENT device's session the moment exactly one happened to
+    // be active elsewhere in the account (e.g. right after this device's
+    // Manual-mode cooldown clears and it goes idle) -- the screen would
+    // appear to "switch devices" out from under the user.
+    bool matchedByDeviceId = false;
     try {
       final cuList = controlUnitsAsync.valueOrNull;
       final sessions = sessionsAsync.valueOrNull;
@@ -694,13 +711,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             resolvedActiveSessionId = cu.activeSessionId;
             isManualMode = cu.isManualSessionMode;
             _backendLastSeenAt = cu.lastSeenAt;
+            matchedByDeviceId = true;
             break;
           }
         }
       }
 
       // If still null, try to find by jobId if provided
-      if (resolvedActiveSessionId == null && widget.jobId != null && sessions != null) {
+      if (!matchedByDeviceId && resolvedActiveSessionId == null && widget.jobId != null && sessions != null) {
         for (final s in sessions) {
           if (s['job']?.toString() == widget.jobId) {
             resolvedActiveSessionId = s['id'] as int?;
@@ -711,12 +729,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       }
 
       // If still null and there's only one active session, use it
-      if (resolvedActiveSessionId == null && sessions != null && sessions.length == 1) {
+      if (!matchedByDeviceId && resolvedActiveSessionId == null && sessions != null && sessions.length == 1) {
         final s = sessions.first;
         resolvedActiveSessionId = s['id'] as int?;
         resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
       }
     } catch (_) {}
+    _isManualMode = isManualMode;
 
     // Shared with the top-left L/R card and the legend below it, so both
     // shift down instead of being covered when a top banner is showing.
@@ -728,6 +747,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final cooldownBannerShown = _cooldownBannerVisible &&
         _cooldownState != null &&
         _cooldownState!.status == DeviceLifecycleStatus.cooldown;
+    // Manual mode only: without a live heartbeat there's no way for a Stop
+    // command to actually reach the device, and no Force End escape hatch to
+    // fall back on if it never confirms -- so don't let the tap go nowhere.
+    // Automatic mode is unaffected: its End always closes the session in the
+    // DB immediately regardless of reachability.
+    final endSessionUnreachable = isManualMode && latestTelemetry == null;
+    final endSessionColor = endSessionUnreachable ? Colors.grey : Colors.redAccent;
     final topBannerVisible = manualIdleBarVisible || cooldownBannerShown;
 
     // Compute simple state indicators from the latest telemetry snapshot.
@@ -772,6 +798,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                           color: Colors.orangeAccent,
                           fontSize: 10,
                           fontWeight: FontWeight.bold)),
+                if (isManualMode &&
+                    resolvedActiveSessionId != null &&
+                    formatDeviceSessionLabel(widget.deviceId,
+                            latestTelemetry?.deviceSessionId) !=
+                        null)
+                  Text(
+                    formatDeviceSessionLabel(widget.deviceId,
+                        latestTelemetry?.deviceSessionId)!,
+                    style: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 9,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 if (_cooldownState?.isInCooldown ?? false)
                   Builder(builder: (_) {
                     final cd = _cooldownState!;
@@ -1161,27 +1201,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     // Manual mode: only a stop was *requested* — the sprayer
                                     // closes its own session, so nothing is cleared or put into
                                     // cooldown here; the session_event / report_ready that
-                                    // follows updates the screen. Offer the escape hatch for a
-                                    // device that can't be reached.
+                                    // follows updates the screen.
                                     if (!endedNow) {
-                                      final endingId = sessionIdToEnd;
-                                      _messengerKey.currentState?.showSnackBar(SnackBar(
-                                        content: const Text('Stop sent to the device…'),
-                                        duration: const Duration(seconds: 15),
-                                        action: SnackBarAction(
-                                          label: 'Device offline? Force end',
-                                          onPressed: () async {
-                                            try {
-                                              await ref
-                                                  .read(eq_provs.equipmentControllerProvider)
-                                                  .endSession(endingId,
-                                                      deviceId: deviceMac, force: true);
-                                            } catch (err) {
-                                              _messengerKey.currentState?.showSnackBar(
-                                                  SnackBar(content: Text(_manualErrorText(err))));
-                                            }
-                                          },
-                                        ),
+                                      _messengerKey.currentState?.showSnackBar(const SnackBar(
+                                        content: Text('Stop sent to the device…'),
+                                        duration: Duration(seconds: 5),
                                       ));
                                       return;
                                     }
@@ -1290,13 +1314,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'end_session',
+                                  enabled: !endSessionUnreachable,
                                   child: Row(
                                     children: [
-                                      const Icon(Icons.stop_circle_outlined,
-                                          color: Colors.redAccent, size: 20),
+                                      Icon(Icons.stop_circle_outlined, color: endSessionColor, size: 20),
                                       const SizedBox(width: 8),
-                                      Text(isManualMode ? 'End session' : 'End active device',
-                                          style: const TextStyle(color: Colors.redAccent)),
+                                      Text(
+                                        isManualMode ? 'End session' : 'End active device',
+                                        style: TextStyle(color: endSessionColor),
+                                      ),
+                                      if (endSessionUnreachable) ...[
+                                        const SizedBox(width: 8),
+                                        const Tooltip(
+                                          message: 'Device unreachable — no live heartbeat',
+                                          child: Icon(Icons.info_outline, color: Colors.grey, size: 16),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),

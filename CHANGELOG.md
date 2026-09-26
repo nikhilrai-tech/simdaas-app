@@ -10,6 +10,104 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-09-25
+
+### Added
+- **Manual (device-managed) session mode** — a new Session Mode toggle
+  (Automatic / Manual) on each device's Equipment Details screen.
+  Automatic keeps today's behavior (the backend infers session start/end
+  from telemetry). In Manual, the sprayer firmware owns the session: it
+  starts and ends only when you start/stop it — the button on the
+  sprayer, or Start/End Session on the Monitoring screen. Data recorded
+  while the device is offline mid-session is kept on the device and
+  merged into the same session once it reconnects, instead of being
+  lost to a network gap. Switching to Manual is blocked with a clear
+  reason if the server-side feature isn't enabled yet, the device's
+  firmware doesn't support it yet, or a session is currently active.
+  *(backend)*
+- Monitoring screen: a MANUAL title chip, an idle banner ("Manual mode —
+  no session running") with its own Start Session button when a Manual
+  device is online with nothing running, and End-session dialog copy
+  that explains the Manual flow (stop is sent to the sprayer; the
+  session ends once it confirms). Live values (flow rate, speed, PTO,
+  tank level, GPS) keep showing on this screen even while idle — the
+  sprayer keeps sending heartbeats whether or not a session is running,
+  and these reflect that directly, independent of the session-only
+  totals (distance, area covered, spray used).
+- Active Devices dashboard: a new "Session Open" filter/status, separate
+  from "Waiting" — a Manual device that's gone unreachable mid-session
+  (still recording locally, no timeout, no countdown) is a different
+  situation from Automatic's 60-minute watchdog and is no longer grouped
+  with it. *(backend)*
+- Reports: a small Automatic/Manual badge, and an "Updated" badge/banner
+  when a report was recomputed after offline-recovered data was merged
+  in from a reconnecting device, plus a "may be incomplete — pending
+  network data" badge for a report whose session was force-closed after
+  a long connectivity gap and hasn't been corrected yet. *(backend)*
+- Manual sessions now show a compact MAC-SessionID identifier (e.g.
+  `88A35AC5E658-29`, the device's own session counter) next to the
+  Automatic/Manual badge — live on the Monitoring screen title while a
+  session is running, and on the report afterwards. *(backend)*
+- Optional Session PIN for switching a device between Automatic and
+  Manual mode — an admin-set 4-6 digit PIN (Django admin only, not
+  self-service) that a farmer's account can require before the session
+  mode changes either direction. Off by default for every account;
+  only prompts once an admin has actually set one. Start/End Session
+  itself is unaffected. *(backend)*
+- Report map now highlights track segments recovered via backfill
+  after a connectivity gap in a distinct color, on top of whichever
+  heatmap mode (GPS/Speed/Spray/L-R) is selected, with a matching
+  legend entry — so it's clear which part of a session's data filled
+  in after the device reconnected. Report-only, not shown live on the
+  Monitoring screen. *(backend)*
+- Manual session reports now show the sprayer's own start/end time
+  (from the firmware, converted to local time) instead of the time the
+  server happened to receive the data — so a session recovered late via
+  backfill shows when it actually ran, not when it reconnected.
+  Automatic reports are unaffected and keep showing server time as
+  before. A "Prefilled" badge now appears on a report that includes any
+  backfill-recovered data, next to the Automatic/Manual badge, on both
+  the reports list and report details screens. *(backend)*
+- Backend groundwork for a "Verified" report state: a Prefilled report
+  can now be cross-checked against the sprayer's own on-SD-card log once
+  it's back online, instead of trusting the recovered (backfill) numbers
+  indefinitely — matching totals flip the report to Verified, a real
+  mismatch or a log that can't be retrieved flips it to Needs Review.
+  Backend-only so far and shipped switched off — no Verified/Needs
+  Review badge in the app yet; this just lays the groundwork for one.
+  *(backend)*
+- A "STAGING" ribbon now shows on every screen for any build pointed at
+  the staging backend, so an APK handed to the testing team is never
+  mistaken for a production build. Derived automatically from
+  `apiBaseUrl` — no separate flag to remember to flip, and no risk of
+  it staying wrong after `apiBaseUrl` is switched.
+
+### Fixed
+- The live WebSocket connection (telemetry, session status, cooldown,
+  report-ready) always pointed at production, regardless of which
+  backend the REST API (`apiBaseUrl`) was actually configured for — so
+  pointing the app at staging silently left all *live* updates talking
+  to production instead. Now derived from the same host as `apiBaseUrl`.
+- Monitoring screen could briefly flicker or lose live data (the Manual
+  idle banner, tank/solenoid/sensor overlays) on any background provider
+  refresh — a loading state was being treated as "no data" instead of
+  keeping the last known value until fresh data arrived.
+- A device sitting idle in Manual mode (online, no session running right
+  now) could suddenly start showing a *different* device's name and
+  session on its own Monitoring screen, whenever exactly one other
+  device in the account happened to have an active session at that
+  moment.
+- A Manual-mode device going offline showed the same 60-minute "Waiting"
+  countdown Automatic mode uses — Manual mode has no such concept, since
+  the sprayer (not a timeout) decides when it reconnects.
+- The top-left L/R nozzle indicator card overlapped the Manual "Start
+  Session" banner when both were visible at once.
+- "End session" could be tapped on a Manual device with no live
+  heartbeat (gone unreachable mid-session) — the Stop command it sends
+  has no way to reach the device and no way to ever confirm, so the tap
+  went nowhere. Now greyed out and disabled for a Manual device that
+  isn't currently sending live telemetry, with a tooltip explaining why.
+
 ## [1.1.4] - 2026-09-18
 
 ### Added
