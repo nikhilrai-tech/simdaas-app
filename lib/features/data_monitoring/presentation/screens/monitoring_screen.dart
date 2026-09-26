@@ -42,6 +42,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   HeatmapType _selectedHeatmap = HeatmapType.gps;
   bool _isSatelliteView = true;
+  // Actual rendered height of whichever top banner (Manual idle bar /
+  // cooldown banner) is currently showing -- the L/R card and legend below
+  // it need to shift down by exactly this much. A fixed guessed offset
+  // previously overlapped on narrower screens where the idle bar's text
+  // wraps to an extra line (its message + a button in one Row, so wrapping
+  // depends on device text scale and screen width, not just phone vs
+  // tablet).
+  final GlobalKey _topBannerKey = GlobalKey();
+  double? _topBannerHeight;
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
   StreamSubscription<TelemetryData>? _deviceSub;
@@ -528,6 +537,30 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     return 'Request failed: $err';
   }
 
+  /// Schedules a check of the top banner's actual rendered height (via
+  /// _topBannerKey) after this frame, updating _topBannerHeight if it
+  /// changed. Safe to call every build -- a no-op setState is never
+  /// triggered when the height is unchanged, so this can't loop.
+  void _scheduleTopBannerMeasurement() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final height = _topBannerKey.currentContext?.size?.height;
+      if (height != null && height != _topBannerHeight) {
+        setState(() => _topBannerHeight = height);
+      }
+    });
+  }
+
+  /// Base top offset (12) plus the top banner's actual measured height when
+  /// one is showing -- falls back to a reasonable guess (52) for the first
+  /// frame or two before the real measurement lands, same as the old fixed
+  /// "64" did, but self-corrects afterwards instead of staying wrong on
+  /// screens where the banner text wraps to an extra line.
+  double _lrCardTopOffset(bool topBannerVisible) {
+    if (!topBannerVisible) return 12;
+    return 12 + (_topBannerHeight ?? 52);
+  }
+
   /// Shown at the top for Manual devices that are online but have no session.
   Widget _buildManualIdleBar() {
     return Container(
@@ -741,6 +774,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final endSessionUnreachable = isManualMode && latestTelemetry == null;
     final endSessionColor = endSessionUnreachable ? Colors.grey : Colors.redAccent;
     final topBannerVisible = manualIdleBarVisible || cooldownBannerShown;
+    if (topBannerVisible) {
+      _scheduleTopBannerMeasurement();
+    } else if (_topBannerHeight != null) {
+      // Neither banner is showing anymore -- drop the stale measurement so
+      // the L/R card and legend snap back to their base offsets immediately
+      // instead of leaving a gap.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _topBannerHeight = null);
+      });
+    }
 
     // Compute simple state indicators from the latest telemetry snapshot.
     final t0 = latestTelemetry;
@@ -784,8 +827,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                           color: Colors.orangeAccent,
                           fontSize: 10,
                           fontWeight: FontWeight.bold)),
+                // Deliberately NOT gated on resolvedActiveSessionId (the
+                // internal DB session id from the slower control-units REST
+                // provider) -- live telemetry with a real deviceSessionId
+                // commonly arrives before that list next refreshes, and
+                // requiring both left this label incorrectly hidden during
+                // that window even though a session was genuinely running.
                 if (isManualMode &&
-                    resolvedActiveSessionId != null &&
                     formatDeviceSessionLabel(widget.deviceId,
                             latestTelemetry?.deviceSessionId) !=
                         null)
@@ -1336,7 +1384,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                 top: 0,
                 left: 0,
                 right: 0,
-                child: _buildManualIdleBar(),
+                child: KeyedSubtree(
+                  key: _topBannerKey,
+                  child: _buildManualIdleBar(),
+                ),
               ),
 
             // ── Cooldown / offline-pending banner ──────────────────────────
@@ -1347,7 +1398,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                 top: 0,
                 left: 0,
                 right: 0,
-                child: _buildCooldownBanner(_cooldownState!),
+                child: KeyedSubtree(
+                  key: _topBannerKey,
+                  child: _buildCooldownBanner(_cooldownState!),
+                ),
               ),
 
             // ── Heatmap legend + active info card (left side, stacked) ───
@@ -1360,7 +1414,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             // is showing, so it stays stacked below the L/R card instead of
             // being covered by the banner.
             Positioned(
-              top: topBannerVisible ? 132 : 80,
+              top: _lrCardTopOffset(topBannerVisible) + 68,
               left: 12,
               child: SafeArea(
                 child: ConstrainedBox(
@@ -1393,7 +1447,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
             // ── Top-left L/R nozzle indicators (left/right) ───────────────
             Positioned(
-              top: topBannerVisible ? 64 : 12,
+              top: _lrCardTopOffset(topBannerVisible),
               left: 12,
               child: SafeArea(
                 child: Card(

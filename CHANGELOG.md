@@ -124,6 +124,17 @@ already written — see "Release process" at the bottom.
   isn't currently sending live telemetry, with a tooltip explaining why.
 - Removed the "Report generated! Tap to view." snackbar that popped up
   on the Monitoring screen whenever a session ended.
+- The MAC-SessionID label on the Monitoring screen title could
+  incorrectly stay hidden even while a Manual session was genuinely
+  running — it was waiting on a separate, slower REST-loaded session id
+  that commonly hadn't caught up yet with the live telemetry already
+  showing the real one.
+- The top-left L/R nozzle indicator card and the legend below it could
+  still overlap the Manual "Start Session" banner on narrower phone
+  screens, where the banner's text wraps to an extra line — the previous
+  fix used a fixed guessed offset that didn't account for that. Now
+  measures the banner's actual height and shifts down by exactly that
+  much.
 
 ## [1.1.4] - 2026-09-18
 

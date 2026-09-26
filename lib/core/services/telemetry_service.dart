@@ -867,6 +867,7 @@ class TelemetryService {
             flowRateLpm: t.flowRateLpm,
             flowInLitres: t.flowInLitres,
             uptimeSec: t.uptimeSec,
+            deviceSessionId: t.deviceSessionId,
           );
 
           _latest[normId] = stored;
