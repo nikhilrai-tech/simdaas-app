@@ -12,6 +12,9 @@ class HeatmapTrackPoint {
   final double? flowRate;
   final bool leftSolenoidOn;
   final bool rightSolenoidOn;
+  // Recovered via /backfill after a connectivity gap -- used only by
+  // RowLineCoverage.buildHeatmapCoverageBands's asBackfillOverlay pass.
+  final bool isBuffered;
 
   const HeatmapTrackPoint({
     required this.position,
@@ -22,6 +25,7 @@ class HeatmapTrackPoint {
     this.flowRate,
     this.leftSolenoidOn = false,
     this.rightSolenoidOn = false,
+    this.isBuffered = false,
   });
 }
 
