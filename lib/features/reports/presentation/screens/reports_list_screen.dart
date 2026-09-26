@@ -178,6 +178,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                               r.pendingNetworkData ||
                               r.amended ||
                               r.verificationStatus == 'prefilled' ||
+                              r.verificationStatus == 'verifying' ||
                               r.verificationStatus == 'verified' ||
                               r.verificationStatus == 'needs_review') ...[
                             const SizedBox(height: 8),
@@ -201,6 +202,8 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                                   _reportBadge('Updated', Colors.blue),
                                 if (r.verificationStatus == 'prefilled')
                                   _reportBadge('Prefilled', Colors.amber),
+                                if (r.verificationStatus == 'verifying')
+                                  _reportBadge('Verifying', Colors.blueGrey),
                                 if (r.verificationStatus == 'verified')
                                   _reportBadge('Verified', Colors.green),
                                 if (r.verificationStatus == 'needs_review')
