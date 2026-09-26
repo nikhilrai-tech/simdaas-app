@@ -67,6 +67,10 @@ class Report {
   // 'prefilled' means the report includes recovered (backfilled) data that
   // hasn't yet been cross-checked against the device's own log file.
   final String? verificationStatus;
+  // Only set when verificationStatus == 'needs_review' -- explains which
+  // numbers didn't match the device's own log, or why verification
+  // couldn't complete (e.g. the log file was never found).
+  final String? verificationNote;
 
   const Report({
     this.plotId,
@@ -108,6 +112,7 @@ class Report {
     this.deviceSessionId,
     this.controlUnitMac,
     this.verificationStatus,
+    this.verificationNote,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,

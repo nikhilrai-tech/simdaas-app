@@ -238,9 +238,83 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         ),
                       ),
                     ),
+                  if (report.verificationStatus == 'verified')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.verified_rounded,
+                              size: 14, color: Colors.green.shade800),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Verified',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (report.verificationStatus == 'needs_review')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Text(
+                        'Needs Review',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.red.shade800,
+                        ),
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 12),
+            ],
+
+            if (report.verificationStatus == 'needs_review') ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.error_outline_rounded,
+                        color: Colors.red.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        report.verificationNote ??
+                            'This report didn\'t match the device\'s own log '
+                                'and needs review.',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.red.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
             ],
 
             if (report.pendingNetworkData) ...[
