@@ -238,6 +238,38 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         ),
                       ),
                     ),
+                  if (report.verificationStatus == 'verifying')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.blueGrey.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: Colors.blueGrey.shade700,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Verifying',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blueGrey.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (report.verificationStatus == 'verified')
                     Container(
                       padding: const EdgeInsets.symmetric(
