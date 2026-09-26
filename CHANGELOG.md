@@ -68,14 +68,15 @@ already written — see "Release process" at the bottom.
   before. A "Prefilled" badge now appears on a report that includes any
   backfill-recovered data, next to the Automatic/Manual badge, on both
   the reports list and report details screens. *(backend)*
-- Backend groundwork for a "Verified" report state: a Prefilled report
-  can now be cross-checked against the sprayer's own on-SD-card log once
-  it's back online, instead of trusting the recovered (backfill) numbers
-  indefinitely — matching totals flip the report to Verified, a real
-  mismatch or a log that can't be retrieved flips it to Needs Review.
-  Backend-only so far and shipped switched off — no Verified/Needs
-  Review badge in the app yet; this just lays the groundwork for one.
-  *(backend)*
+- A Prefilled report can now be cross-checked against the sprayer's own
+  on-SD-card log once it's back online, instead of trusting the recovered
+  (backfill) numbers indefinitely — matching totals flip the report to a
+  new green "Verified" badge; a real mismatch or a log that can't be
+  retrieved flips it to a red "Needs Review" badge with a note explaining
+  why (which numbers didn't match, or why verification couldn't
+  complete), on both the reports list and report details screens. Off by
+  default per environment until the SD-card log pipeline is turned on
+  there. *(backend)*
 - A "STAGING" ribbon now shows on every screen for any build pointed at
   the staging backend, so an APK handed to the testing team is never
   mistaken for a production build. Derived automatically from
