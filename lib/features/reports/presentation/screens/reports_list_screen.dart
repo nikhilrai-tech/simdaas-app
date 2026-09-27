@@ -174,46 +174,51 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                               const Icon(Icons.chevron_right, color: Colors.grey),
                             ],
                           ),
-                          if (r.sessionMode != null ||
-                              r.pendingNetworkData ||
-                              r.amended ||
-                              r.verificationStatus == 'prefilled' ||
-                              r.verificationStatus == 'verifying' ||
-                              r.verificationStatus == 'verified' ||
-                              r.verificationStatus == 'needs_review') ...[
+                          if (r.sessionMode != null) ...[
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 6,
                               runSpacing: 6,
                               children: [
-                                if (r.sessionMode != null)
-                                  _reportBadge(
-                                    r.sessionMode == 'device'
-                                        ? 'Manual'
-                                        : 'Automatic',
-                                    r.sessionMode == 'device'
-                                        ? Colors.teal
-                                        : Colors.indigo,
-                                  ),
+                                // 1. Session mode.
+                                _reportBadge(
+                                  r.sessionMode == 'device'
+                                      ? 'Manual'
+                                      : 'Automatic',
+                                  r.sessionMode == 'device'
+                                      ? Colors.teal
+                                      : Colors.indigo,
+                                ),
                                 if (r.pendingNetworkData)
                                   _reportBadge('Pending network data',
                                       Colors.orange),
+                                // 2. Data composition -- independent of
+                                // verificationStatus below, which gets
+                                // overwritten to verifying/verified/
+                                // needs_review once the log-check pipeline
+                                // picks the report up and no longer says
+                                // whether it started out backfilled.
                                 if (r.amended)
-                                  _reportBadge('Updated', Colors.blue),
-                                // Manual only -- every Automatic report is
-                                // always 'live' (verification never runs on
-                                // it), so the badge would just be noise there.
-                                if (r.sessionMode == 'device' &&
-                                    r.verificationStatus == 'live')
-                                  _reportBadge('Live', Colors.grey),
-                                if (r.verificationStatus == 'prefilled')
-                                  _reportBadge('Prefilled', Colors.amber),
-                                if (r.verificationStatus == 'verifying')
-                                  _reportBadge('Verifying', Colors.blueGrey),
-                                if (r.verificationStatus == 'verified')
-                                  _reportBadge('Verified', Colors.green),
-                                if (r.verificationStatus == 'needs_review')
-                                  _reportBadge('Needs Review', Colors.red),
+                                  _reportBadge('Log Updated', Colors.blue)
+                                else if (r.hadBackfillData)
+                                  _reportBadge('Backfill', Colors.amber)
+                                else
+                                  _reportBadge('Normal', Colors.grey),
+                                // 3. Verification pipeline status -- Manual
+                                // only, since Automatic reports are never
+                                // checked against a device log.
+                                if (r.sessionMode == 'device') ...[
+                                  if (r.verificationStatus == 'live' ||
+                                      r.verificationStatus == 'prefilled')
+                                    _reportBadge('Pending', Colors.grey)
+                                  else if (r.verificationStatus == 'verifying')
+                                    _reportBadge('Verifying', Colors.blueGrey)
+                                  else if (r.verificationStatus == 'verified')
+                                    _reportBadge('Verified', Colors.green)
+                                  else if (r.verificationStatus ==
+                                      'needs_review')
+                                    _reportBadge('Needs Review', Colors.red),
+                                ],
                                 if (r.sessionMode == 'device' &&
                                     formatDeviceSessionLabel(
                                             r.controlUnitMac,

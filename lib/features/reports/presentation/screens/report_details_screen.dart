@@ -271,31 +271,30 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
-                  // Only for Manual -- every Automatic report is always
-                  // 'live' (verification never runs on it), so the badge
-                  // would just be noise there. For Manual it's meaningful:
-                  // distinguishes "never needed recovery" from
-                  // Prefilled/Verifying/Verified/Needs Review.
-                  if (report.sessionMode == 'device' &&
-                      report.verificationStatus == 'live')
+                  // Data composition -- independent of verificationStatus
+                  // below, which gets overwritten to verifying/verified/
+                  // needs_review once the log-check pipeline picks the
+                  // report up and no longer says whether it started out
+                  // backfilled. Shown for both modes.
+                  if (report.amended)
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
+                        color: Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.grey.shade300),
+                        border: Border.all(color: Colors.blue.shade200),
                       ),
                       child: Text(
-                        'Live',
+                        'Log Updated',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade700,
+                          color: Colors.blue.shade800,
                         ),
                       ),
-                    ),
-                  if (report.verificationStatus == 'prefilled')
+                    )
+                  else if (report.hadBackfillData)
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
@@ -305,15 +304,57 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         border: Border.all(color: Colors.amber.shade200),
                       ),
                       child: Text(
-                        'Prefilled',
+                        'Backfill',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           color: Colors.amber.shade900,
                         ),
                       ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        'Normal',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
                     ),
-                  if (report.verificationStatus == 'verifying')
+                  // Verification pipeline status -- Manual only, since
+                  // Automatic reports are never checked against a device
+                  // log.
+                  if (report.sessionMode == 'device' &&
+                      (report.verificationStatus == 'live' ||
+                          report.verificationStatus == 'prefilled'))
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        'Pending',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  if (report.sessionMode == 'device' &&
+                      report.verificationStatus == 'verifying')
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
@@ -345,7 +386,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         ],
                       ),
                     ),
-                  if (report.verificationStatus == 'verified')
+                  if (report.sessionMode == 'device' &&
+                      report.verificationStatus == 'verified')
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
@@ -371,7 +413,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         ],
                       ),
                     ),
-                  if (report.verificationStatus == 'needs_review')
+                  if (report.sessionMode == 'device' &&
+                      report.verificationStatus == 'needs_review')
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
