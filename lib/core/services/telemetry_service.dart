@@ -1107,6 +1107,7 @@ class TelemetryService {
           deviceInPlot: p['device_in_plot'] as bool?,
           leftSolenoidState: (p['left_solenoid_state'] as num?)?.toInt(),
           rightSolenoidState: (p['right_solenoid_state'] as num?)?.toInt(),
+          isBuffered: p['is_buffered'] == true,
         ));
       }
       if (restored.isEmpty) return;
@@ -1192,6 +1193,7 @@ class TelemetryService {
               'device_in_plot': e.deviceInPlot,
               'left_solenoid': e.leftSolenoidState,
               'right_solenoid': e.rightSolenoidState,
+              'is_buffered': e.isBuffered,
             })
         .toList();
   }
@@ -1247,6 +1249,13 @@ class _LatLonEntry {
   final bool? deviceInPlot;
   final int? leftSolenoidState;
   final int? rightSolenoidState;
+  // Recovered via /backfill after a connectivity gap rather than arriving
+  // live. Only ever true for points that came from restoreTrackFromBackend
+  // (the live WS path never sees backfilled points at all -- see that
+  // method's doc comment). Lets the Monitoring screen exclude these from
+  // its live heatmap/trajectory instead of drawing a gap's worth of
+  // coverage all at once the moment the app resyncs after reconnecting.
+  final bool isBuffered;
   _LatLonEntry({
     required this.timestamp,
     required this.lat,
@@ -1258,6 +1267,7 @@ class _LatLonEntry {
     this.deviceInPlot,
     this.leftSolenoidState,
     this.rightSolenoidState,
+    this.isBuffered = false,
   });
 }
 

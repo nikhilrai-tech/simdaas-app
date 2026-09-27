@@ -279,6 +279,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         final uid = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
         ref.invalidate(eq_provs.controlUnitsProvider(uid));
         ref.invalidate(activeSessionsListProvider);
+        if (e.event == 'START') {
+          // Wipe whatever GPS trail accumulated while idle before this
+          // session started -- otherwise it would all suddenly appear at
+          // once as soon as manualIdleBarVisible flips off and rendering
+          // resumes (positions was never cleared just for sitting idle,
+          // only on session end).
+          svc.clearCache(normId);
+          positions = svc.getPositions(normId);
+        }
         setState(() => _manualBusy = false);
       });
       _sessionAckSub = svc.deviceSessionAckStream(normId).listen((ack) {
@@ -930,6 +939,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     // showing (the Manual idle bar used to be part of this too -- its
     // Start control now lives in the title instead of a full-width banner).
     final topBannerVisible = cooldownBannerShown;
+    // Manual, idle (no session) -- suppress trajectory/heatmap rendering so
+    // idle movement (e.g. driving to the field before starting) never gets
+    // drawn as spray coverage or an outside-plot line. Real coverage
+    // resumes the moment a session actually starts (Automatic is
+    // unaffected -- it has no idle-vs-session distinction here).
+    //
+    // Also drop backfilled points (a connectivity gap recovered via
+    // /backfill mid-session, then pulled in by restoreTrackFromBackend on
+    // reconnect/app-resume) from the LIVE view -- otherwise the whole gap
+    // suddenly draws as a heatmap/line the instant the app resyncs, even
+    // though nobody watched it happen live. The finished report is
+    // unaffected: it reads the session's full trajectory independently and
+    // already has its own Recovered-overlay treatment for these points.
+    final mapPositions = manualIdleBarVisible
+        ? const <Map<String, dynamic>>[]
+        : positions.where((p) => p['is_buffered'] != true).toList();
     if (topBannerVisible) {
       _scheduleTopBannerMeasurement();
     } else if (_topBannerHeight != null) {
@@ -1182,7 +1207,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                   PolygonLayer(
                     polygons: RowLineCoverage.buildHeatmapCoverageBands(
                       rowLines: plot.rowLines!,
-                      insidePoints: _buildInsideTrackPoints(positions, plot),
+                      insidePoints: _buildInsideTrackPoints(mapPositions, plot),
                       rowSpacing: plot.rowSpacing ?? 3.0,
                       heatmapType: _selectedHeatmap,
                     ),
@@ -1195,16 +1220,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                 ],
                 // Outside-plot trajectory lines only (inside → no line, filled
                 // rows above handle the inside visualization).
-                if (widget.deviceId != null && positions.isNotEmpty) ...[
+                if (widget.deviceId != null && mapPositions.isNotEmpty) ...[
                   PolylineLayer(
-                      polylines:
-                          _buildColoredPolylinesFromPositions(positions, plot)),
+                      polylines: _buildColoredPolylinesFromPositions(
+                          mapPositions, plot)),
                 ],
-                if (widget.deviceId != null && positions.isNotEmpty)
+                if (widget.deviceId != null && mapPositions.isNotEmpty)
                   MarkerLayer(markers: [
                     Marker(
-                        point: LatLng((positions.first['lat'] as num).toDouble(),
-                            (positions.first['lon'] as num).toDouble()),
+                        point: LatLng((mapPositions.first['lat'] as num).toDouble(),
+                            (mapPositions.first['lon'] as num).toDouble()),
                         width: 36,
                         height: 36,
                         child: const Icon(Icons.flag,
