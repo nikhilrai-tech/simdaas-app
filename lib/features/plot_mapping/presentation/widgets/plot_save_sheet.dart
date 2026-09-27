@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/features/plot_mapping/data/models/plot_model.dart';
-import 'package:simdaas/core/utils/error_utils.dart';
 import '../providers/plot_providers.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 
-/// Shows the save-field bottom sheet and performs save.
-/// Returns the saved [PlotModel] on success, null otherwise.
+/// Shows the save-field bottom sheet and builds the resulting [PlotModel]
+/// from what the user entered. Does NOT save it -- the caller (map_screen.dart)
+/// does that via BackgroundSaveService so the map screen can show a
+/// dismissible buffering banner instead of blocking on the network call.
+/// Returns null if the sheet was cancelled.
 Future<PlotModel?> showPlotSaveSheet(
     BuildContext context,
     WidgetRef ref,
@@ -72,7 +74,7 @@ Future<PlotModel?> showPlotSaveSheet(
     treeCount = null;
   }
 
-  final model = PlotModel(
+  return PlotModel(
       id: existingPlot?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
       name: resMap['name'] ?? '',
       bedHeight: (resMap['bedHeight'] ?? '').isEmpty
@@ -85,26 +87,6 @@ Future<PlotModel?> showPlotSaveSheet(
       userId: owner,
       rowLines: existingPlot?.rowLines,
   );
-
-  final repo = ref.read(plotRepoProvider);
-  PlotModel savedModel = model;
-  try {
-    if (existingPlot != null) {
-      await repo.updatePlot(model);
-    } else {
-      savedModel = await repo.addPlot(model);
-    }
-  } catch (e) {
-    if (context.mounted) {
-      showPolishedError(context, e, fallback: 'Error saving plot');
-    }
-    return null;
-  }
-
-  final currentUserId =
-      ref.read(authServiceProvider).currentUserId ?? 'demo_user';
-  ref.invalidate(plotsListProvider(currentUserId));
-  return savedModel;
 }
 
 // ---------------------------------------------------------------------------
