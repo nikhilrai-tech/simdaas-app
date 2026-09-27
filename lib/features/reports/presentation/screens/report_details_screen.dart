@@ -258,19 +258,6 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       ),
                     ),
                   ),
-                  if (report.sessionMode == 'device' &&
-                      formatDeviceSessionLabel(
-                              report.controlUnitMac, report.deviceSessionId) !=
-                          null)
-                    Text(
-                      formatDeviceSessionLabel(
-                          report.controlUnitMac, report.deviceSessionId)!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
                   // Data composition -- independent of verificationStatus
                   // below, which gets overwritten to verifying/verified/
                   // needs_review once the log-check pipeline picks the
@@ -430,6 +417,20 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           fontWeight: FontWeight.w600,
                           color: Colors.red.shade800,
                         ),
+                      ),
+                    ),
+                  // MAC+session-ID label goes last, after every badge.
+                  if (report.sessionMode == 'device' &&
+                      formatDeviceSessionLabel(
+                              report.controlUnitMac, report.deviceSessionId) !=
+                          null)
+                    Text(
+                      formatDeviceSessionLabel(
+                          report.controlUnitMac, report.deviceSessionId)!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                 ],
