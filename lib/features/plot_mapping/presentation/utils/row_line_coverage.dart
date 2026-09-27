@@ -30,6 +30,11 @@ class RowLineCoverage {
   /// How many telemetry samples inside a sub-band counts as "one pass".
   static const double samplesPerPass = 3.0;
 
+  /// A corridor whose measured gap exceeds rowSpacing by more than this is
+  /// treated as "a row is missing here" rather than a genuine tapering
+  /// field — see the anomalous-gap check in [buildHeatmapCoverageBands].
+  static const double _anomalousGapMultiplier = 4.0;
+
   /// Build coverage band polygons (the colored strips between tree rows).
   ///
   /// Each band lives in the corridor between rowLines[i] and rowLines[i+1].
@@ -145,23 +150,31 @@ class RowLineCoverage {
     // is tracked separately for the start and end and interpolated by
     // position (t) along the corridor for every point, instead of one flat
     // number.
-    final corridors = List<_CorridorGeometry?>.filled(
-        rowLines.length - 1, null);
+    // A growable list rather than one fixed slot per rowLines pair — an
+    // anomalous or explicitly-deleted gap (below) produces TWO independent
+    // edge-band corridors out of what would normally be a single slot, and
+    // nothing past this point relies on a corridor's index lining up with
+    // its position in rowLines, only on iterating every corridor that
+    // exists.
+    final corridors = <_CorridorGeometry?>[];
     for (int ri = 0; ri < rowLines.length - 1; ri++) {
       final rowA = rowLines[ri];
       final rowB = rowLines[ri + 1];
-      if (rowA.length < 2 || rowB.length < 2) continue;
+      final aReal = rowA.length >= 2;
+      final bReal = rowB.length >= 2;
+      if (!aReal && !bReal) continue; // both rows missing — no corridor here
 
-      final midStart = _lerp(rowA[0], rowB[0], 0.5);
-      final midEnd   = _lerp(rowA[1], rowB[1], 0.5);
-
-      final segLen = RowLineGenerator
-          .pointToSegmentInfo(midStart, midStart, midEnd)
-          .segmentLengthMeters;
-      if (segLen < 0.5) continue;
-
-      final numSub =
-          (segLen / subSegmentLengthMeters).ceil().clamp(1, 1000).toInt();
+      if (!aReal || !bReal) {
+        // Exactly one row is missing (an explicit deleted-row placeholder,
+        // or the field boundary) — a narrow band hugging whichever row is
+        // real, row_spacing wide, instead of stretching all the way to a
+        // row that no longer has a defined position. The genuinely empty
+        // stretch in between two such bands gets no credit at all — there's
+        // no way to know real spraying happened there since the dividing
+        // row's true position is gone.
+        corridors.add(_edgeCorridorGeometry(aReal ? rowA : rowB, rowSpacing));
+        continue;
+      }
 
       final gapStart =
           RowLineGenerator.pointToSegmentInfo(rowA[0], rowB[0], rowB[0])
@@ -169,17 +182,38 @@ class RowLineCoverage {
       final gapEnd =
           RowLineGenerator.pointToSegmentInfo(rowA[1], rowB[1], rowB[1])
               .distance;
-      final fallback = rowSpacing / 2;
-      final halfWidthStart = gapStart > 0.1 ? gapStart / 2 : fallback;
-      final halfWidthEnd = gapEnd > 0.1 ? gapEnd / 2 : fallback;
 
-      corridors[ri] = _CorridorGeometry(
+      // A row deleted between two others leaves no trace in THIS pair's own
+      // measurement — a plot mapped before the row-delete button existed
+      // (or edited some other way) can have a genuine gap this large with
+      // no placeholder marking it. Real tapering fields stay within a few
+      // times rowSpacing at their widest observed so far, so anything
+      // beyond that is treated the same as an explicit deleted-row
+      // placeholder: two independent edge bands (one per side) instead of
+      // one merged corridor spanning the whole gap.
+      if (gapStart > rowSpacing * _anomalousGapMultiplier ||
+          gapEnd > rowSpacing * _anomalousGapMultiplier) {
+        corridors.add(_edgeCorridorGeometry(rowA, rowSpacing));
+        corridors.add(_edgeCorridorGeometry(rowB, rowSpacing));
+        continue;
+      }
+
+      final midStart = _lerp(rowA[0], rowB[0], 0.5);
+      final midEnd = _lerp(rowA[1], rowB[1], 0.5);
+      final segLen = RowLineGenerator
+          .pointToSegmentInfo(midStart, midStart, midEnd)
+          .segmentLengthMeters;
+      if (segLen < 0.5) continue;
+      final numSub =
+          (segLen / subSegmentLengthMeters).ceil().clamp(1, 1000).toInt();
+      final fallback = rowSpacing / 2;
+      corridors.add(_CorridorGeometry(
         midStart: midStart,
         midEnd: midEnd,
-        halfWidthStart: halfWidthStart,
-        halfWidthEnd: halfWidthEnd,
+        halfWidthStart: gapStart > 0.1 ? gapStart / 2 : fallback,
+        halfWidthEnd: gapEnd > 0.1 ? gapEnd / 2 : fallback,
         numSub: numSub,
-      );
+      ));
     }
 
     final n = corridors.length;
@@ -474,6 +508,30 @@ class RowLineCoverage {
     final px = -dy / len * halfWidthMeters;
     final py =  dx / len * halfWidthMeters;
     return LatLng(py / mPerDeg, px / (cosLat * mPerDeg));
+  }
+
+  /// A narrow corridor hugging a single real row line's own position,
+  /// row_spacing wide — used where the row on the other side is missing
+  /// (deleted, or an anomalously large unmarked gap) so there's no second
+  /// line to measure a real gap against. Flat width, not tapered: there's
+  /// nothing on the far side to interpolate a taper toward.
+  static _CorridorGeometry? _edgeCorridorGeometry(
+      List<LatLng> row, double rowSpacing) {
+    if (row.length < 2) return null;
+    final segLen = RowLineGenerator
+        .pointToSegmentInfo(row[0], row[0], row[1])
+        .segmentLengthMeters;
+    if (segLen < 0.5) return null;
+    final numSub =
+        (segLen / subSegmentLengthMeters).ceil().clamp(1, 1000).toInt();
+    final halfWidth = rowSpacing / 2;
+    return _CorridorGeometry(
+      midStart: row[0],
+      midEnd: row[1],
+      halfWidthStart: halfWidth,
+      halfWidthEnd: halfWidth,
+      numSub: numSub,
+    );
   }
 
   static LatLng _lerp(LatLng a, LatLng b, double t) => LatLng(
