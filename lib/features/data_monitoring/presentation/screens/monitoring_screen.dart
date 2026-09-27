@@ -1379,11 +1379,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             ),
 
             // ── Manual mode: online but no session running ─────────────────
+            // right: 96 leaves the top-right overlay-menu button (a fixed
+            // Positioned(top: 12, right: 12) 80px-wide card, further below)
+            // clear of the banner instead of buried under its full-width
+            // background.
             if (manualIdleBarVisible)
               Positioned(
                 top: 0,
                 left: 0,
-                right: 0,
+                right: 96,
                 child: KeyedSubtree(
                   key: _topBannerKey,
                   child: _buildManualIdleBar(),
@@ -1397,7 +1401,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               Positioned(
                 top: 0,
                 left: 0,
-                right: 0,
+                right: 96,
                 child: KeyedSubtree(
                   key: _topBannerKey,
                   child: _buildCooldownBanner(_cooldownState!),
