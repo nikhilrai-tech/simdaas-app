@@ -71,6 +71,11 @@ class Report {
   // numbers didn't match the device's own log, or why verification
   // couldn't complete (e.g. the log file was never found).
   final String? verificationNote;
+  // True if any of this session's GPS points were ever recovered via
+  // /backfill -- independent of verificationStatus, which gets overwritten
+  // to verifying/verified/needs_review once the log-check pipeline picks
+  // the report up and no longer says whether it started out backfilled.
+  final bool hadBackfillData;
 
   const Report({
     this.plotId,
@@ -113,6 +118,7 @@ class Report {
     this.controlUnitMac,
     this.verificationStatus,
     this.verificationNote,
+    this.hadBackfillData = false,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,
