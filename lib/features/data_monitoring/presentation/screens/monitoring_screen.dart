@@ -944,8 +944,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     // drawn as spray coverage or an outside-plot line. Real coverage
     // resumes the moment a session actually starts (Automatic is
     // unaffected -- it has no idle-vs-session distinction here).
-    final mapPositions =
-        manualIdleBarVisible ? const <Map<String, dynamic>>[] : positions;
+    //
+    // Also drop backfilled points (a connectivity gap recovered via
+    // /backfill mid-session, then pulled in by restoreTrackFromBackend on
+    // reconnect/app-resume) from the LIVE view -- otherwise the whole gap
+    // suddenly draws as a heatmap/line the instant the app resyncs, even
+    // though nobody watched it happen live. The finished report is
+    // unaffected: it reads the session's full trajectory independently and
+    // already has its own Recovered-overlay treatment for these points.
+    final mapPositions = manualIdleBarVisible
+        ? const <Map<String, dynamic>>[]
+        : positions.where((p) => p['is_buffered'] != true).toList();
     if (topBannerVisible) {
       _scheduleTopBannerMeasurement();
     } else if (_topBannerHeight != null) {
