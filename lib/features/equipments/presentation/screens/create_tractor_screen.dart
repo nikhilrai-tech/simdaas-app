@@ -1,11 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/equipment_providers.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'dart:convert';
-import 'package:simdaas/core/services/api_exception.dart';
-import 'package:simdaas/core/utils/api_error.dart';
-import 'package:simdaas/core/utils/api_error_ui.dart';
+import 'package:simdaas/core/services/background_save_service.dart';
+import 'package:simdaas/core/widgets/buffered_save_banner.dart';
 
 // Small helper to keep PageView pages alive so their FormState is available
 class _KeepAlive extends StatefulWidget {
@@ -49,7 +49,7 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
   String _axleLengthUnit = 'm';
   final _pageController = PageController();
   int _currentPage = 0;
-  bool _isSaving = false;
+  final _bufferedSave = BufferedSaveController();
 
   @override
   void dispose() {
@@ -58,6 +58,7 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
     _screwsInWheel.dispose();
     _axleLength.dispose();
     _pageController.dispose();
+    _bufferedSave.dispose();
     super.dispose();
   }
 
@@ -124,6 +125,9 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
   void initState() {
     super.initState();
     _pageKeys = List.generate(4, (_) => GlobalKey<FormState>());
+    _bufferedSave.addListener(() {
+      if (mounted) setState(() {});
+    });
     if (widget.existingData != null) {
       final ex = widget.existingData!;
       // Prefill controllers once (do not set in build to avoid overwriting user input)
@@ -405,7 +409,7 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                         Expanded(
                           flex: 2,
                           child: ElevatedButton(
-                            onPressed: _isSaving
+                            onPressed: _bufferedSave.isSaving
                                 ? null
                                 : () async {
                                     // validate current page
@@ -509,8 +513,15 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                     final currentUserId = ref
                                         .read(authServiceProvider)
                                         .currentUserId;
-                                    try {
-                                      setState(() => _isSaving = true);
+
+                                    // Buffered save: see BackgroundSaveService's
+                                    // doc comment -- fires the network call
+                                    // without blocking this screen on it, so a
+                                    // slow/hung request no longer looks like
+                                    // nothing happened if the user navigates
+                                    // away before it resolves.
+                                    _bufferedSave.start();
+                                    Future<void> saveAction() async {
                                       if (isEditing) {
                                         final id = widget.existingData!['id']
                                                 as String? ??
@@ -546,35 +557,26 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                                         };
                                         await ctrl.add(data);
                                       }
-                                      if (!mounted) return;
-                                      // hide spinner and show success snackbar
-                                      if (mounted)
-                                        setState(() => _isSaving = false);
-                                      final msg = isEditing
-                                          ? 'Tractor updated'
-                                          : 'Tractor added';
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                              SnackBar(content: Text(msg)));
-                                      await Future.delayed(
-                                          const Duration(milliseconds: 700));
-                                      if (!mounted) return;
-                                      debugPrint(
-                                          'CreateTractorScreen: save successful');
-                                      navigator.pop(true);
-                                    } catch (e) {
-                                      if (e is ApiException) {
-                                        final err = ApiError.fromResponse(
-                                            e.statusCode, e.body);
-                                        showApiErrorSnackBar(context, err);
-                                      } else {
-                                        showGenericErrorSnackBar(
-                                            context, e.toString());
-                                      }
-                                    } finally {
-                                      if (mounted)
-                                        setState(() => _isSaving = false);
                                     }
+
+                                    unawaited(ref
+                                        .read(backgroundSaveServiceProvider)
+                                        .run(
+                                          action: saveAction,
+                                          successMessage: isEditing
+                                              ? 'Tractor updated'
+                                              : 'Tractor added',
+                                          onSuccess: () async {
+                                            if (mounted) navigator.pop(true);
+                                          },
+                                          onSettled: [
+                                            () {
+                                              if (mounted) {
+                                                _bufferedSave.finish();
+                                              }
+                                            },
+                                          ],
+                                        ));
                                   },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
@@ -590,15 +592,17 @@ class _CreateTractorScreenState extends ConsumerState<CreateTractorScreen> {
                   ),
                 ],
               ),
-              if (_isSaving)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black45,
-                    child: const Center(
-                      child: CircularProgressIndicator(),
-                    ),
-                  ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: BufferedSaveBanner(
+                  controller: _bufferedSave,
+                  label: isEditing
+                      ? 'Updating tractor…'
+                      : 'Adding tractor…',
                 ),
+              ),
             ],
           ),
         ));

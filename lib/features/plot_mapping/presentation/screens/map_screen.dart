@@ -10,8 +10,12 @@ import 'package:simdaas/core/services/geocoding_service.dart';
 import 'package:latlong2/latlong.dart';
 // plot providers/imports moved to helper where needed
 import '../providers/map_state_providers.dart';
+import '../providers/plot_providers.dart';
 // Plot model and auth service used in save helper
 import 'package:simdaas/core/services/location_service.dart';
+import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/services/background_save_service.dart';
+import 'package:simdaas/core/widgets/buffered_save_banner.dart';
 import '../../data/models/plot_model.dart';
 import '../widgets/plot_save_sheet.dart';
 import '../widgets/map_layers.dart';
@@ -42,6 +46,7 @@ class MapScreen extends ConsumerStatefulWidget {
 
 class _MapScreenState extends ConsumerState<MapScreen> {
   final MapController _mapController = MapController();
+  final _bufferedSave = BufferedSaveController();
   bool _locatingDevice = false;
   bool _isSatelliteView = true;
   // Latest fix from MapLayers' own live MyLocationLayer stream. Reused by
@@ -180,6 +185,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void initState() {
     super.initState();
+    _bufferedSave.addListener(() {
+      if (mounted) setState(() {});
+    });
     // Initialize polygon state
     try {
       if (widget.initialPoints != null && widget.initialPoints!.isNotEmpty) {
@@ -237,6 +245,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _searchCtrl.removeListener(_onSearchChanged);
     _searchCtrl.dispose();
     _searchFocus.dispose();
+    _bufferedSave.dispose();
     super.dispose();
   }
 
@@ -400,38 +409,76 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // update stored points to normalized
     ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
 
-    final savedPlot =
-        await showPlotSaveSheet(context, ref, normalizedPoints, _computeAreaHa, existingPlot: widget.existingPlot);
-    if (savedPlot != null && mounted) {
-      final goToRowLine = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('AB Line Plotting'),
-          content: const Text(
-              'Plot saved successfully. Do you want to proceed to AB line (row line) plotting now?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Skip'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Proceed'),
-            ),
-          ],
+    final pendingModel = await showPlotSaveSheet(
+        context, ref, normalizedPoints, _computeAreaHa,
+        existingPlot: widget.existingPlot);
+    if (pendingModel == null) return;
+
+    final repo = ref.read(plotRepoProvider);
+    final isEditing = widget.existingPlot != null;
+    var savedModel = pendingModel;
+
+    // Buffered save: see BackgroundSaveService's doc comment. The AB-line
+    // prompt below only fires from onSuccess, using the confirmed saved
+    // model -- if the user discards/navigates away before the save actually
+    // completes, they simply don't get prompted here (never builds row
+    // lines on a plot that may not have been created).
+    _bufferedSave.start();
+    Future<void> saveAction() async {
+      if (isEditing) {
+        await repo.updatePlot(pendingModel);
+      } else {
+        savedModel = await repo.addPlot(pendingModel);
+      }
+    }
+
+    unawaited(ref.read(backgroundSaveServiceProvider).run(
+      action: saveAction,
+      successMessage: isEditing ? 'Plot updated' : 'Plot saved',
+      onSuccess: () async {
+        final currentUserId =
+            ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+        ref.invalidate(plotsListProvider(currentUserId));
+        if (!mounted) return;
+        await _promptRowLinePlotting(savedModel);
+      },
+      onSettled: [
+        () {
+          if (mounted) _bufferedSave.finish();
+        },
+      ],
+    ));
+  }
+
+  Future<void> _promptRowLinePlotting(PlotModel savedPlot) async {
+    final goToRowLine = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('AB Line Plotting'),
+        content: const Text(
+            'Plot saved successfully. Do you want to proceed to AB line (row line) plotting now?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Skip'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Proceed'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (goToRowLine == true) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => RowLineScreen(plot: savedPlot),
         ),
       );
-      if (!mounted) return;
-      if (goToRowLine == true) {
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => RowLineScreen(plot: savedPlot),
-          ),
-        );
-        if (mounted) Navigator.of(context).pop(true);
-      } else {
-        Navigator.of(context).pop(true);
-      }
+      if (mounted) Navigator.of(context).pop(true);
+    } else {
+      if (mounted) Navigator.of(context).pop(true);
     }
   }
 
@@ -783,7 +830,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   ]),
                 ),
               ),
-            )
+            ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: BufferedSaveBanner(
+              controller: _bufferedSave,
+              label: widget.existingPlot != null
+                  ? 'Updating plot…'
+                  : 'Saving plot…',
+            ),
+          ),
         ],
       ),
       floatingActionButton: Column(
@@ -791,7 +849,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         children: [
           FloatingActionButton(
             heroTag: 'save_plot',
-            onPressed: _saveField,
+            onPressed: _bufferedSave.isSaving ? null : _saveField,
             child: const Icon(Icons.save),
           ),
           const SizedBox(height: 12),
