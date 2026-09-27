@@ -561,39 +561,185 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     return 12 + (_topBannerHeight ?? 52);
   }
 
-  /// Shown at the top for Manual devices that are online but have no session.
-  Widget _buildManualIdleBar() {
+  /// "Ongoing" status chip shown in the AppBar title itself (Manual mode,
+  /// session actually running) -- purely a status indicator, no action.
+  /// Start/End themselves are PopupMenuItems in the overlay menu (see
+  /// itemBuilder) so there's one consistent place ("the toggle button") for
+  /// the actions, with just the live state surfaced in the title.
+  Widget _buildTitleSessionStatus({required bool ongoing}) {
+    if (!ongoing) return const SizedBox.shrink();
     return Container(
-      color: Colors.blueGrey.shade800.withValues(alpha: 0.95),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: SafeArea(
-        bottom: false,
-        child: Row(
-          children: [
-            const Icon(Icons.pan_tool_alt_outlined, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text(
-                'Manual mode — no session running.\nStart one here, or hold the RIGHT button on the sprayer for 5 s.',
-                style: TextStyle(color: Colors.white, fontSize: 12, height: 1.3),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: _manualBusy ? null : _startManualSession,
-              icon: _manualBusy
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.play_arrow_rounded, size: 18),
-              label: const Text('Start Session'),
-            ),
-          ],
-        ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.green.withAlpha(40),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.greenAccent, width: 1),
       ),
+      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.circle, size: 8, color: Colors.greenAccent),
+        SizedBox(width: 4),
+        Text('Ongoing',
+            style: TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold)),
+      ]),
     );
+  }
+
+  /// Requests a Stop on the device's active session (Manual) or ends it
+  /// outright (Automatic), after a confirmation dialog. Was previously
+  /// inline in the overlay menu's 'end_session' handler.
+  Future<void> _endSession({
+    required int? resolvedActiveSessionId,
+    required bool isManualMode,
+    required String? resolvedControlUnitName,
+  }) async {
+    debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
+    int? sessionIdToEnd = resolvedActiveSessionId;
+
+    if (sessionIdToEnd == null) {
+      debugPrint('MonitoringScreen: resolvedActiveSessionId is null, attempting fallback lookup...');
+      try {
+        // FORCE REFRESH to ensure we have the latest active sessions
+        final sessions = await ref.refresh(activeSessionsListProvider.future);
+        debugPrint('MonitoringScreen: Fetched ${sessions.length} active sessions');
+
+        if (sessions.isNotEmpty) {
+          final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
+          debugPrint('MonitoringScreen: Searching for MAC=$normId or jobId=${widget.jobId}');
+
+          for (final s in sessions) {
+            final sId = s['id'];
+            final sJob = s['job']?.toString();
+            final sMac = (s['control_unit_mac'] ?? s['mac_addr'] ?? s['mac_address'])?.toString();
+            final normSMac = sMac != null ? canonicalizeMac(sMac) : null;
+
+            debugPrint('MonitoringScreen: Checking session ID=$sId, Job=$sJob, MAC=$sMac (Norm=$normSMac)');
+
+            if (normId != null && normSMac == normId) {
+              debugPrint('MonitoringScreen: Match found by MAC!');
+              sessionIdToEnd = sId as int?;
+              break;
+            }
+
+            if (widget.jobId != null && sJob == widget.jobId) {
+              debugPrint('MonitoringScreen: Match found by JobID!');
+              sessionIdToEnd = sId as int?;
+              break;
+            }
+          }
+
+          // Absolute fallback: if only 1 active session in the whole system for this user, assume it's the one
+          if (sessionIdToEnd == null && sessions.length == 1) {
+            debugPrint('MonitoringScreen: Single session fallback used.');
+            sessionIdToEnd = sessions.first['id'] as int?;
+          }
+        } else {
+          debugPrint('MonitoringScreen: activeSessionsList returned empty.');
+        }
+      } catch (e) {
+        debugPrint('MonitoringScreen: Error during session fallback: $e');
+      }
+    } else {
+      debugPrint('MonitoringScreen: Using already resolvedActiveSessionId=$sessionIdToEnd');
+    }
+
+    if (sessionIdToEnd == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No active session ID found.')));
+      }
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              title: const Text('End Session?'),
+              content: Text(isManualMode
+                  ? 'Stop the running session on ${resolvedControlUnitName ?? "this device"}? The stop is sent to the sprayer and the session ends when it confirms.'
+                  : 'Are you sure you want to end the active session for ${resolvedControlUnitName ?? "this device"}?'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('End')),
+              ],
+            ));
+    if (confirmed == true) {
+      try {
+        final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
+        final endedNow = await ref
+            .read(eq_provs.equipmentControllerProvider)
+            .endSession(sessionIdToEnd, deviceId: deviceMac);
+
+        // Manual mode: only a stop was *requested* — the sprayer
+        // closes its own session, so nothing is cleared or put into
+        // cooldown here; the session_event / report_ready that
+        // follows updates the screen.
+        if (!endedNow) {
+          _messengerKey.currentState?.showSnackBar(const SnackBar(
+            content: Text('Stop sent to the device…'),
+            duration: Duration(seconds: 5),
+          ));
+          return;
+        }
+
+        // 1. Block telemetry on this screen until the cooldown ends
+        //    (cleared automatically when the cooldown stream emits an
+        //    out-of-cooldown state).
+        _sessionEndedManually = true;
+        if (deviceMac != null) {
+          final normMac = canonicalizeMac(deviceMac);
+          // Manual cooldown is 2 min on the backend.
+          _ignoredUntil[normMac] = DateTime.now()
+              .add(const Duration(minutes: 2));
+        }
+
+        // 2. Immediate UI feedback: clear local telemetry state
+        //    and transition to cooldown immediately without waiting
+        //    for the WS event (which may be delayed).
+        final optimisticCooldown = CooldownState(
+          deviceId: deviceMac ?? '',
+          status: DeviceLifecycleStatus.cooldown,
+          cooldownEnd: DateTime.now()
+              .toUtc()
+              .add(const Duration(minutes: 2)),
+          cooldownType: 'manual_end',
+        );
+        setState(() {
+          _clearSessionState();
+          _cooldownState = optimisticCooldown;
+          _startCountdownTimer();
+        });
+        // Push the same optimistic state into the
+        // shared service so other screens (e.g.
+        // Active Devices list) show the cooldown
+        // timer immediately too, instead of
+        // waiting for the backend's WS event.
+        if (deviceMac != null) {
+          ref
+              .read(telemetryServiceProvider)
+              .setCooldownStateOptimistic(
+                  optimisticCooldown);
+        }
+        _showCooldownBannerBriefly();
+
+        // 3. Clear service cache so device is no longer "active".
+        if (deviceMac != null) {
+          ref.read(telemetryServiceProvider).clearCache(deviceMac);
+        }
+
+        // The top cooldown banner already conveys this; no extra
+        // snackbar so we don't get duplicate notifications.
+      } catch (err) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('Error: $err')));
+        }
+      }
+    }
   }
 
   // ── Cooldown banner widget ───────────────────────────────────────────────
@@ -756,8 +902,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     } catch (_) {}
     _isManualMode = isManualMode;
 
-    // Shared with the top-left L/R card and the legend below it, so both
-    // shift down instead of being covered when a top banner is showing.
+    // Manual, online, no session running -- shows a "Start session" item in
+    // the overlay menu (see itemBuilder).
     final manualIdleBarVisible = isManualMode &&
         resolvedActiveSessionId == null &&
         latestTelemetry != null &&
@@ -773,7 +919,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     // DB immediately regardless of reachability.
     final endSessionUnreachable = isManualMode && latestTelemetry == null;
     final endSessionColor = endSessionUnreachable ? Colors.grey : Colors.redAccent;
-    final topBannerVisible = manualIdleBarVisible || cooldownBannerShown;
+    // Manual, has a real active session, and not mid-cooldown -- drives the
+    // "Ongoing" + End control in the AppBar title.
+    final manualSessionOngoing = isManualMode &&
+        resolvedActiveSessionId != null &&
+        !(_cooldownState?.isInCooldown ?? false) &&
+        !cooldownBannerShown;
+    // Shared with the top-left L/R card and the legend below it, so both
+    // shift down instead of being covered when the cooldown banner is
+    // showing (the Manual idle bar used to be part of this too -- its
+    // Start control now lives in the title instead of a full-width banner).
+    final topBannerVisible = cooldownBannerShown;
     if (topBannerVisible) {
       _scheduleTopBannerMeasurement();
     } else if (_topBannerHeight != null) {
@@ -816,11 +972,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                   ),
                 ),
           title: Row(children: [
-            Column(
+            Flexible(
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(resolvedControlUnitName ?? 'Data Monitoring', style: const TextStyle(fontSize: 18)),
+                Text(resolvedControlUnitName ?? 'Data Monitoring',
+                    style: const TextStyle(fontSize: 18),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
                 if (isManualMode)
                   const Text('MANUAL',
                       style: TextStyle(
@@ -871,11 +1031,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     );
                   }),
               ],
+              ),
             ),
+            if (isManualMode && manualSessionOngoing) ...[
+              const SizedBox(width: 8),
+              _buildTitleSessionStatus(ongoing: manualSessionOngoing),
+            ],
             const Spacer(),
             if (latestTelemetry != null) ...[
-              // Signal/GPS status chip
-              Container(
+              // Signal/GPS status chip. Flexible+FittedBox so this shrinks
+              // instead of hard-overflowing on narrow phones now that the
+              // title row also carries the Manual session control.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: Colors.black.withAlpha(220), // Darker, more solid for contrast
@@ -945,6 +1116,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                       );
                     }),
                   ],
+                ),
+                  ),
                 ),
               )
             ]
@@ -1152,152 +1325,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 setState(() {
                                   _selectedHeatmap = HeatmapType.gps;
                                 });
+                              } else if (v == 'start_session') {
+                                _startManualSession();
                               } else if (v == 'end_session') {
-                                debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
-                                int? sessionIdToEnd = resolvedActiveSessionId;
-                                
-                                if (sessionIdToEnd == null) {
-                                  debugPrint('MonitoringScreen: resolvedActiveSessionId is null, attempting fallback lookup...');
-                                  try {
-                                    // FORCE REFRESH to ensure we have the latest active sessions
-                                    final sessions = await ref.refresh(activeSessionsListProvider.future);
-                                    debugPrint('MonitoringScreen: Fetched ${sessions.length} active sessions');
-
-                                    if (sessions.isNotEmpty) {
-                                      final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
-                                      debugPrint('MonitoringScreen: Searching for MAC=$normId or jobId=${widget.jobId}');
-
-                                      for (final s in sessions) {
-                                        final sId = s['id'];
-                                        final sJob = s['job']?.toString();
-                                        final sMac = (s['control_unit_mac'] ?? s['mac_addr'] ?? s['mac_address'])?.toString();
-                                        final normSMac = sMac != null ? canonicalizeMac(sMac) : null;
-                                        
-                                        debugPrint('MonitoringScreen: Checking session ID=$sId, Job=$sJob, MAC=$sMac (Norm=$normSMac)');
-
-                                        if (normId != null && normSMac == normId) {
-                                          debugPrint('MonitoringScreen: Match found by MAC!');
-                                          sessionIdToEnd = sId as int?;
-                                          break;
-                                        }
-
-                                        if (widget.jobId != null && sJob == widget.jobId) {
-                                          debugPrint('MonitoringScreen: Match found by JobID!');
-                                          sessionIdToEnd = sId as int?;
-                                          break;
-                                        }
-                                      }
-
-                                      // Absolute fallback: if only 1 active session in the whole system for this user, assume it's the one
-                                      if (sessionIdToEnd == null && sessions.length == 1) {
-                                        debugPrint('MonitoringScreen: Single session fallback used.');
-                                        sessionIdToEnd = sessions.first['id'] as int?;
-                                      }
-                                    } else {
-                                      debugPrint('MonitoringScreen: activeSessionsList returned empty.');
-                                    }
-                                  } catch (e) {
-                                    debugPrint('MonitoringScreen: Error during session fallback: $e');
-                                  }
-                                } else {
-                                  debugPrint('MonitoringScreen: Using already resolvedActiveSessionId=$sessionIdToEnd');
-                                }
-
-                                if (sessionIdToEnd == null) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No active session ID found.')));
-                                  }
-                                  return;
-                                }
-                                final confirmed = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                          title: const Text('End Session?'),
-                                          content: Text(isManualMode
-                                              ? 'Stop the running session on ${resolvedControlUnitName ?? "this device"}? The stop is sent to the sprayer and the session ends when it confirms.'
-                                              : 'Are you sure you want to end the active session for ${resolvedControlUnitName ?? "this device"}?'),
-                                          actions: [
-                                            TextButton(
-                                                onPressed: () => Navigator.pop(ctx, false),
-                                                child: const Text('Cancel')),
-                                            TextButton(
-                                                onPressed: () => Navigator.pop(ctx, true),
-                                                child: const Text('End')),
-                                          ],
-                                        ));
-                                if (confirmed == true) {
-                                  try {
-                                    final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
-                                    final endedNow = await ref
-                                        .read(eq_provs.equipmentControllerProvider)
-                                        .endSession(sessionIdToEnd, deviceId: deviceMac);
-
-                                    // Manual mode: only a stop was *requested* — the sprayer
-                                    // closes its own session, so nothing is cleared or put into
-                                    // cooldown here; the session_event / report_ready that
-                                    // follows updates the screen.
-                                    if (!endedNow) {
-                                      _messengerKey.currentState?.showSnackBar(const SnackBar(
-                                        content: Text('Stop sent to the device…'),
-                                        duration: Duration(seconds: 5),
-                                      ));
-                                      return;
-                                    }
-
-                                    // 1. Block telemetry on this screen until the cooldown ends
-                                    //    (cleared automatically when the cooldown stream emits an
-                                    //    out-of-cooldown state).
-                                    _sessionEndedManually = true;
-                                    if (deviceMac != null) {
-                                      final normMac = canonicalizeMac(deviceMac);
-                                      // Manual cooldown is 2 min on the backend.
-                                      _ignoredUntil[normMac] = DateTime.now()
-                                          .add(const Duration(minutes: 2));
-                                    }
-
-                                    // 2. Immediate UI feedback: clear local telemetry state
-                                    //    and transition to cooldown immediately without waiting
-                                    //    for the WS event (which may be delayed).
-                                    final optimisticCooldown = CooldownState(
-                                      deviceId: deviceMac ?? '',
-                                      status: DeviceLifecycleStatus.cooldown,
-                                      cooldownEnd: DateTime.now()
-                                          .toUtc()
-                                          .add(const Duration(minutes: 2)),
-                                      cooldownType: 'manual_end',
-                                    );
-                                    setState(() {
-                                      _clearSessionState();
-                                      _cooldownState = optimisticCooldown;
-                                      _startCountdownTimer();
-                                    });
-                                    // Push the same optimistic state into the
-                                    // shared service so other screens (e.g.
-                                    // Active Devices list) show the cooldown
-                                    // timer immediately too, instead of
-                                    // waiting for the backend's WS event.
-                                    if (deviceMac != null) {
-                                      ref
-                                          .read(telemetryServiceProvider)
-                                          .setCooldownStateOptimistic(
-                                              optimisticCooldown);
-                                    }
-                                    _showCooldownBannerBriefly();
-
-                                    // 3. Clear service cache so device is no longer "active".
-                                    if (deviceMac != null) {
-                                      ref.read(telemetryServiceProvider).clearCache(deviceMac);
-                                    }
-
-                                    // The top cooldown banner already conveys this; no extra
-                                    // snackbar so we don't get duplicate notifications.
-                                  } catch (err) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(SnackBar(content: Text('Error: $err')));
-                                    }
-                                  }
-                                }
+                                await _endSession(
+                                  resolvedActiveSessionId: resolvedActiveSessionId,
+                                  isManualMode: isManualMode,
+                                  resolvedControlUnitName: resolvedControlUnitName,
+                                );
                               }
                             },
                             itemBuilder: (ctx) => [
@@ -1344,7 +1379,28 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               const PopupMenuItem(
                                   value: 'spray_on_off',
                                   child: Text('Spray on/off view')),
-                              if (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0) ...[
+                              // Start/End session actions live here (Manual
+                              // idle -> Start, either mode with something
+                              // running -> End) -- the title only shows the
+                              // live "Ongoing" state, not the actions
+                              // themselves.
+                              if (manualIdleBarVisible) ...[
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'start_session',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.play_arrow_rounded,
+                                          color: Colors.green, size: 20),
+                                      const SizedBox(width: 8),
+                                      const Text('Start session'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              if ((isManualMode && manualSessionOngoing) ||
+                                  (!isManualMode &&
+                                      (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0))) ...[
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'end_session',
@@ -1353,10 +1409,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     children: [
                                       Icon(Icons.stop_circle_outlined, color: endSessionColor, size: 20),
                                       const SizedBox(width: 8),
-                                      Text(
-                                        isManualMode ? 'End session' : 'End active device',
-                                        style: TextStyle(color: endSessionColor),
-                                      ),
+                                      Text(isManualMode ? 'End session' : 'End active device'),
                                       if (endSessionUnreachable) ...[
                                         const SizedBox(width: 8),
                                         const Tooltip(
@@ -1378,21 +1431,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               ),
             ),
 
-            // ── Manual mode: online but no session running ─────────────────
-            // right: 96 leaves the top-right overlay-menu button (a fixed
-            // Positioned(top: 12, right: 12) 80px-wide card, further below)
-            // clear of the banner instead of buried under its full-width
-            // background.
-            if (manualIdleBarVisible)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 96,
-                child: KeyedSubtree(
-                  key: _topBannerKey,
-                  child: _buildManualIdleBar(),
-                ),
-              ),
+            // Manual idle state (Start Session) is a menu item in the
+            // overlay menu instead of a full-width banner here.
 
             // ── Cooldown / offline-pending banner ──────────────────────────
             // Shown briefly at the top when a cooldown begins, then auto
