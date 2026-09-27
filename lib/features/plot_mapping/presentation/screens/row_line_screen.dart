@@ -202,17 +202,34 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   /// closer to one neighbor at this end than at the other) is preserved
   /// exactly; only its position *along* the neighbor-to-neighbor axis gets
   /// pulled back if it would cross.
+  /// Walks past deleted rows (empty placeholders left by the row-delete
+  /// button — see [_buildRowDeleteMarkers]) to find the nearest REAL
+  /// neighboring row in [direction] (-1 = toward index 0, +1 = toward the
+  /// end). Without this, a row sitting right next to a deleted one would
+  /// think it has no neighbor on that side at all and skip the
+  /// crossing-prevention check entirely, instead of correctly checking
+  /// against the next real row beyond the gap.
+  List<LatLng>? _nearestRealRow(int fromIdx, int direction) {
+    int i = fromIdx + direction;
+    while (i >= 0 && i < _rowLines.length) {
+      if (_rowLines[i].length > 1) return _rowLines[i];
+      i += direction;
+    }
+    return null;
+  }
+
   LatLng _preventCrossing(int rowIdx, int endIdx, LatLng candidate) {
-    final hasBelow = rowIdx > 0 && _rowLines[rowIdx - 1].length > endIdx;
-    final hasAbove =
-        rowIdx < _rowLines.length - 1 && _rowLines[rowIdx + 1].length > endIdx;
+    final belowRow = _nearestRealRow(rowIdx, -1);
+    final aboveRow = _nearestRealRow(rowIdx, 1);
+    final hasBelow = belowRow != null && belowRow.length > endIdx;
+    final hasAbove = aboveRow != null && aboveRow.length > endIdx;
     if (!hasBelow && !hasAbove) return candidate;
 
     // At a field edge (only one real neighbor), this row's own pivot stands
     // in for the missing side — there's nothing to cross into there anyway,
     // the polygon boundary clamp already covers that direction.
-    final below = hasBelow ? _rowLines[rowIdx - 1][endIdx] : _dragPivot;
-    final above = hasAbove ? _rowLines[rowIdx + 1][endIdx] : _dragPivot;
+    final below = hasBelow ? belowRow[endIdx] : _dragPivot;
+    final above = hasAbove ? aboveRow[endIdx] : _dragPivot;
     if (below == null || above == null) return candidate;
 
     final axisLat = above.latitude - below.latitude;
@@ -249,15 +266,13 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   bool _wouldCrossNeighborSegment(int rowIdx, LatLng candidate) {
     if (_dragPivot == null) return false;
     final pivot = _dragPivot!;
-    bool crosses(List<LatLng> neighbor) {
-      if (neighbor.length < 2) return false;
+    bool crosses(List<LatLng>? neighbor) {
+      if (neighbor == null || neighbor.length < 2) return false;
       return _segmentsIntersect(pivot, candidate, neighbor[0], neighbor[1]);
     }
 
-    if (rowIdx > 0 && crosses(_rowLines[rowIdx - 1])) return true;
-    if (rowIdx < _rowLines.length - 1 && crosses(_rowLines[rowIdx + 1])) {
-      return true;
-    }
+    if (crosses(_nearestRealRow(rowIdx, -1))) return true;
+    if (crosses(_nearestRealRow(rowIdx, 1))) return true;
     return false;
   }
 
@@ -334,7 +349,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   // ── Map overlay builders ─────────────────────────────────────────────────
 
   List<Polyline> _buildRowPolylines() {
-    return _rowLines.map((seg) {
+    return _rowLines.where((seg) => seg.length >= 2).map((seg) {
       return Polyline(
         points: seg,
         color: Colors.yellow.withAlpha(200),
@@ -467,8 +482,15 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           onTap: () => setState(() {
             _draggingRow = null;
             _draggingEnd = null;
-            final newLines = List<List<LatLng>>.from(_rowLines)
-              ..removeAt(rowIdx);
+            // Replace with an empty placeholder rather than removing the
+            // slot outright — this preserves every other row's index and,
+            // crucially, leaves a marker at this exact position so the
+            // coverage heatmap knows a row used to be here and treats the
+            // (now larger) gap to each remaining neighbor as two separate
+            // narrow bands instead of one oversized merged corridor. See
+            // RowLineCoverage.buildHeatmapCoverageBands.
+            final newLines = List<List<LatLng>>.from(_rowLines);
+            newLines[rowIdx] = <LatLng>[];
             _rowLines = newLines;
           }),
           child: Container(
