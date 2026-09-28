@@ -1206,6 +1206,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                       insidePoints: _buildInsideTrackPoints(mapPositions, plot),
                       rowSpacing: plot.rowSpacing ?? 3.0,
                       heatmapType: _selectedHeatmap,
+                      polygon: plot.polygon,
                     ),
                   ),
                   PolylineLayer(
