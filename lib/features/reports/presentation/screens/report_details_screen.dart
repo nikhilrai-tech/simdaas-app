@@ -152,7 +152,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                             ),
                           ),
                           Text(
-                            "Matches the sprayer's own on-device log",
+                            "Matches your sprayer's own record",
                             style: TextStyle(fontSize: 12, color: Colors.white70),
                           ),
                         ],
@@ -456,8 +456,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     Expanded(
                       child: Text(
                         report.verificationNote ??
-                            'This report didn\'t match the device\'s own log '
-                                'and needs review.',
+                            'Some totals in this report don\'t match your sprayer\'s '
+                                'own record.',
                         style: TextStyle(
                             fontSize: 13, color: Colors.red.shade900),
                       ),
