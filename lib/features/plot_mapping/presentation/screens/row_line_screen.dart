@@ -12,6 +12,7 @@ import 'package:simdaas/core/services/location_service.dart';
 import 'package:simdaas/core/widgets/my_location_layer.dart';
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
+import '../utils/corridor_strip.dart';
 import '../utils/row_line_generator.dart';
 
 enum _Mode { guide, manual }
@@ -40,14 +41,12 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   Offset? _lastPointerPos;
   int? _draggingRow;
   int? _draggingEnd; // 0 = start, 1 = end
-  // Captured once when a drag starts: the OTHER endpoint of the row being
-  // dragged (pivot) and the row's length at that moment. Both are held
-  // fixed for the whole gesture so the dragged endpoint can only slide
-  // sideways around the pivot — never lengthen or shorten the row. Taper
-  // (a row closer to one neighbor at one end than the other) still works
-  // fine, since each endpoint is locked independently around its own pivot.
-  LatLng? _dragPivot;
-  double? _dragLockedLength;
+  // Captured when a drag starts: the row as it was, and how far (metres,
+  // positive = to the row's left) the finger has slid it since. A drag moves
+  // the WHOLE row sideways across its corridor (a parallel shift, re-clipped
+  // to the plot boundary) -- it never pivots around the far end.
+  List<LatLng>? _dragOrigRow;
+  double _dragShiftMeters = 0.0;
 
   bool _isSaving = false;
 
@@ -169,46 +168,13 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     }
   }
 
-  // ── Manual-edit constraints (length lock + no crossing) ──────────────────
+  // ── Manual-edit constraints (parallel shift + no crossing) ───────────────
 
-  double _distanceDeg(LatLng a, LatLng b) {
-    final dlat = a.latitude - b.latitude;
-    final dlon = a.longitude - b.longitude;
-    return math.sqrt(dlat * dlat + dlon * dlon);
-  }
-
-  /// Pulls [candidate] back onto a circle of [lockedLength] centred on
-  /// [pivot] — the dragged endpoint can slide all the way around (so the row
-  /// can still taper, closer to a neighbor at one end than the other) but
-  /// can never move the row's total length longer or shorter.
-  LatLng _applyLengthLock(LatLng candidate, LatLng pivot, double lockedLength) {
-    final dlat = candidate.latitude - pivot.latitude;
-    final dlon = candidate.longitude - pivot.longitude;
-    final dist = math.sqrt(dlat * dlat + dlon * dlon);
-    if (dist < 1e-12) return candidate;
-    final scale = lockedLength / dist;
-    return LatLng(
-      pivot.latitude + dlat * scale,
-      pivot.longitude + dlon * scale,
-    );
-  }
-
-  /// Keeps this row's [endIdx] endpoint from crossing past the matching
-  /// endpoint of its immediate neighboring row(s) — so Row 3 can never end
-  /// up sitting where Row 5 used to be, which would otherwise silently
-  /// corrupt the heatmap tolerance for two unrelated corridors at once.
-  ///
-  /// The candidate's sideways deviation (which is what lets a row taper —
-  /// closer to one neighbor at this end than at the other) is preserved
-  /// exactly; only its position *along* the neighbor-to-neighbor axis gets
-  /// pulled back if it would cross.
   /// Walks past deleted rows (empty placeholders left by the row-delete
   /// button — see [_buildRowDeleteMarkers]) to find the nearest REAL
   /// neighboring row in [direction] (-1 = toward index 0, +1 = toward the
-  /// end). Without this, a row sitting right next to a deleted one would
-  /// think it has no neighbor on that side at all and skip the
-  /// crossing-prevention check entirely, instead of correctly checking
-  /// against the next real row beyond the gap.
+  /// end), so a row next to a deleted one is still limited by the next real
+  /// row beyond the gap.
   List<LatLng>? _nearestRealRow(int fromIdx, int direction) {
     int i = fromIdx + direction;
     while (i >= 0 && i < _rowLines.length) {
@@ -218,132 +184,23 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     return null;
   }
 
-  LatLng _preventCrossing(int rowIdx, int endIdx, LatLng candidate) {
-    final belowRow = _nearestRealRow(rowIdx, -1);
-    final aboveRow = _nearestRealRow(rowIdx, 1);
-    final hasBelow = belowRow != null && belowRow.length > endIdx;
-    final hasAbove = aboveRow != null && aboveRow.length > endIdx;
-    if (!hasBelow && !hasAbove) return candidate;
-
-    // At a field edge (only one real neighbor), this row's own pivot stands
-    // in for the missing side — there's nothing to cross into there anyway,
-    // the polygon boundary clamp already covers that direction.
-    final below = hasBelow ? belowRow[endIdx] : _dragPivot;
-    final above = hasAbove ? aboveRow[endIdx] : _dragPivot;
-    if (below == null || above == null) return candidate;
-
-    final axisLat = above.latitude - below.latitude;
-    final axisLon = above.longitude - below.longitude;
-    final axisLenSq = axisLat * axisLat + axisLon * axisLon;
-    if (axisLenSq < 1e-18) return candidate;
-
-    final vLat = candidate.latitude - below.latitude;
-    final vLon = candidate.longitude - below.longitude;
-    final t = (vLat * axisLat + vLon * axisLon) / axisLenSq;
-
-    const margin = 0.05; // keep rows from ever fully touching/crossing
-    final tMin = hasBelow ? margin : -double.infinity;
-    final tMax = hasAbove ? 1 - margin : double.infinity;
-    final tClamped = t.clamp(tMin, tMax);
-    if (tClamped == t) return candidate;
-
-    final perpLat = vLat - t * axisLat;
-    final perpLon = vLon - t * axisLon;
-    return LatLng(
-      below.latitude + tClamped * axisLat + perpLat,
-      below.longitude + tClamped * axisLon + perpLon,
-    );
-  }
-
-  /// Catches the case _preventCrossing's axis-clamp misses: on a tapering
-  /// field, the two endpoints of a row can each individually stay clear of
-  /// their same-side neighbor endpoint, yet the diagonal *connecting* them
-  /// still slices through a neighboring row's line somewhere in the middle.
-  /// Rather than re-projecting (which would pull the point off the
-  /// length-lock circle), an invalid move is simply rejected for this frame
-  /// — the drag holds at the last valid position, so it "stops" right at
-  /// the neighboring line instead of jumping past it.
-  bool _wouldCrossNeighborSegment(int rowIdx, LatLng candidate) {
-    if (_dragPivot == null) return false;
-    final pivot = _dragPivot!;
-    bool crosses(List<LatLng>? neighbor) {
-      if (neighbor == null || neighbor.length < 2) return false;
-      return _segmentsIntersect(pivot, candidate, neighbor[0], neighbor[1]);
-    }
-
-    if (crosses(_nearestRealRow(rowIdx, -1))) return true;
-    if (crosses(_nearestRealRow(rowIdx, 1))) return true;
-    return false;
-  }
-
-  /// True if open segments p1→p2 and q1→q2 cross at an interior point of
-  /// both (shared endpoints / touching don't count as crossing).
-  bool _segmentsIntersect(LatLng p1, LatLng p2, LatLng q1, LatLng q2) {
-    final rLat = p2.latitude - p1.latitude;
-    final rLon = p2.longitude - p1.longitude;
-    final sLat = q2.latitude - q1.latitude;
-    final sLon = q2.longitude - q1.longitude;
-    final denom = rLat * sLon - rLon * sLat;
-    if (denom.abs() < 1e-18) return false; // parallel
-    final qpLat = q1.latitude - p1.latitude;
-    final qpLon = q1.longitude - p1.longitude;
-    final t = (qpLat * sLon - qpLon * sLat) / denom;
-    final u = (qpLat * rLon - qpLon * rLat) / denom;
-    const eps = 1e-9;
-    return t > eps && t < 1 - eps && u > eps && u < 1 - eps;
-  }
-
-  // ── Boundary snapping helpers ────────────────────────────────────────────
-
-  LatLng _clampToBoundary(LatLng point, List<LatLng> polygon) {
-    if (polygon.length < 3) return point;
-    if (_isInsidePolygon(point, polygon)) return point;
-    LatLng nearest = polygon.first;
-    double minDistSq = double.infinity;
-    for (int i = 0; i < polygon.length; i++) {
-      final a = polygon[i];
-      final b = polygon[(i + 1) % polygon.length];
-      final c = _nearestPointOnSegment(point, a, b);
-      final d = _distanceSq(point, c);
-      if (d < minDistSq) {
-        minDistSq = d;
-        nearest = c;
+  /// Allowed sideways range (metres, positive = row's left) for shifting
+  /// [orig], so it can't cross or touch its nearest real neighbours.
+  ({double lower, double upper}) _shiftLimits(int rowIdx, List<LatLng> orig) {
+    const gap = 0.3;
+    var lower = -double.infinity, upper = double.infinity;
+    for (final dir in const [-1, 1]) {
+      final nb = _nearestRealRow(rowIdx, dir);
+      if (nb == null) continue;
+      final d0 = RowLineGeometry.signedDistance(orig, nb[0]);
+      final d1 = RowLineGeometry.signedDistance(orig, nb[1]);
+      if (d0 > 0 && d1 > 0) {
+        upper = math.min(upper, math.min(d0, d1) - gap);
+      } else if (d0 < 0 && d1 < 0) {
+        lower = math.max(lower, math.max(d0, d1) + gap);
       }
     }
-    return nearest;
-  }
-
-  bool _isInsidePolygon(LatLng p, List<LatLng> poly) {
-    int crossings = 0;
-    for (int i = 0; i < poly.length; i++) {
-      final a = poly[i];
-      final b = poly[(i + 1) % poly.length];
-      if (((a.longitude <= p.longitude) && (p.longitude < b.longitude)) ||
-          ((b.longitude <= p.longitude) && (p.longitude < a.longitude))) {
-        final lat = a.latitude +
-            (p.longitude - a.longitude) *
-                (b.latitude - a.latitude) /
-                (b.longitude - a.longitude);
-        if (p.latitude < lat) crossings++;
-      }
-    }
-    return crossings.isOdd;
-  }
-
-  LatLng _nearestPointOnSegment(LatLng p, LatLng a, LatLng b) {
-    final dx = b.latitude - a.latitude;
-    final dy = b.longitude - a.longitude;
-    if (dx == 0 && dy == 0) return a;
-    final t = ((p.latitude - a.latitude) * dx + (p.longitude - a.longitude) * dy) /
-        (dx * dx + dy * dy);
-    final tc = t.clamp(0.0, 1.0);
-    return LatLng(a.latitude + tc * dx, a.longitude + tc * dy);
-  }
-
-  double _distanceSq(LatLng a, LatLng b) {
-    final dlat = a.latitude - b.latitude;
-    final dlon = a.longitude - b.longitude;
-    return dlat * dlat + dlon * dlon;
+    return (lower: lower, upper: upper);
   }
 
   // ── Map overlay builders ─────────────────────────────────────────────────
@@ -378,15 +235,8 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 _draggingRow = rowIdx;
                 _draggingEnd = endIdx;
                 _lastPointerPos = ev.position;
-                final seg = _rowLines[rowIdx];
-                final fixedIdx = endIdx == 0 ? 1 : 0;
-                if (fixedIdx < seg.length) {
-                  _dragPivot = seg[fixedIdx];
-                  _dragLockedLength = _distanceDeg(seg[endIdx], seg[fixedIdx]);
-                } else {
-                  _dragPivot = null;
-                  _dragLockedLength = null;
-                }
+                _dragOrigRow = List<LatLng>.from(_rowLines[rowIdx]);
+                _dragShiftMeters = 0.0;
               });
             },
             onPointerMove: (ev) {
@@ -400,33 +250,31 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 final currLocal = box.globalToLocal(ev.position);
                 final lastLL = camera.offsetToCrs(Offset(lastLocal.dx, lastLocal.dy));
                 final currLL = camera.offsetToCrs(Offset(currLocal.dx, currLocal.dy));
-                final dLat = currLL.latitude - lastLL.latitude;
-                final dLon = currLL.longitude - lastLL.longitude;
+                final orig = _dragOrigRow;
+                if (orig == null || orig.length < 2) return;
+                // Finger movement (metres, east/north) projected onto the
+                // row's own left-normal = how far it moved ACROSS the row.
+                final cosLat = math.cos(orig[0].latitude * math.pi / 180.0);
+                final dx = (currLL.longitude - lastLL.longitude) * cosLat * 111320.0;
+                final dy = (currLL.latitude - lastLL.latitude) * 111320.0;
+                final n = RowLineGeometry.leftNormal(orig);
+                final limits = _shiftLimits(rowIdx, orig);
+                final target = (_dragShiftMeters + dx * n.x + dy * n.y)
+                    .clamp(limits.lower, limits.upper)
+                    .toDouble();
+                final shifted = RowLineGeometry.shiftRow(
+                  row: orig,
+                  lateralMeters: target,
+                  polygon: widget.plot.polygon,
+                );
                 setState(() {
-                  final newSeg = List<LatLng>.from(_rowLines[rowIdx]);
-                  var moved = LatLng(
-                    newSeg[endIdx].latitude + dLat,
-                    newSeg[endIdx].longitude + dLon,
-                  );
-                  // 1. Length lock — pull the point back onto a circle of the
-                  // original row length, centred on the OTHER (fixed) end.
-                  if (_dragPivot != null && _dragLockedLength != null) {
-                    moved = _applyLengthLock(
-                        moved, _dragPivot!, _dragLockedLength!);
-                  }
-                  // 2. No crossing — never let this endpoint pass a
-                  // neighboring row's matching endpoint.
-                  moved = _preventCrossing(rowIdx, endIdx, moved);
-                  // 3. Full-line crossing — if the diagonal from the fixed
-                  // pivot to this new position would still slice through a
-                  // neighboring row somewhere in the middle, reject this
-                  // frame's move and hold the last valid position instead.
-                  if (_wouldCrossNeighborSegment(rowIdx, moved)) {
-                    moved = newSeg[endIdx];
-                  }
-                  newSeg[endIdx] = _clampToBoundary(moved, widget.plot.polygon);
-                  _rowLines = List<List<LatLng>>.from(_rowLines)..[rowIdx] = newSeg;
                   _lastPointerPos = ev.position;
+                  // Shifted out of the plot entirely: hold the last valid
+                  // position instead of letting the row leave the field.
+                  if (shifted == null) return;
+                  _dragShiftMeters = target;
+                  _rowLines = List<List<LatLng>>.from(_rowLines)
+                    ..[rowIdx] = shifted;
                 });
               } catch (_) {
                 _lastPointerPos = ev.position;
@@ -436,15 +284,15 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               _draggingRow = null;
               _draggingEnd = null;
               _lastPointerPos = null;
-              _dragPivot = null;
-              _dragLockedLength = null;
+              _dragOrigRow = null;
+              _dragShiftMeters = 0.0;
             }),
             onPointerCancel: (_) => setState(() {
               _draggingRow = null;
               _draggingEnd = null;
               _lastPointerPos = null;
-              _dragPivot = null;
-              _dragLockedLength = null;
+              _dragOrigRow = null;
+              _dragShiftMeters = 0.0;
             }),
             child: Container(
               width: 28,
@@ -686,7 +534,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           child: Text(
             _rowLines.isEmpty
                 ? 'Switch to Guide Line mode to generate rows first.'
-                : 'Drag orange handles to adjust endpoints. Tap the red ✕ to delete a row.',
+                : 'Drag an orange handle to slide the whole row sideways. Tap the red ✕ to delete a row.',
             style: const TextStyle(fontSize: 13),
           ),
         ),
