@@ -23,6 +23,15 @@ class ConnectivityService {
   int _consecutiveFailures = 0;
   DateTime? _lastProbeAt;
   String _lastProbeStatus = 'unknown';
+  // The platform connectivity plugin can fire onConnectivityChanged
+  // repeatedly for the same state (seen: every 1-3s, without any real
+  // transition) -- each firing used to re-run the full 4-stage internet
+  // probe AND, downstream in main.dart's isOnlineStreamProvider listener,
+  // a full re-subscribe + per-device status reconcile for every control
+  // unit on the account, over and over, competing with whatever the app
+  // was actually trying to do. Only actually emitting on a real state
+  // change stops that cascade at the source.
+  bool? _lastEmitted;
 
   /// Timestamp of the last probe, or null if none yet.
   DateTime? get lastProbeAt => _lastProbeAt;
@@ -33,6 +42,14 @@ class ConnectivityService {
   /// Number of consecutive probe failures recorded by the service.
   int get consecutiveFailures => _consecutiveFailures;
 
+  /// Emits [value] on [_onlineController] only if it actually differs from
+  /// the last emitted value -- see [_lastEmitted].
+  void _emit(bool value) {
+    if (_lastEmitted == value) return;
+    _lastEmitted = value;
+    _onlineController.add(value);
+  }
+
   void _init() {
     debugPrint('ConnectivityService: initializing');
     // seed initial value with an active internet probe for accuracy
@@ -41,13 +58,13 @@ class ConnectivityService {
       if (res == ConnectivityResult.none) {
         _consecutiveFailures = 0;
         debugPrint('ConnectivityService: connectivity NONE -> emitting false');
-        _onlineController.add(false);
+        _emit(false);
       } else {
         final ok = await _verifyInternet();
         _emitOnline(ok);
       }
     }).catchError((_) {
-      _onlineController.add(false);
+      _emit(false);
     });
 
     // listen for connectivity type changes; when a network becomes
@@ -61,7 +78,7 @@ class ConnectivityService {
           _consecutiveFailures = 0;
           debugPrint(
               'ConnectivityService: connectivity NONE (onChange) -> emitting false');
-          _onlineController.add(false);
+          _emit(false);
         } else {
           final ok = await _verifyInternet();
           _emitOnline(ok);
@@ -76,7 +93,7 @@ class ConnectivityService {
         debugPrint('ConnectivityService: probe succeeded, resetting failures');
       _consecutiveFailures = 0;
       debugPrint('ConnectivityService: emitting true (online)');
-      _onlineController.add(true);
+      _emit(true);
     } else {
       _consecutiveFailures++;
       debugPrint(
@@ -86,7 +103,7 @@ class ConnectivityService {
       if (_consecutiveFailures >= 2) {
         debugPrint(
             'ConnectivityService: emitting false (offline) after $_consecutiveFailures failures');
-        _onlineController.add(false);
+        _emit(false);
       } else {
         debugPrint(
             'ConnectivityService: waiting for another failure before emitting offline');
