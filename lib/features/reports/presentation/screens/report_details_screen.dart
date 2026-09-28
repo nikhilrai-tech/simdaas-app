@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
+import 'package:simdaas/core/utils/gps_jump_detector.dart';
 import '../../domain/report.dart';
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
@@ -855,6 +856,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   polylines:
                       _buildHeatmapPolylines(report.trajectory, report.plot),
                 ),
+                if (_heatmapType == HeatmapType.gps)
+                  PolylineLayer(
+                    polylines: _buildGpsJumpLines(report.trajectory),
+                  ),
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -1352,6 +1357,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
@@ -1359,6 +1365,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
       if (!isInPlot) continue;
+
+      // Whether this point is an implausible GPS jump from the PREVIOUS
+      // in-plot point in this list (see GpsJumpDetector) -- own list, own
+      // consecutive pairs, so a stretch driven outside the plot in between
+      // (a real gap, not a glitch) doesn't get mistaken for one.
+      final isJump = prev != null &&
+          GpsJumpDetector.isJump(
+              LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp);
+      prev = p;
+
       // The backend now records a GPS point on every telemetry packet while
       // spraying (see session_service.py's should_record), so trajectory is
       // as dense as what the live Monitoring screen draws from — no need to
@@ -1373,9 +1389,20 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         leftSolenoidOn: p.leftSolenoidState == 1,
         rightSolenoidOn: p.rightSolenoidState == 1,
         isBuffered: p.isBuffered,
+        isJumpFromPrevious: isJump,
       ));
     }
     return result;
+  }
+
+  // Pink dashed segments marking implausible GPS jumps in the raw
+  // trajectory -- shown on the GPS heatmap only, regardless of plot
+  // membership. See GpsJumpDetector.
+  List<Polyline> _buildGpsJumpLines(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpLines(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
   }
 
   List<Polyline> _buildHeatmapPolylines(
@@ -1430,6 +1457,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         final prev = trajectory[i - 1];
         if (p.timestamp.difference(prev.timestamp).inSeconds > 30) {
           flush(strokeWidth: 6.0);
+        } else if (GpsJumpDetector.isJump(
+            LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp)) {
+          // An implausible GPS jump is drawn separately (see
+          // _buildGpsJumpLines), never bridged into this continuous track.
+          flush();
         }
       }
 
@@ -1590,6 +1622,10 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
               PolylineLayer(
                 polylines: _buildHeatmapPolylines(report.trajectory, report.plot),
               ),
+              if (_heatmapType == HeatmapType.gps)
+                PolylineLayer(
+                  polylines: _buildGpsJumpLines(report.trajectory),
+                ),
               if (points.isNotEmpty)
                 MarkerLayer(
                   markers: [
@@ -1830,6 +1866,7 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
@@ -1837,6 +1874,16 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
       if (!isInPlot) continue;
+
+      // Whether this point is an implausible GPS jump from the PREVIOUS
+      // in-plot point in this list (see GpsJumpDetector) -- own list, own
+      // consecutive pairs, so a stretch driven outside the plot in between
+      // (a real gap, not a glitch) doesn't get mistaken for one.
+      final isJump = prev != null &&
+          GpsJumpDetector.isJump(
+              LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp);
+      prev = p;
+
       // The backend now records a GPS point on every telemetry packet while
       // spraying (see session_service.py's should_record), so trajectory is
       // as dense as what the live Monitoring screen draws from — no need to
@@ -1851,9 +1898,20 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         leftSolenoidOn: p.leftSolenoidState == 1,
         rightSolenoidOn: p.rightSolenoidState == 1,
         isBuffered: p.isBuffered,
+        isJumpFromPrevious: isJump,
       ));
     }
     return result;
+  }
+
+  // Pink dashed segments marking implausible GPS jumps in the raw
+  // trajectory -- shown on the GPS heatmap only, regardless of plot
+  // membership. See GpsJumpDetector.
+  List<Polyline> _buildGpsJumpLines(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpLines(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
   }
 
   List<Polyline> _buildHeatmapPolylines(
@@ -1908,6 +1966,11 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         final prev = trajectory[i - 1];
         if (p.timestamp.difference(prev.timestamp).inSeconds > 30) {
           flush(strokeWidth: 6.0);
+        } else if (GpsJumpDetector.isJump(
+            LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp)) {
+          // An implausible GPS jump is drawn separately (see
+          // _buildGpsJumpLines), never bridged into this continuous track.
+          flush();
         }
       }
 

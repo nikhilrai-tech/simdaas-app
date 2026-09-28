@@ -451,8 +451,11 @@ class RowLineCoverage {
           : HeatmapColorUtils.getColorForInsidePoint(pt, heatmapType);
 
       // Fill every sub-band from the previous in-corridor index to this one
-      // so that GPS sampling gaps don't leave blank stripes.
-      final prev = prevIdxInCorridor[ri];
+      // so that GPS sampling gaps don't leave blank stripes -- except across
+      // an implausible GPS jump (see GpsJumpDetector), where bridging the
+      // gap would paint the jump itself as if it had been sprayed.
+      final prev =
+          pt.isJumpFromPrevious ? null : prevIdxInCorridor[ri];
       final lo = prev != null ? math.min(prev, idx) : idx;
       final hi = prev != null ? math.max(prev, idx) : idx;
 
