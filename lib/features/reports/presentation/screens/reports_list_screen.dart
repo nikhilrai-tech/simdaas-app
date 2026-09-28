@@ -46,7 +46,13 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final reportsAsync = ref.watch(reportsListProvider);
+    final reportsAsync = ref.watch(reportsListProvider(ReportsPageParams(
+      page: _currentPage + 1,
+      pageSize: _pageSize,
+      plotId: _selectedPlotId,
+      controlUnitId: _selectedControlUnitId,
+      sortAscending: _sortAscending,
+    )));
 
     return Scaffold(
       appBar: AppBar(
@@ -78,27 +84,10 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
             child: RefreshIndicator(
               onRefresh: _refreshData,
         child: reportsAsync.when(
-          data: (reports) {
-            // Apply filtering
-            var filtered = reports;
-            if (_selectedPlotId != null) {
-              filtered = filtered.where((r) => r.plotId == _selectedPlotId).toList();
-            }
-            if (_selectedControlUnitId != null) {
-              filtered = filtered.where((r) => r.controlUnitId == _selectedControlUnitId).toList();
-            }
+          data: (data) {
+            final pageItems = data.reports;
 
-            // Apply sorting
-            final sorted = List.from(filtered);
-            sorted.sort((a, b) {
-              if (_sortAscending) {
-                return a.createdAt.compareTo(b.createdAt);
-              } else {
-                return b.createdAt.compareTo(a.createdAt);
-              }
-            });
-
-            if (sorted.isEmpty) {
+            if (pageItems.isEmpty && data.totalCount == 0) {
               return ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 children: [
@@ -120,10 +109,18 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                 ],
               );
             }
-            final pageCount = (sorted.length / _pageSize).ceil();
-            final page = _currentPage.clamp(0, pageCount - 1);
-            final pageItems =
-                sorted.skip(page * _pageSize).take(_pageSize).toList();
+            final pageCount = (data.totalCount / _pageSize).ceil();
+            final page = _currentPage;
+            // The count shrank (e.g. a report was deleted, or a filter
+            // change landed while a deeper page was in view) enough that
+            // this page no longer exists -- back off to the last real one
+            // instead of showing an empty/broken page.
+            if (page >= pageCount) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _currentPage = pageCount - 1);
+              });
+              return const Center(child: CircularProgressIndicator());
+            }
 
             return Column(
               children: [
@@ -278,15 +275,27 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
               ],
             );
           },
-          error: (err, stack) => ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            children: [
-              SizedBox(
-                height: MediaQuery.of(context).size.height * 0.7,
-                child: Center(child: Text('Error: $err')),
-              ),
-            ],
-          ),
+          error: (err, stack) {
+            // A page number past the last one (backend 404s it) means the
+            // list shrank out from under a deep page -- back off to page 1
+            // instead of showing a raw error for what isn't really a
+            // failure.
+            if (_currentPage > 0) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _currentPage = 0);
+              });
+              return const Center(child: CircularProgressIndicator());
+            }
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.7,
+                  child: Center(child: Text('Error: $err')),
+                ),
+              ],
+            );
+          },
           loading: () => const Center(child: CircularProgressIndicator()),
         ),
       ),

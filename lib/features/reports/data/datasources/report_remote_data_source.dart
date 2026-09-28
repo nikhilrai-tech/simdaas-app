@@ -3,7 +3,17 @@ import 'package:simdaas/core/services/api_service.dart';
 import '../models/report_model.dart';
 
 abstract class ReportRemoteDataSource {
-  Future<List<ReportModel>> getReports();
+  /// One page straight from the backend's own pagination/filtering --
+  /// replaces the old walk-every-page-then-filter-client-side approach,
+  /// which fetched an account's entire report history (seen on staging:
+  /// 800+ reports, ~18 sequential requests) just to show 10 of them.
+  Future<({List<ReportModel> reports, int totalCount})> getReportsPage({
+    required int page,
+    required int pageSize,
+    String? plotId,
+    String? controlUnitId,
+    bool sortAscending = false,
+  });
   Future<ReportModel> getReport(String id);
   Future<void> deleteReport(String id);
   Future<ReportModel> updateReportDetails(String id,
@@ -15,45 +25,45 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
   ReportRemoteDataSourceImpl(this.api);
 
   @override
-  Future<List<ReportModel>> getReports() async {
+  Future<({List<ReportModel> reports, int totalCount})> getReportsPage({
+    required int page,
+    required int pageSize,
+    String? plotId,
+    String? controlUnitId,
+    bool sortAscending = false,
+  }) async {
     try {
-      final reports = <ReportModel>[];
-      // Walk the backend's own pagination (page_size=50, matching its
-      // default) instead of asking for everything in one page_size=200
-      // request -- with enough reports on an account that single request
-      // gets slow enough to hit "Failed to fetch" outright. Smaller pages
-      // keep every individual request fast and reliable.
-      String? path = '/jobs/api/reports/?page_size=50';
-      while (path != null) {
-        final response = await api.getJson(path);
-        // Backend now returns a paginated dict: { count, next, previous,
-        // results }. Fall back to a plain list for forward/backwards
-        // compatibility.
-        if (response is Map && response['results'] is List) {
-          final results = response['results'] as List;
-          reports.addAll(results.map((e) => ReportModel.fromJson(e)));
-          final next = response['next'];
-          path = next is String ? _relativePath(next) : null;
-        } else if (response is List) {
-          reports.addAll(response.map((e) => ReportModel.fromJson(e)));
-          path = null;
-        } else {
-          path = null;
-        }
+      final params = <String, String>{
+        'page': '$page',
+        'page_size': '$pageSize',
+        'ordering': sortAscending ? 'created_at' : '-created_at',
+        if (plotId != null) 'plot': plotId,
+        if (controlUnitId != null) 'control_unit': controlUnitId,
+      };
+      final query = params.entries
+          .map((e) =>
+              '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}')
+          .join('&');
+      final response = await api.getJson('/jobs/api/reports/?$query');
+      if (response is Map && response['results'] is List) {
+        final results = (response['results'] as List)
+            .map((e) => ReportModel.fromJson(e))
+            .toList();
+        final count = response['count'];
+        return (
+          reports: results,
+          totalCount: count is int ? count : results.length,
+        );
       }
-      return reports;
+      if (response is List) {
+        final results = response.map((e) => ReportModel.fromJson(e)).toList();
+        return (reports: results, totalCount: results.length);
+      }
+      return (reports: <ReportModel>[], totalCount: 0);
     } catch (e) {
-      debugPrint('Error fetching reports: $e');
+      debugPrint('Error fetching reports page: $e');
       rethrow;
     }
-  }
-
-  /// The backend's `next` link is an absolute URL (DRF's
-  /// build_absolute_uri()). ApiService.getJson always prepends its own
-  /// baseUrl, so only the path+query is passed back in for the next call.
-  String _relativePath(String nextUrl) {
-    final uri = Uri.parse(nextUrl);
-    return uri.query.isEmpty ? uri.path : '${uri.path}?${uri.query}';
   }
 
   @override
