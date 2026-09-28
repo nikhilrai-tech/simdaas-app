@@ -26,7 +26,6 @@ import 'features/equipments/presentation/screens/create_control_unit_screen.dart
 import 'features/equipments/presentation/screens/create_tractor_screen.dart';
 import 'features/equipments/presentation/screens/create_sprayer_screen.dart';
 import 'features/home/presentation/screens/technician_dashboard_screen.dart';
-import 'features/home/presentation/screens/job_reports_screen.dart';
 import 'features/home/presentation/screens/settings_screen.dart';
 import 'features/auth/presentation/screens/register_screen.dart';
 import 'features/auth/presentation/screens/verify_email_screen.dart';
@@ -154,7 +153,6 @@ class MyApp extends StatelessWidget {
         '/job_supervisor_dashboard': (ctx) =>
             const JobSupervisorDashboardScreen(),
         '/technician_dashboard': (ctx) => const TechnicianDashboardScreen(),
-        '/job_reports': (ctx) => const JobReportsScreen(),
         '/settings': (ctx) => const SettingsScreen(),
         '/map': (ctx) => const MapScreen(),
         '/jobs': (ctx) => const JobPlannerScreen(),
