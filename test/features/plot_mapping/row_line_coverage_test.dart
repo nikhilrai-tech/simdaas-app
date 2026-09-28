@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
+import 'package:simdaas/features/plot_mapping/presentation/utils/corridor_strip.dart';
 import 'package:simdaas/features/plot_mapping/presentation/utils/row_line_coverage.dart';
 
 const _mPerDeg = 111320.0;
@@ -161,6 +162,98 @@ void main() {
     }
   });
 
+  group('polygon-aware corridors', () {
+    // 100 m x 100 m square plot at lat 20. Rows run north-south at x = 30 m
+    // (full length) and x = 60 m (SHORT: only the northern half).
+    const lat0 = 20.0, lon0 = 73.0;
+    final cosLat = math.cos(lat0 * math.pi / 180);
+    LatLng at(double x, double y) =>
+        LatLng(lat0 + y / _mPerDeg, lon0 + x / (_mPerDeg * cosLat));
+    final square = [at(0, 0), at(100, 0), at(100, 100), at(0, 100)];
+    final rows = [
+      [at(30, 0), at(30, 100)],
+      [at(60, 50), at(60, 100)],
+    ];
+
+    double bandsArea(List<dynamic> bands) =>
+        bands.fold<double>(0, (s, b) => s + _areaSqm(b.points));
+
+    test('sweeping every corridor, incl. outer strips, fills the whole plot', () {
+      final track = [
+        for (var x = 5.0; x < 100; x += 5)
+          for (var y = 0.0; y <= 100; y += 1.5) _pt(at(x, y).latitude, at(x, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bandsArea(bands), closeTo(10000.0, 300.0));
+    });
+
+    test('a short row does not shorten its corridor', () {
+      // Sprayer drives up the middle of the x=30..60 corridor from the very
+      // start of the plot, well before the short row (y >= 50) begins.
+      final track = [
+        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(45, y).latitude, at(45, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      final minLat = bands
+          .expand((b) => b.points)
+          .map((p) => p.latitude)
+          .reduce(math.min);
+      expect((minLat - lat0) * _mPerDeg, lessThan(3.0)); // starts at the plot edge
+    });
+
+    test('the stretch between the plot boundary and the first row is a corridor', () {
+      final track = [
+        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(10, y).latitude, at(10, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bands, isNotEmpty);
+      for (final b in bands) {
+        for (final p in b.points) {
+          final x = (p.longitude - lon0) * cosLat * _mPerDeg;
+          expect(x, inInclusiveRange(-0.5, 30.5)); // boundary .. first row
+        }
+      }
+    });
+
+    test('bands never leave a concave plot', () {
+      // L-shaped plot: the bottom-right quarter is missing.
+      final l = [at(0, 0), at(50, 0), at(50, 50), at(100, 50), at(100, 100), at(0, 100)];
+      final track = [
+        for (var x = 5.0; x < 100; x += 5)
+          for (var y = 0.0; y <= 100; y += 1.5)
+            if (_inPoly(at(x, y), l)) _pt(at(x, y).latitude, at(x, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: l);
+      expect(bands, isNotEmpty);
+      expect(bandsArea(bands), lessThan(7600.0)); // plot is 7500 m2
+      for (final b in bands) {
+        for (final p in b.points) {
+          expect(_inPoly(p, l) || _minEdgeDist(p, l) < 0.5, isTrue,
+              reason: 'band corner $p is outside the plot');
+        }
+      }
+    });
+  });
   group('GPS-jump gap-fill suppression', () {
     // Two north-south rows 4 m apart, 200 m long.
     const lat0 = 20.0, lon0 = 73.0;
@@ -221,6 +314,45 @@ void main() {
         return sum + (lats.reduce(math.max) - lats.reduce(math.min));
       });
       expect(coveredLength, greaterThan(100.0));
+    });
+  });
+  group('RowLineGeometry.shiftRow', () {
+    const lat0 = 20.0, lon0 = 73.0;
+    final cosLat = math.cos(lat0 * math.pi / 180);
+    LatLng at(double x, double y) =>
+        LatLng(lat0 + y / _mPerDeg, lon0 + x / (_mPerDeg * cosLat));
+    final square = [at(0, 0), at(100, 0), at(100, 100), at(0, 100)];
+    // North-south row: its left side is WEST (-x).
+    final row = [at(30, 0), at(30, 100)];
+
+    test('slides the whole row sideways and keeps both ends on the boundary', () {
+      final moved = RowLineGeometry.shiftRow(
+          row: row, lateralMeters: 10, polygon: square)!;
+      for (final p in moved) {
+        expect((p.longitude - lon0) * cosLat * _mPerDeg, closeTo(20.0, 0.05));
+      }
+      expect((moved[0].latitude - lat0) * _mPerDeg, closeTo(0.0, 0.05));
+      expect((moved[1].latitude - lat0) * _mPerDeg, closeTo(100.0, 0.05));
+    });
+
+    test('a short row is lengthened to the plot boundary when shifted', () {
+      final short = [at(60, 50), at(60, 100)];
+      final moved = RowLineGeometry.shiftRow(
+          row: short, lateralMeters: -5, polygon: square)!;
+      expect((moved[0].latitude - lat0) * _mPerDeg, closeTo(0.0, 0.05));
+      expect((moved[1].latitude - lat0) * _mPerDeg, closeTo(100.0, 0.05));
+      expect((moved[0].longitude - lon0) * cosLat * _mPerDeg, closeTo(65.0, 0.05));
+    });
+
+    test('shifting out of the plot returns null', () {
+      expect(
+          RowLineGeometry.shiftRow(row: row, lateralMeters: 40, polygon: square),
+          isNull);
+    });
+
+    test('signedDistance is positive on the row\'s left', () {
+      expect(RowLineGeometry.signedDistance(row, at(20, 50)), closeTo(10.0, 0.05));
+      expect(RowLineGeometry.signedDistance(row, at(45, 50)), closeTo(-15.0, 0.05));
     });
   });
 }

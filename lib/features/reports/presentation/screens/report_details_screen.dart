@@ -831,6 +831,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           report.trajectory, report.plot),
                       rowSpacing: report.plot!.rowSpacing ?? 3.0,
                       heatmapType: _heatmapType,
+                      polygon: report.plot!.polygon,
                     ),
                   ),
                   if (_heatmapType == HeatmapType.gps && _showBackfillOverlay)
@@ -841,6 +842,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                             report.trajectory, report.plot),
                         rowSpacing: report.plot!.rowSpacing ?? 3.0,
                         heatmapType: _heatmapType,
+                        polygon: report.plot!.polygon,
                         asBackfillOverlay: true,
                       ),
                     ),
@@ -1299,32 +1301,28 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   Widget _backfillToggleChip() {
+    final on = _showBackfillOverlay;
     return InkWell(
       onTap: () => setState(() => _showBackfillOverlay = !_showBackfillOverlay),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: _showBackfillOverlay
-              ? Colors.deepPurpleAccent.withValues(alpha: 0.12)
-              : Colors.transparent,
+          color: on ? const Color(0xFF262626) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.deepPurpleAccent),
+          border: Border.all(color: const Color(0xFF262626)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              _showBackfillOverlay ? Icons.visibility : Icons.visibility_off,
-              size: 14,
-              color: Colors.deepPurpleAccent,
-            ),
+            Icon(on ? Icons.visibility : Icons.visibility_off,
+                size: 14, color: on ? Colors.white : Colors.black87),
             const SizedBox(width: 6),
-            const Text(
+            Text(
               'Backfill',
               style: TextStyle(
+                color: on ? Colors.white : Colors.black87,
+                fontWeight: on ? FontWeight.bold : FontWeight.normal,
                 fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.deepPurpleAccent,
               ),
             ),
           ],
@@ -1601,6 +1599,7 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                     insidePoints: _buildInsideTrackPoints(report.trajectory, report.plot),
                     rowSpacing: report.plot!.rowSpacing ?? 3.0,
                     heatmapType: _heatmapType,
+                    polygon: report.plot!.polygon,
                   ),
                 ),
                 if (_heatmapType == HeatmapType.gps && _showBackfillOverlay)
@@ -1610,6 +1609,7 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                       insidePoints: _buildInsideTrackPoints(report.trajectory, report.plot),
                       rowSpacing: report.plot!.rowSpacing ?? 3.0,
                       heatmapType: _heatmapType,
+                      polygon: report.plot!.polygon,
                       asBackfillOverlay: true,
                     ),
                   ),
@@ -1830,16 +1830,15 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   }
 
   Widget _backfillToggleChip() {
+    final on = _showBackfillOverlay;
     return GestureDetector(
       onTap: () => setState(() => _showBackfillOverlay = !_showBackfillOverlay),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: _showBackfillOverlay
-              ? Colors.deepPurpleAccent.withOpacity(0.15)
-              : Colors.white.withOpacity(0.6),
+          color: on ? Colors.white : Colors.white.withOpacity(0.6),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.deepPurpleAccent),
+          border: Border.all(color: on ? Colors.black : Colors.white70),
           boxShadow: [
             BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
           ],
@@ -1847,18 +1846,15 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              _showBackfillOverlay ? Icons.visibility : Icons.visibility_off,
-              size: 14,
-              color: Colors.deepPurpleAccent,
-            ),
+            Icon(on ? Icons.visibility : Icons.visibility_off,
+                size: 14, color: Colors.black87),
             const SizedBox(width: 6),
-            const Text(
+            Text(
               'Backfill',
               style: TextStyle(
+                color: Colors.black87,
+                fontWeight: on ? FontWeight.bold : FontWeight.normal,
                 fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.deepPurpleAccent,
               ),
             ),
           ],

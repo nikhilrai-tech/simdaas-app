@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 
+import 'corridor_strip.dart';
 import 'row_line_generator.dart';
 
 /// Builds the visual layers for spray coverage on the plot map.
@@ -125,9 +126,19 @@ class RowLineCoverage {
     // GPS/Speed/Spray/Left-Right bands this function already produces are
     // untouched either way, this is purely additive.
     bool asBackfillOverlay = false,
+    // The plot boundary. When given, every corridor runs the full width of
+    // the plot (bounded by the row LINES, not by how long each stored
+    // segment happens to be), the stretch between the plot boundary and the
+    // first/last row is a corridor too, and bands are cut by the boundary.
+    // Without it the older behaviour is kept: corridors exist only where
+    // both row segments overlap.
+    List<LatLng>? polygon,
   }) {
     if (rowLines.length < 2) return const [];
     final bands = <Polygon>[];
+    final plane = (polygon != null && polygon.length >= 3)
+        ? MetricPlane.around(polygon)
+        : null;
 
     // Precompute every corridor's geometry up front (instead of inline,
     // inside the loop below) so that while processing corridor `ri` we can
@@ -172,7 +183,10 @@ class RowLineCoverage {
         // stretch in between two such bands gets no credit at all — there's
         // no way to know real spraying happened there since the dividing
         // row's true position is gone.
-        corridors.add(_edgeCorridorGeometry(aReal ? rowA : rowB, rowSpacing));
+        final realRow = aReal ? rowA : rowB;
+        corridors.add(plane != null
+            ? _ribbonCorridor(plane, polygon!, realRow, rowSpacing / 2)
+            : _edgeCorridorGeometry(realRow, rowSpacing));
         continue;
       }
 
@@ -186,9 +200,20 @@ class RowLineCoverage {
       // the stretch of a shared axis where BOTH exist, so every measurement
       // below is the true perpendicular gap between the two row lines.
       final aligned = _alignRows(rowA, rowB);
-      if (aligned == null) continue;
-      final gapStart = aligned.gapStart;
-      final gapEnd = aligned.gapEnd;
+      final strip = plane != null
+          ? CorridorStrip.between(
+              plane: plane, polygon: polygon!, rowA: rowA, rowB: rowB)
+          : null;
+      final double gapStart, gapEnd;
+      if (aligned != null) {
+        gapStart = aligned.gapStart;
+        gapEnd = aligned.gapEnd;
+      } else if (strip != null) {
+        gapStart = strip.halfWidthStart * 2;
+        gapEnd = strip.halfWidthEnd * 2;
+      } else {
+        continue;
+      }
 
       // A row deleted between two others leaves no trace in THIS pair's own
       // measurement — a plot mapped before the row-delete button existed
@@ -200,10 +225,21 @@ class RowLineCoverage {
       // one merged corridor spanning the whole gap.
       if (gapStart > rowSpacing * _anomalousGapMultiplier ||
           gapEnd > rowSpacing * _anomalousGapMultiplier) {
-        corridors.add(_edgeCorridorGeometry(rowA, rowSpacing));
-        corridors.add(_edgeCorridorGeometry(rowB, rowSpacing));
+        if (plane != null) {
+          corridors.add(_ribbonCorridor(plane, polygon!, rowA, rowSpacing / 2));
+          corridors.add(_ribbonCorridor(plane, polygon, rowB, rowSpacing / 2));
+        } else {
+          corridors.add(_edgeCorridorGeometry(rowA, rowSpacing));
+          corridors.add(_edgeCorridorGeometry(rowB, rowSpacing));
+        }
         continue;
       }
+
+      if (strip != null) {
+        corridors.add(_corridorFromStrip(strip));
+        continue;
+      }
+      if (aligned == null) continue;
 
       final midStart = _lerp(aligned.a0, aligned.b0, 0.5);
       final midEnd = _lerp(aligned.a1, aligned.b1, 0.5);
@@ -225,6 +261,45 @@ class RowLineCoverage {
         rowB0: aligned.b0,
         rowB1: aligned.b1,
       ));
+    }
+
+    // The stretch between the plot boundary and the outermost rows.
+    if (plane != null) {
+      int? firstReal, secondReal, lastReal, beforeLast;
+      for (int i = 0; i < rowLines.length; i++) {
+        if (rowLines[i].length < 2) continue;
+        if (firstReal == null) {
+          firstReal = i;
+        } else {
+          secondReal ??= i;
+        }
+      }
+      for (int i = rowLines.length - 1; i >= 0; i--) {
+        if (rowLines[i].length < 2) continue;
+        if (lastReal == null) {
+          lastReal = i;
+        } else {
+          beforeLast ??= i;
+        }
+      }
+      // Only when the outermost ENTRY is a real row: a deleted outermost row
+      // leaves an unknown gap, which stays uncredited like any other.
+      if (firstReal == 0 && secondReal != null) {
+        corridors.add(_corridorFromStrip(CorridorStrip.outer(
+            plane: plane,
+            polygon: polygon!,
+            row: rowLines[0],
+            otherRow: rowLines[secondReal])));
+      }
+      if (lastReal == rowLines.length - 1 &&
+          beforeLast != null &&
+          lastReal != firstReal) {
+        corridors.add(_corridorFromStrip(CorridorStrip.outer(
+            plane: plane,
+            polygon: polygon!,
+            row: rowLines[lastReal!],
+            otherRow: rowLines[beforeLast])));
+      }
     }
 
     final n = corridors.length;
@@ -307,8 +382,7 @@ class RowLineCoverage {
       if (currentRow != null) {
         final curGeo = corridors[currentRow];
         if (curGeo != null) {
-          final curInfo = RowLineGenerator.pointToSegmentInfo(
-              pt.position, curGeo.midStart, curGeo.midEnd);
+          final curInfo = curGeo.project(pt.position);
           if (curInfo.distance <= curGeo.halfWidthAt(curInfo.t)) {
             nearestRow = currentRow;
             nearestDist = curInfo.distance;
@@ -319,8 +393,7 @@ class RowLineCoverage {
         for (int ri = 0; ri < n; ri++) {
           final geo = corridors[ri];
           if (geo == null) continue;
-          final info = RowLineGenerator.pointToSegmentInfo(
-              pt.position, geo.midStart, geo.midEnd);
+          final info = geo.project(pt.position);
           if (info.distance > geo.halfWidthAt(info.t)) continue;
           if (nearestDist == null || info.distance < nearestDist) {
             nearestDist = info.distance;
@@ -366,7 +439,7 @@ class RowLineCoverage {
       final ri = currentRow;
       final geo = corridors[ri]!;
       final info =
-          RowLineGenerator.pointToSegmentInfo(pt.position, geo.midStart, geo.midEnd);
+          geo.project(pt.position);
 
       if (prevIdxInCorridor[ri] == null) {
         corridorPassCount[ri]++; // entered (or re-entered) the corridor
@@ -464,7 +537,11 @@ class RowLineCoverage {
         final t0 = i / numSub;
         final t1 = (i + 1) / numSub;
         final List<LatLng> corners;
-        if (geo.hasRows) {
+        if (geo.strip != null) {
+          final c = geo.strip!.bandCorners(t0, t1);
+          if (c == null) continue; // slice lies outside the plot
+          corners = c;
+        } else if (geo.hasRows) {
           // Bounded by the two actual row lines -- the band follows the
           // corridor's real (tapering) outline instead of a rectangle
           // around the mid-line that only matches it where rows happen to
@@ -530,6 +607,33 @@ class RowLineCoverage {
     final px = -dy / len * halfWidthMeters;
     final py =  dx / len * halfWidthMeters;
     return LatLng(py / mPerDeg, px / (cosLat * mPerDeg));
+  }
+
+  static _CorridorGeometry? _corridorFromStrip(CorridorStrip? strip) {
+    if (strip == null) return null;
+    final numSub = (strip.length / subSegmentLengthMeters)
+        .ceil()
+        .clamp(1, 1000)
+        .toInt();
+    return _CorridorGeometry(
+      midStart: strip.midStart,
+      midEnd: strip.midEnd,
+      halfWidthStart: strip.halfWidthStart,
+      halfWidthEnd: strip.halfWidthEnd,
+      numSub: numSub,
+      strip: strip,
+    );
+  }
+
+  /// Flat-width corridor centred on a single row, running the full length
+  /// of the plot (the polygon-aware counterpart of [_edgeCorridorGeometry]).
+  static _CorridorGeometry? _ribbonCorridor(MetricPlane plane,
+      List<LatLng> polygon, List<LatLng> row, double halfWidth) {
+    return _corridorFromStrip(CorridorStrip.ribbon(
+        plane: plane,
+        polygon: polygon,
+        row: row,
+        halfWidthMeters: halfWidth));
   }
 
   /// A narrow corridor hugging a single real row line's own position,
@@ -662,6 +766,9 @@ class _CorridorGeometry {
   final LatLng? rowA1;
   final LatLng? rowB0;
   final LatLng? rowB1;
+  // Polygon-aware corridor (see CorridorStrip). When set, crediting and band
+  // drawing use it instead of the mid-line segment / row endpoints above.
+  final CorridorStrip? strip;
 
   const _CorridorGeometry({
     required this.midStart,
@@ -673,7 +780,20 @@ class _CorridorGeometry {
     this.rowA1,
     this.rowB0,
     this.rowB1,
+    this.strip,
   });
+
+  /// Distance from the corridor's centre line and position along it (t in
+  /// 0..1) of [p].
+  SegmentProjection project(LatLng p) {
+    final st = strip;
+    if (st != null) {
+      final r = st.project(p);
+      return SegmentProjection(
+          distance: r.distance, t: r.t, segmentLengthMeters: st.length);
+    }
+    return RowLineGenerator.pointToSegmentInfo(p, midStart, midEnd);
+  }
 
   bool get hasRows =>
       rowA0 != null && rowA1 != null && rowB0 != null && rowB1 != null;
