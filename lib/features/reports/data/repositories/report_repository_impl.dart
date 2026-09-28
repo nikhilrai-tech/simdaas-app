@@ -8,9 +8,21 @@ class ReportRepositoryImpl implements ReportRepository {
   ReportRepositoryImpl(this.remoteDataSource);
 
   @override
-  Future<List<Report>> getReports() async {
-    final models = await remoteDataSource.getReports();
-    return models;
+  Future<({List<Report> reports, int totalCount})> getReportsPage({
+    required int page,
+    required int pageSize,
+    String? plotId,
+    String? controlUnitId,
+    bool sortAscending = false,
+  }) async {
+    final result = await remoteDataSource.getReportsPage(
+      page: page,
+      pageSize: pageSize,
+      plotId: plotId,
+      controlUnitId: controlUnitId,
+      sortAscending: sortAscending,
+    );
+    return (reports: result.reports, totalCount: result.totalCount);
   }
 
   @override
