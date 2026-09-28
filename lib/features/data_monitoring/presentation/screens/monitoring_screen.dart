@@ -12,7 +12,6 @@ import '../../../plot_mapping/presentation/providers/plot_providers.dart'
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
-import '../providers/monitoring_providers.dart';
 import '../../../equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
 import 'package:simdaas/core/services/auth_service.dart';
@@ -845,7 +844,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
     final sprayersAsync = ref.watch(eq_provs.sprayersProvider(userId));
     final plotsAsync = ref.watch(fm_providers.plotsListProvider(userId));
-    final metricsAsync = ref.watch(monitoringStreamProvider(userId));
+    // monitoringStreamProvider used to be watched here. It only ever emitted
+    // random dummy numbers (yield/moisture/...) under keys this screen never
+    // reads, yet a new emission every second rebuilt the whole screen --
+    // including recomputing every heatmap band -- which is what made it
+    // laggy on phones. Every read below is `m[...] ?? live telemetry`, so an
+    // empty map behaves identically.
+    const metricsAsync =
+        AsyncValue<Map<String, Map<String, dynamic>>>.data({});
     final sessionsAsync = ref.watch(activeSessionsListProvider);
     final sessionsLoaded = sessionsAsync is AsyncData;
 
@@ -1164,6 +1170,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             // Default center if no plot polygon and no positions (e.g. session just ended)
             center = const LatLng(20.5937, 78.9629); // India center approx or last known
           }
+          final trackLayers = _memoTrackLayers(plot, mapPositions);
           return Stack(children: [
             FlutterMap(
               mapController: _mapController,
@@ -1196,41 +1203,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                             : Colors.red,
                         borderStrokeWidth: 2.5)
                   ]),
-                // Heatmap-colored coverage bands between rows.
-                // Only inside-plot positions fill the bands; color depends on
-                // the selected heatmap type.
-                if (plot.rowLines != null && plot.rowLines!.isNotEmpty) ...[
-                  PolygonLayer(
-                    polygons: RowLineCoverage.buildHeatmapCoverageBands(
-                      rowLines: plot.rowLines!,
-                      insidePoints: _buildInsideTrackPoints(mapPositions, plot),
-                      rowSpacing: plot.rowSpacing ?? 3.0,
-                      heatmapType: _selectedHeatmap,
-                    ),
-                  ),
-                  PolylineLayer(
-                    polylines: RowLineCoverage.buildRowLines(
-                      rowLines: plot.rowLines!,
-                    ),
-                  ),
-                ],
-                // Outside-plot trajectory lines only (inside → no line, filled
-                // rows above handle the inside visualization).
-                if (widget.deviceId != null && mapPositions.isNotEmpty) ...[
-                  PolylineLayer(
-                      polylines: _buildColoredPolylinesFromPositions(
-                          mapPositions, plot)),
-                ],
-                if (widget.deviceId != null && mapPositions.isNotEmpty)
-                  MarkerLayer(markers: [
-                    Marker(
-                        point: LatLng((mapPositions.first['lat'] as num).toDouble(),
-                            (mapPositions.first['lon'] as num).toDouble()),
-                        width: 36,
-                        height: 36,
-                        child: const Icon(Icons.flag,
-                            color: Colors.blue)),
-                  ]),
+                ...trackLayers,
                 if (widget.deviceId != null && latestTelemetry != null)
                   MarkerLayer(markers: [
                     Marker(
@@ -2206,6 +2179,63 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   // Build inside-plot HeatmapTrackPoints from raw position list.
+  // Heatmap bands / outside-track line / start flag, rebuilt only when what
+  // they draw actually changed. build() also runs for cooldown ticks, banner
+  // measurements, menu toggles etc., and recomputing + re-laying-out several
+  // hundred polygons for each of those made the screen stutter on phones.
+  // Returning the SAME widget instances when nothing changed also lets
+  // Flutter skip rebuilding those subtrees.
+  Object? _trackLayersKey;
+  List<Widget> _trackLayersCache = const [];
+
+  List<Widget> _memoTrackLayers(
+      PlotEntity plot, List<Map<String, dynamic>> mapPositions) {
+    final key = Object.hash(
+      identityHashCode(plot),
+      identityHashCode(plot.rowLines),
+      plot.rowSpacing,
+      _selectedHeatmap,
+      widget.deviceId != null,
+      mapPositions.length,
+      mapPositions.isEmpty ? null : mapPositions.last['timestamp'],
+    );
+    if (key == _trackLayersKey) return _trackLayersCache;
+    _trackLayersKey = key;
+    _trackLayersCache = [
+      // Heatmap-colored coverage bands between rows. Only inside-plot
+      // positions fill the bands; color depends on the selected heatmap.
+      if (plot.rowLines != null && plot.rowLines!.isNotEmpty) ...[
+        PolygonLayer(
+          polygons: RowLineCoverage.buildHeatmapCoverageBands(
+            rowLines: plot.rowLines!,
+            insidePoints: _buildInsideTrackPoints(mapPositions, plot),
+            rowSpacing: plot.rowSpacing ?? 3.0,
+            heatmapType: _selectedHeatmap,
+          ),
+        ),
+        PolylineLayer(
+          polylines: RowLineCoverage.buildRowLines(rowLines: plot.rowLines!),
+        ),
+      ],
+      // Outside-plot trajectory lines only (inside -> no line, the filled
+      // rows above handle the inside visualization).
+      if (widget.deviceId != null && mapPositions.isNotEmpty) ...[
+        PolylineLayer(
+            polylines: _buildColoredPolylinesFromPositions(mapPositions, plot)),
+      ],
+      if (widget.deviceId != null && mapPositions.isNotEmpty)
+        MarkerLayer(markers: [
+          Marker(
+              point: LatLng((mapPositions.first['lat'] as num).toDouble(),
+                  (mapPositions.first['lon'] as num).toDouble()),
+              width: 36,
+              height: 36,
+              child: const Icon(Icons.flag, color: Colors.blue)),
+        ]),
+    ];
+    return _trackLayersCache;
+  }
+
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<Map<String, dynamic>> positions, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
