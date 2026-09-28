@@ -22,7 +22,6 @@ import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'dart:async';
 import 'package:simdaas/core/services/connectivity_service.dart';
 import '../../../reports/presentation/providers/session_providers.dart';
-import 'package:simdaas/main.dart' show appNavKey;
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   final String? plotId;
@@ -322,10 +321,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         _messengerKey.currentState?.showSnackBar(SnackBar(
           content: Text(e.note ?? 'A report was updated with recovered data.'),
           duration: const Duration(seconds: 8),
-          action: SnackBarAction(
-            label: 'View',
-            onPressed: () => appNavKey.currentState?.pushNamed('/job_reports'),
-          ),
+          showCloseIcon: true,
         ));
       });
 
