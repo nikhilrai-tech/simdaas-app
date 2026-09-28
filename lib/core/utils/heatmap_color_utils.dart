@@ -15,6 +15,11 @@ class HeatmapTrackPoint {
   // Recovered via /backfill after a connectivity gap -- used only by
   // RowLineCoverage.buildHeatmapCoverageBands's asBackfillOverlay pass.
   final bool isBuffered;
+  // True when the jump from the PREVIOUS point in the track to this one is
+  // an implausible GPS jump (see GpsJumpDetector) -- an implied speed no
+  // sprayer can actually reach. Stops the heatmap gap-fill from bridging
+  // across it and painting the jump itself as sprayed.
+  final bool isJumpFromPrevious;
 
   const HeatmapTrackPoint({
     required this.position,
@@ -26,6 +31,7 @@ class HeatmapTrackPoint {
     this.leftSolenoidOn = false,
     this.rightSolenoidOn = false,
     this.isBuffered = false,
+    this.isJumpFromPrevious = false,
   });
 }
 

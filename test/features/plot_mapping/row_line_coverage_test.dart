@@ -160,4 +160,67 @@ void main() {
       }
     }
   });
+
+  group('GPS-jump gap-fill suppression', () {
+    // Two north-south rows 4 m apart, 200 m long.
+    const lat0 = 20.0, lon0 = 73.0;
+    final cosLat = math.cos(lat0 * math.pi / 180);
+    final dLon = 4.0 / (_mPerDeg * cosLat);
+    final dLat = 200.0 / _mPerDeg;
+    final rows = [
+      [LatLng(lat0, lon0), LatLng(lat0 + dLat, lon0)],
+      [LatLng(lat0, lon0 + dLon), LatLng(lat0 + dLat, lon0 + dLon)],
+    ];
+    LatLng along(double metres) =>
+        LatLng(lat0 + dLat * metres / 200.0, lon0 + dLon / 2);
+
+    test('a flagged jump does not bridge/fill the sub-bands it spans', () {
+      // Two points 150 m apart along the corridor with nothing recorded in
+      // between (a real jump would never have intermediate samples) --
+      // flagging the second one must stop the gap-fill from painting the
+      // 150 m stretch as if it had been driven.
+      final track = [
+        _pt(along(10).latitude, along(10).longitude),
+        HeatmapTrackPoint(
+          position: along(160),
+          isInPlot: true,
+          ptoOn: true,
+          isAuto: true,
+          speed: 4,
+          flowRate: 10,
+          isJumpFromPrevious: true,
+        ),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+      // Only the two visited sub-bands (near 10 m and near 160 m) are
+      // covered -- nowhere close to the ~150 m that a bridged fill would
+      // produce.
+      final coveredLength = bands.fold<double>(0, (sum, b) {
+        final lats = b.points.map((p) => (p.latitude - lat0) * _mPerDeg);
+        return sum + (lats.reduce(math.max) - lats.reduce(math.min));
+      });
+      expect(coveredLength, lessThan(20.0));
+    });
+
+    test('the same gap without the jump flag fills normally', () {
+      final track = [
+        _pt(along(10).latitude, along(10).longitude),
+        _pt(along(160).latitude, along(160).longitude), // isJumpFromPrevious: false
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+      final coveredLength = bands.fold<double>(0, (sum, b) {
+        final lats = b.points.map((p) => (p.latitude - lat0) * _mPerDeg);
+        return sum + (lats.reduce(math.max) - lats.reduce(math.min));
+      });
+      expect(coveredLength, greaterThan(100.0));
+    });
+  });
 }

@@ -12,6 +12,7 @@ import '../../../plot_mapping/presentation/providers/plot_providers.dart'
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
+import 'package:simdaas/core/utils/gps_jump_detector.dart';
 import '../../../equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
 import 'package:simdaas/core/services/auth_service.dart';
@@ -1204,6 +1205,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                         borderStrokeWidth: 2.5)
                   ]),
                 ...trackLayers,
+                if (widget.deviceId != null &&
+                    mapPositions.isNotEmpty &&
+                    _selectedHeatmap == HeatmapType.gps)
+                  PolylineLayer(polylines: _buildGpsJumpLines(mapPositions)),
                 if (widget.deviceId != null && latestTelemetry != null)
                   MarkerLayer(markers: [
                     Marker(
@@ -2239,14 +2244,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<Map<String, dynamic>> positions, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    LatLng? prevPoint;
+    DateTime? prevTime;
     for (final p in positions) {
       final lat = (p['lat'] as num?)?.toDouble();
       final lon = (p['lon'] as num?)?.toDouble();
       if (lat == null || lon == null) continue;
+      final point = LatLng(lat, lon);
+      final time = DateTime.tryParse(p['timestamp']?.toString() ?? '');
 
       bool isInPlot;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
-        isInPlot = _isPointInPolygon(LatLng(lat, lon), plot.polygon);
+        isInPlot = _isPointInPolygon(point, plot.polygon);
       } else {
         final devInPlot = p['device_in_plot'];
         isInPlot = devInPlot == true ||
@@ -2255,6 +2264,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       }
 
       if (!isInPlot) continue;
+
+      // Whether this point is an implausible GPS jump from the PREVIOUS
+      // in-plot point in this list -- own list, own consecutive pairs, so a
+      // stretch driven outside the plot in between (a real gap, not a
+      // glitch) doesn't get mistaken for one.
+      final isJump = prevPoint != null &&
+          prevTime != null &&
+          time != null &&
+          GpsJumpDetector.isJump(prevPoint, prevTime, point, time);
+      prevPoint = point;
+      prevTime = time;
 
       final pto = p['pto'];
       final ptoOn =
@@ -2270,7 +2290,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           (rightSol is int ? rightSol == 1 : rightSol.toString() == '1');
 
       result.add(HeatmapTrackPoint(
-        position: LatLng(lat, lon),
+        position: point,
         isInPlot: true,
         ptoOn: ptoOn,
         isAuto: isAuto,
@@ -2278,6 +2298,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         flowRate: (p['flow_rate'] as num?)?.toDouble(),
         leftSolenoidOn: leftOn,
         rightSolenoidOn: rightOn,
+        isJumpFromPrevious: isJump,
       ));
     }
     return result;
@@ -2329,6 +2350,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     // like a scribble of disconnected dashes instead of one line.
     const maxJitterStreak = 2;
     int inPlotStreak = 0;
+    LatLng? prevPoint;
+    DateTime? prevTime;
 
     for (var i = 0; i < pos.length; i++) {
       final p = pos[i];
@@ -2336,6 +2359,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       final lon = (p['lon'] as num?)?.toDouble();
       if (lat == null || lon == null) continue;
       final point = LatLng(lat, lon);
+      final time = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+
+      // An implausible GPS jump (see GpsJumpDetector) is drawn separately
+      // (see _buildGpsJumpLines), never as part of this continuous track --
+      // breaks the line here instead of bridging straight across it.
+      final isJump = prevPoint != null &&
+          prevTime != null &&
+          time != null &&
+          GpsJumpDetector.isJump(prevPoint, prevTime, point, time);
+      prevPoint = point;
+      prevTime = time;
+      if (isJump) flush();
 
       bool isInPlot;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
@@ -2393,6 +2428,23 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
     flush();
     return result;
+  }
+
+  // Pink dashed segments marking implausible GPS jumps in the raw track --
+  // shown on the GPS heatmap only, regardless of plot membership. See
+  // GpsJumpDetector.
+  List<Polyline> _buildGpsJumpLines(List<Map<String, dynamic>> pos) {
+    final points = <LatLng>[];
+    final times = <DateTime>[];
+    for (final p in pos) {
+      final lat = (p['lat'] as num?)?.toDouble();
+      final lon = (p['lon'] as num?)?.toDouble();
+      final t = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+      if (lat == null || lon == null || t == null) continue;
+      points.add(LatLng(lat, lon));
+      times.add(t);
+    }
+    return GpsJumpDetector.buildJumpLines(points, times);
   }
 
   // Small "Flow / L-R" switch shown only while a spray-related heatmap is
