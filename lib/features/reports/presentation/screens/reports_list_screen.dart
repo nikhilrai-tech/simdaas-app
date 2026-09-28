@@ -23,6 +23,9 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   String? _selectedControlUnitId;
   bool _sortAscending = false; // Default Newest first
 
+  static const _pageSize = 10;
+  int _currentPage = 0;
+
   dynamic _setupAutoRefresh() {
     return Stream.periodic(const Duration(seconds: 30)).listen((_) {
       if (mounted) _refreshData();
@@ -55,6 +58,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
             onPressed: () {
               setState(() {
                 _sortAscending = !_sortAscending;
+                _currentPage = 0;
               });
             },
             tooltip: _sortAscending ? 'Oldest first' : 'Newest first',
@@ -116,12 +120,19 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                 ],
               );
             }
-            return ListView.builder(
+            final pageCount = (sorted.length / _pageSize).ceil();
+            final page = _currentPage.clamp(0, pageCount - 1);
+            final pageItems =
+                sorted.skip(page * _pageSize).take(_pageSize).toList();
+
+            return Column(
+              children: [
+                Expanded(child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
-              itemCount: sorted.length,
+              itemCount: pageItems.length,
               itemBuilder: (context, i) {
-                final r = sorted[i];
+                final r = pageItems[i];
                 return Card(
                   elevation: 2,
                   margin: const EdgeInsets.only(bottom: 16),
@@ -262,6 +273,9 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                   ),
                 );
               },
+            )),
+                if (pageCount > 1) _buildPaginationBar(page, pageCount),
+              ],
             );
           },
           error: (err, stack) => ListView(
@@ -281,6 +295,37 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   ),
  );
 }
+
+  Widget _buildPaginationBar(int page, int pageCount) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          TextButton.icon(
+            onPressed: page > 0
+                ? () => setState(() => _currentPage = page - 1)
+                : null,
+            icon: const Icon(Icons.chevron_left),
+            label: const Text('Previous'),
+          ),
+          Text('Page ${page + 1} of $pageCount',
+              style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+          TextButton.icon(
+            onPressed: page < pageCount - 1
+                ? () => setState(() => _currentPage = page + 1)
+                : null,
+            icon: const Icon(Icons.chevron_right),
+            label: const Text('Next'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildFilterBar(BuildContext context, WidgetRef ref) {
     final userId = ref.read(authServiceProvider).currentUserId ?? '';
@@ -308,7 +353,10 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                   const DropdownMenuItem(value: null, child: Text('All Fields', style: TextStyle(fontSize: 13))),
                   ...plots.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name, style: const TextStyle(fontSize: 13)))),
                 ],
-                onChanged: (val) => setState(() => _selectedPlotId = val),
+                onChanged: (val) => setState(() {
+                  _selectedPlotId = val;
+                  _currentPage = 0;
+                }),
               ),
               loading: () => const LinearProgressIndicator(),
               error: (_, __) => const Text('Error loading plots'),
@@ -331,7 +379,10 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                   const DropdownMenuItem(value: null, child: Text('All Units', style: TextStyle(fontSize: 13))),
                   ...cus.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name, style: const TextStyle(fontSize: 13)))),
                 ],
-                onChanged: (val) => setState(() => _selectedControlUnitId = val),
+                onChanged: (val) => setState(() {
+                  _selectedControlUnitId = val;
+                  _currentPage = 0;
+                }),
               ),
               loading: () => const LinearProgressIndicator(),
               error: (_, __) => const Text('Error loading units'),
