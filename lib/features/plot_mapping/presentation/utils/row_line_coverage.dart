@@ -176,12 +176,19 @@ class RowLineCoverage {
         continue;
       }
 
-      final gapStart =
-          RowLineGenerator.pointToSegmentInfo(rowA[0], rowB[0], rowB[0])
-              .distance;
-      final gapEnd =
-          RowLineGenerator.pointToSegmentInfo(rowA[1], rowB[1], rowB[1])
-              .distance;
+      // Rows drawn for a tapering (clipped-to-polygon) field don't end at
+      // the same place along their own length -- their far ends are
+      // staggered. Measuring the "gap" as start-to-start / end-to-end
+      // point distance then picks up that stagger as if it were width (a
+      // ~100m diagonal for rows that are really ~10m apart), and the band
+      // built around the mid-line came out as a huge skewed block that
+      // spilled past the rows and even out of the plot. Clip both rows to
+      // the stretch of a shared axis where BOTH exist, so every measurement
+      // below is the true perpendicular gap between the two row lines.
+      final aligned = _alignRows(rowA, rowB);
+      if (aligned == null) continue;
+      final gapStart = aligned.gapStart;
+      final gapEnd = aligned.gapEnd;
 
       // A row deleted between two others leaves no trace in THIS pair's own
       // measurement — a plot mapped before the row-delete button existed
@@ -198,8 +205,8 @@ class RowLineCoverage {
         continue;
       }
 
-      final midStart = _lerp(rowA[0], rowB[0], 0.5);
-      final midEnd = _lerp(rowA[1], rowB[1], 0.5);
+      final midStart = _lerp(aligned.a0, aligned.b0, 0.5);
+      final midEnd = _lerp(aligned.a1, aligned.b1, 0.5);
       final segLen = RowLineGenerator
           .pointToSegmentInfo(midStart, midStart, midEnd)
           .segmentLengthMeters;
@@ -213,6 +220,10 @@ class RowLineCoverage {
         halfWidthStart: gapStart > 0.1 ? gapStart / 2 : fallback,
         halfWidthEnd: gapEnd > 0.1 ? gapEnd / 2 : fallback,
         numSub: numSub,
+        rowA0: aligned.a0,
+        rowA1: aligned.a1,
+        rowB0: aligned.b0,
+        rowB1: aligned.b1,
       ));
     }
 
@@ -449,26 +460,34 @@ class RowLineCoverage {
 
         final t0 = i / numSub;
         final t1 = (i + 1) / numSub;
-        final p0 = _lerp(midStart, midEnd, t0);
-        final p1 = _lerp(midStart, midEnd, t1);
-        // Local half-width for this specific sub-band, not one flat value
-        // for the whole corridor — matches the tapering tolerance used
-        // above so a wedge-shaped field's band drawing narrows visually
-        // the same place its real row spacing does.
-        final perp = _perpendicularOffsetLatLng(
-            midStart, midEnd, geo.halfWidthAt((t0 + t1) / 2));
-        if (perp == null) continue;
+        final List<LatLng> corners;
+        if (geo.hasRows) {
+          // Bounded by the two actual row lines -- the band follows the
+          // corridor's real (tapering) outline instead of a rectangle
+          // around the mid-line that only matches it where rows happen to
+          // be parallel.
+          corners = [
+            _lerp(geo.rowA0!, geo.rowA1!, t0),
+            _lerp(geo.rowA0!, geo.rowA1!, t1),
+            _lerp(geo.rowB0!, geo.rowB1!, t1),
+            _lerp(geo.rowB0!, geo.rowB1!, t0),
+          ];
+        } else {
+          // Single-row edge band (flat width, no second row to follow).
+          final p0 = _lerp(midStart, midEnd, t0);
+          final p1 = _lerp(midStart, midEnd, t1);
+          final perp = _perpendicularOffsetLatLng(
+              midStart, midEnd, geo.halfWidthAt((t0 + t1) / 2));
+          if (perp == null) continue;
+          corners = [
+            LatLng(p0.latitude + perp.latitude, p0.longitude + perp.longitude),
+            LatLng(p1.latitude + perp.latitude, p1.longitude + perp.longitude),
+            LatLng(p1.latitude - perp.latitude, p1.longitude - perp.longitude),
+            LatLng(p0.latitude - perp.latitude, p0.longitude - perp.longitude),
+          ];
+        }
         bands.add(Polygon(
-          points: [
-            LatLng(p0.latitude + perp.latitude,
-                p0.longitude + perp.longitude),
-            LatLng(p1.latitude + perp.latitude,
-                p1.longitude + perp.longitude),
-            LatLng(p1.latitude - perp.latitude,
-                p1.longitude - perp.longitude),
-            LatLng(p0.latitude - perp.latitude,
-                p0.longitude - perp.longitude),
-          ],
+          points: corners,
           color: bandColor.withAlpha(alpha),
           borderColor: Colors.transparent,
           borderStrokeWidth: 0,
@@ -534,6 +553,77 @@ class RowLineCoverage {
     );
   }
 
+  /// Clips two row lines to the stretch of a shared axis (the average of
+  /// their own directions) where BOTH exist, and measures the gap between
+  /// them perpendicular to that axis at each end. Null if the rows don't
+  /// overlap along the axis at all.
+  static _AlignedRows? _alignRows(List<LatLng> rowA, List<LatLng> rowB) {
+    const mPerDeg = 111320.0;
+    final lat0 = rowA[0].latitude;
+    final lon0 = rowA[0].longitude;
+    final cosLat = math.cos(lat0 * math.pi / 180.0);
+    if (cosLat.abs() < 1e-9) return null;
+    math.Point<double> toXY(LatLng p) => math.Point(
+        (p.longitude - lon0) * cosLat * mPerDeg, (p.latitude - lat0) * mPerDeg);
+    LatLng toLL(math.Point<double> p) =>
+        LatLng(lat0 + p.y / mPerDeg, lon0 + p.x / (cosLat * mPerDeg));
+
+    var a0 = toXY(rowA[0]), a1 = toXY(rowA[1]);
+    var b0 = toXY(rowB[0]), b1 = toXY(rowB[1]);
+    math.Point<double> unit(math.Point<double> v) {
+      final l = math.sqrt(v.x * v.x + v.y * v.y);
+      return l < 1e-9
+          ? const math.Point(0.0, 0.0)
+          : math.Point(v.x / l, v.y / l);
+    }
+
+    final da = unit(a1 - a0);
+    var db = unit(b1 - b0);
+    // Rows drawn in opposite directions: flip B so both run the same way.
+    if (da.x * db.x + da.y * db.y < 0) {
+      final t = b0;
+      b0 = b1;
+      b1 = t;
+      db = unit(b1 - b0);
+    }
+    final u = unit(math.Point(da.x + db.x, da.y + db.y));
+    if (u.x == 0 && u.y == 0) return null;
+    double s(math.Point<double> p) => p.x * u.x + p.y * u.y;
+    if (s(a1) < s(a0)) {
+      final t = a0;
+      a0 = a1;
+      a1 = t;
+    }
+    if (s(b1) < s(b0)) {
+      final t = b0;
+      b0 = b1;
+      b1 = t;
+    }
+    final lo = math.max(s(a0), s(b0));
+    final hi = math.min(s(a1), s(b1));
+    if (hi - lo < 0.5) return null;
+    math.Point<double> at(
+        math.Point<double> p0, math.Point<double> p1, double sv) {
+      final span = s(p1) - s(p0);
+      if (span.abs() < 1e-9) return p0;
+      final f = (sv - s(p0)) / span;
+      return math.Point(p0.x + (p1.x - p0.x) * f, p0.y + (p1.y - p0.y) * f);
+    }
+
+    final ca0 = at(a0, a1, lo), ca1 = at(a0, a1, hi);
+    final cb0 = at(b0, b1, lo), cb1 = at(b0, b1, hi);
+    double dist(math.Point<double> p, math.Point<double> q) =>
+        math.sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y));
+    return _AlignedRows(
+      a0: toLL(ca0),
+      a1: toLL(ca1),
+      b0: toLL(cb0),
+      b1: toLL(cb1),
+      gapStart: dist(ca0, cb0),
+      gapEnd: dist(ca1, cb1),
+    );
+  }
+
   static LatLng _lerp(LatLng a, LatLng b, double t) => LatLng(
         a.latitude  + (b.latitude  - a.latitude)  * t,
         a.longitude + (b.longitude - a.longitude) * t,
@@ -562,6 +652,13 @@ class _CorridorGeometry {
   final double halfWidthStart;
   final double halfWidthEnd;
   final int numSub;
+  // The two (axially clipped) row segments this corridor is bounded by, so
+  // its bands can follow the real row lines. Null for single-row edge
+  // bands, which have no second row to follow.
+  final LatLng? rowA0;
+  final LatLng? rowA1;
+  final LatLng? rowB0;
+  final LatLng? rowB1;
 
   const _CorridorGeometry({
     required this.midStart,
@@ -569,9 +666,29 @@ class _CorridorGeometry {
     required this.halfWidthStart,
     required this.halfWidthEnd,
     required this.numSub,
+    this.rowA0,
+    this.rowA1,
+    this.rowB0,
+    this.rowB1,
   });
+
+  bool get hasRows =>
+      rowA0 != null && rowA1 != null && rowB0 != null && rowB1 != null;
 
   /// Corridor half-width at position [t] (0 = start, 1 = end) along its length.
   double halfWidthAt(double t) =>
       halfWidthStart + (halfWidthEnd - halfWidthStart) * t.clamp(0.0, 1.0);
+}
+
+class _AlignedRows {
+  final LatLng a0, a1, b0, b1;
+  final double gapStart, gapEnd;
+  const _AlignedRows({
+    required this.a0,
+    required this.a1,
+    required this.b0,
+    required this.b1,
+    required this.gapStart,
+    required this.gapEnd,
+  });
 }
