@@ -1,3 +1,4 @@
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/gps_jump_detector.dart';
@@ -56,5 +57,42 @@ void main() {
     final lines = GpsJumpDetector.buildJumpLines(
         [a, near], [ta, ta.add(const Duration(seconds: 5))]);
     expect(lines, isEmpty);
+  });
+
+  test('buildJumpMarkers places one marker at each end of every jump', () {
+    final points = [a, b];
+    final times = [ta, ta.add(const Duration(seconds: 17))];
+    final markers = GpsJumpDetector.buildJumpMarkers(points, times);
+    expect(markers, hasLength(2));
+    expect(markers.map((m) => m.point), [a, b]);
+  });
+
+  test('buildJumpMarkers gives a small jump the same visibility as a big '
+      'one -- constant marker count regardless of physical distance', () {
+    // A tiny but still-implausible jump: ~6m in well under a second.
+    final tinyB = LatLng(a.latitude + 0.00005, a.longitude);
+    final tb = ta.add(const Duration(milliseconds: 500));
+    expect(GpsJumpDetector.isJump(a, ta, tinyB, tb), isTrue);
+    final markers = GpsJumpDetector.buildJumpMarkers([a, tinyB], [ta, tb]);
+    expect(markers, hasLength(2));
+  });
+
+  test('buildJumpMarkers is empty when nothing jumps', () {
+    final near = LatLng(a.latitude + 0.00009, a.longitude);
+    final markers = GpsJumpDetector.buildJumpMarkers(
+        [a, near], [ta, ta.add(const Duration(seconds: 5))]);
+    expect(markers, isEmpty);
+  });
+
+  test('buildJumpMarkers covers multiple jumps in one track', () {
+    final near = LatLng(a.latitude + 0.00009, a.longitude);
+    final points = [a, b, near];
+    final times = [
+      ta,
+      ta.add(const Duration(seconds: 17)), // a -> b: jump
+      ta.add(const Duration(seconds: 17, milliseconds: 100)), // b -> near: jump back
+    ];
+    final markers = GpsJumpDetector.buildJumpMarkers(points, times);
+    expect(markers, hasLength(4)); // 2 jumps x 2 endpoints each
   });
 }

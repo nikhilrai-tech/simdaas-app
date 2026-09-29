@@ -363,6 +363,11 @@ class RowLineCoverage {
     int? currentRow;
     int? pendingRow; // candidate row (or null = "outside every corridor")
     int pendingStreak = 0;
+    // How many points in the current pending (not-yet-confirmed) stretch
+    // have been force-credited to the old row -- see the "not confirmed
+    // yet" branch below. Reset whenever pendingRow changes or the pending
+    // phase ends (confirmed switch, or reaffirming the current row).
+    int pendingForcedCount = 0;
 
     // A run of implausible GPS jumps (a glitch that lasts several points,
     // not just one bad fix) used to fall through to the "nearest row" search
@@ -471,6 +476,7 @@ class RowLineCoverage {
         // Nothing established yet for this pass — accept the first match
         // immediately, no streak needed.
         currentRow = nearestRow;
+        pendingForcedCount = 0;
       } else if (nearestRow != currentRow) {
         if (currentRow == null && nearestRow == null) {
           continue; // still nothing to paint
@@ -480,6 +486,7 @@ class RowLineCoverage {
         } else {
           pendingRow = nearestRow;
           pendingStreak = 1;
+          pendingForcedCount = 0;
         }
         if (pendingStreak > maxJitterStreak) {
           // Confirmed: the sprayer genuinely moved to a different row (or
@@ -490,13 +497,48 @@ class RowLineCoverage {
           currentRow = nearestRow;
           pendingRow = null;
           pendingStreak = 0;
+          pendingForcedCount = 0;
         } else {
-          continue; // not confirmed yet — treat as a tolerated blip, skip
+          // Not confirmed yet -- credit this point to the row we were last
+          // sure of (if any) instead of dropping it outright. A genuine
+          // row-to-row transition (driving from the end of one row to the
+          // start of the next) spends several points outside every
+          // corridor's tolerance while turning; without this, that whole
+          // stretch showed as an uncredited gap even though the sprayer
+          // never actually stopped spraying. Bounded the same way a GPS-
+          // glitch episode is (maxGlitchForcedPoints, see glitchAnchorRow
+          // above) so a point that never settles into any row for a long
+          // time doesn't keep crediting a row it may have long since left
+          // -- the normal streak-confirm above still runs every point, so a
+          // genuinely new row gets picked up (and forcing stops) the moment
+          // it's confirmed, same as always.
+          if (currentRow != null && pendingForcedCount < maxGlitchForcedPoints) {
+            pendingForcedCount++;
+            final ri = currentRow;
+            _creditPoint(
+              pt: pt,
+              ri: ri,
+              geo: corridors[ri]!,
+              heatmapType: heatmapType,
+              asBackfillOverlay: asBackfillOverlay,
+              isForcedGlitchCredit: true,
+              corridorPassCount: corridorPassCount,
+              prevIdxInCorridor: prevIdxInCorridor,
+              subBandMaxPass: subBandMaxPass,
+              hasBuffered: hasBuffered,
+              accumulated: accumulated,
+              accumulatedCount: accumulatedCount,
+              gpsMaxPriority: gpsMaxPriority,
+              latestColor: latestColor,
+            );
+          }
+          continue;
         }
       } else {
         // Reaffirms the current row — cancel any pending switch.
         pendingRow = null;
         pendingStreak = 0;
+        pendingForcedCount = 0;
       }
 
       if (currentRow == null) continue; // confirmed outside every corridor

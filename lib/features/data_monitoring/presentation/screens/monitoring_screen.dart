@@ -1264,8 +1264,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                 ...trackLayers,
                 if (widget.deviceId != null &&
                     mapPositions.isNotEmpty &&
-                    _selectedHeatmap == HeatmapType.gps)
+                    _selectedHeatmap == HeatmapType.gps) ...[
                   PolylineLayer(polylines: _buildGpsJumpLines(mapPositions)),
+                  MarkerLayer(markers: _buildGpsJumpMarkers(mapPositions)),
+                ],
                 if (widget.deviceId != null && latestTelemetry != null)
                   MarkerLayer(markers: [
                     Marker(
@@ -2503,6 +2505,23 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       times.add(t);
     }
     return GpsJumpDetector.buildJumpLines(points, times);
+  }
+
+  // Constant-size endpoint markers for every jump in _buildGpsJumpLines --
+  // see GpsJumpDetector.buildJumpMarkers's doc comment for why the line
+  // alone isn't enough (a short jump shrinks to nothing at normal zoom).
+  List<Marker> _buildGpsJumpMarkers(List<Map<String, dynamic>> pos) {
+    final points = <LatLng>[];
+    final times = <DateTime>[];
+    for (final p in pos) {
+      final lat = (p['lat'] as num?)?.toDouble();
+      final lon = (p['lon'] as num?)?.toDouble();
+      final t = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+      if (lat == null || lon == null || t == null) continue;
+      points.add(LatLng(lat, lon));
+      times.add(t);
+    }
+    return GpsJumpDetector.buildJumpMarkers(points, times);
   }
 
   // Small "Flow / L-R" switch shown only while a spray-related heatmap is
