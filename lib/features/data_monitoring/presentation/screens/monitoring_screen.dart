@@ -508,21 +508,40 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     final mac = widget.deviceId;
     if (mac == null || mac.isEmpty || _manualBusy) return;
     setState(() => _manualBusy = true);
-    try {
-      await ref.read(eq_provs.equipmentControllerProvider).startDeviceSession(mac);
-      _messengerKey.currentState?.showSnackBar(
-          const SnackBar(content: Text('Start sent to the device…')));
-      // Safety: never leave the button spinning if the device never answers.
-      Future.delayed(const Duration(seconds: 20), () {
-        if (mounted && _manualBusy) setState(() => _manualBusy = false);
-      });
-    } catch (err) {
-      if (mounted) setState(() => _manualBusy = false);
-      _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(_manualErrorText(err))));
+    final sent = await _sendWithStatusDialog(
+      sendingText: 'Sending start request to the device…',
+      action: () => ref.read(eq_provs.equipmentControllerProvider).startDeviceSession(mac),
+      sentTextBuilder: () =>
+          'Request reached the server. Waiting for the device to confirm…',
+    );
+    if (!mounted) return;
+    if (!sent) {
+      setState(() => _manualBusy = false);
+      return;
     }
+    // Safety: never leave the button spinning if the device never answers.
+    Future.delayed(const Duration(seconds: 20), () {
+      if (mounted && _manualBusy) {
+        setState(() => _manualBusy = false);
+        _messengerKey.currentState?.showSnackBar(const SnackBar(
+          content: Text(
+              "Device hasn't responded yet — it may be offline or have a weak connection."),
+          duration: Duration(seconds: 6),
+        ));
+      }
+    });
   }
 
+  // True only for a request that never got an HTTP response at all (DNS/
+  // connect/timeout failure -- see ApiService, which throws with a null
+  // statusCode specifically for this case) -- i.e. a real internet problem,
+  // as opposed to the server responding with a rejection.
+  bool _isNetworkError(Object err) => err is ApiException && err.statusCode == null;
+
   String _manualErrorText(Object err) {
+    if (_isNetworkError(err)) {
+      return "Couldn't reach the server. Check your internet connection and try again.";
+    }
     if (err is ApiException && err.body != null) {
       try {
         final body = json.decode(err.body!);
@@ -540,6 +559,34 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       } catch (_) {}
     }
     return 'Request failed: $err';
+  }
+
+  /// Shows a "Sending…" dialog while [action] runs, so a slow or failed
+  /// request to start/stop a manual session is never silently invisible.
+  /// On success it briefly confirms (unless [sentTextBuilder] returns null,
+  /// e.g. when the caller's own immediate-success UI -- the cooldown banner
+  /// for an Automatic end -- already covers it) then pops `true`. On
+  /// failure it shows a clear, actionable message -- distinguishing "no
+  /// internet" from a server-side rejection -- with an OK button, and pops
+  /// `false` once dismissed.
+  Future<bool> _sendWithStatusDialog({
+    required String sendingText,
+    required Future<void> Function() action,
+    String? Function()? sentTextBuilder,
+  }) async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _SessionRequestDialog(
+        sendingText: sendingText,
+        action: action,
+        sentTextBuilder: sentTextBuilder,
+        errorTextBuilder: _manualErrorText,
+        isNetworkError: _isNetworkError,
+      ),
+    );
+    return result ?? false;
   }
 
   /// Schedules a check of the top banner's actual rendered height (via
@@ -673,21 +720,31 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               ],
             ));
     if (confirmed == true) {
-      try {
-        final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
-        final endedNow = await ref
-            .read(eq_provs.equipmentControllerProvider)
-            .endSession(sessionIdToEnd, deviceId: deviceMac);
+      final resolvedSessionId = sessionIdToEnd; // captured non-null for the closure below
+      final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
+      bool? endedNow;
+      final sent = await _sendWithStatusDialog(
+        sendingText: 'Sending stop request…',
+        action: () async {
+          endedNow = await ref
+              .read(eq_provs.equipmentControllerProvider)
+              .endSession(resolvedSessionId, deviceId: deviceMac);
+        },
+        // Automatic mode ends immediately -- the cooldown banner below is
+        // the real feedback, so no extra confirmation phase in the dialog.
+        // Manual mode only ever *requests* the stop, so it gets one.
+        sentTextBuilder: () => endedNow == false
+            ? 'Request reached the server. Waiting for the device to confirm…'
+            : null,
+      );
+      if (!sent || endedNow == null) return; // error already shown by the dialog
 
+      try {
         // Manual mode: only a stop was *requested* — the sprayer
         // closes its own session, so nothing is cleared or put into
         // cooldown here; the session_event / report_ready that
         // follows updates the screen.
-        if (!endedNow) {
-          _messengerKey.currentState?.showSnackBar(const SnackBar(
-            content: Text('Stop sent to the device…'),
-            duration: Duration(seconds: 5),
-          ));
+        if (!endedNow!) {
           return;
         }
 
@@ -2614,5 +2671,114 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         ],
       ),
     );
+  }
+}
+
+enum _SessionRequestPhase { sending, sent, error }
+
+/// Runs [action] behind a modal dialog so a manual start/stop request is
+/// never silently invisible while the server call is in flight -- see
+/// _MonitoringScreenState._sendWithStatusDialog. Three phases: a spinner
+/// while [action] runs, a brief checkmark confirmation on success (skipped
+/// when [sentTextBuilder] returns null), or a blocking error message
+/// (network vs server-rejected, via [isNetworkError]/[errorTextBuilder])
+/// that stays until the user taps OK.
+class _SessionRequestDialog extends StatefulWidget {
+  final String sendingText;
+  final Future<void> Function() action;
+  final String? Function()? sentTextBuilder;
+  final String Function(Object err) errorTextBuilder;
+  final bool Function(Object err) isNetworkError;
+
+  const _SessionRequestDialog({
+    required this.sendingText,
+    required this.action,
+    required this.errorTextBuilder,
+    required this.isNetworkError,
+    this.sentTextBuilder,
+  });
+
+  @override
+  State<_SessionRequestDialog> createState() => _SessionRequestDialogState();
+}
+
+class _SessionRequestDialogState extends State<_SessionRequestDialog> {
+  _SessionRequestPhase _phase = _SessionRequestPhase.sending;
+  String _sentText = '';
+  String _errorText = '';
+  bool _errorIsNetwork = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    try {
+      await widget.action();
+      if (!mounted) return;
+      final sentText = widget.sentTextBuilder?.call();
+      if (sentText == null) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      setState(() {
+        _phase = _SessionRequestPhase.sent;
+        _sentText = sentText;
+      });
+      await Future.delayed(const Duration(milliseconds: 1200));
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _SessionRequestPhase.error;
+        _errorText = widget.errorTextBuilder(err);
+        _errorIsNetwork = widget.isNetworkError(err);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_phase) {
+      case _SessionRequestPhase.sending:
+        return AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: Text(widget.sendingText)),
+            ],
+          ),
+        );
+      case _SessionRequestPhase.sent:
+        return AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green),
+              const SizedBox(width: 16),
+              Expanded(child: Text(_sentText)),
+            ],
+          ),
+        );
+      case _SessionRequestPhase.error:
+        return AlertDialog(
+          title: Text(_errorIsNetwork ? 'No connection' : 'Request failed'),
+          content: Text(_errorText),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+    }
   }
 }
