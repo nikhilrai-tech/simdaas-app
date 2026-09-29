@@ -16,6 +16,8 @@ class ReportsListScreen extends ConsumerStatefulWidget {
   ConsumerState<ReportsListScreen> createState() => _ReportsListScreenState();
 }
 
+enum _DatePreset { allTime, thisMonth, past2Months, custom }
+
 class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   late final javaTimer = _setupAutoRefresh();
 
@@ -23,8 +25,115 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   String? _selectedControlUnitId;
   bool _sortAscending = false; // Default Newest first
 
+  _DatePreset _datePreset = _DatePreset.allTime;
+  DateTimeRange? _customRange;
+
   static const _pageSize = 10;
   int _currentPage = 0;
+
+  DateTime? get _dateFrom {
+    final now = DateTime.now();
+    switch (_datePreset) {
+      case _DatePreset.allTime:
+        return null;
+      case _DatePreset.thisMonth:
+        return DateTime(now.year, now.month, 1);
+      case _DatePreset.past2Months:
+        return now.subtract(const Duration(days: 60));
+      case _DatePreset.custom:
+        return _customRange?.start;
+    }
+  }
+
+  DateTime? get _dateTo {
+    // "This month" / "past 2 months" both mean "...through now" -- no upper
+    // bound needed. Only a custom range has a real end date, and it should
+    // include that whole day.
+    if (_datePreset == _DatePreset.custom && _customRange != null) {
+      final end = _customRange!.end;
+      return DateTime(end.year, end.month, end.day, 23, 59, 59);
+    }
+    return null;
+  }
+
+  String get _dateFilterLabel {
+    switch (_datePreset) {
+      case _DatePreset.allTime:
+        return 'All time';
+      case _DatePreset.thisMonth:
+        return 'This month';
+      case _DatePreset.past2Months:
+        return 'Past 2 months';
+      case _DatePreset.custom:
+        if (_customRange == null) return 'Custom range';
+        final f = DateFormat.yMMMd();
+        return '${f.format(_customRange!.start)} - ${f.format(_customRange!.end)}';
+    }
+  }
+
+  Future<void> _pickDateFilter() async {
+    final choice = await showModalBottomSheet<_DatePreset>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('All time'),
+              trailing: _datePreset == _DatePreset.allTime
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.allTime),
+            ),
+            ListTile(
+              title: const Text('This month'),
+              trailing: _datePreset == _DatePreset.thisMonth
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.thisMonth),
+            ),
+            ListTile(
+              title: const Text('Past 2 months'),
+              trailing: _datePreset == _DatePreset.past2Months
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.past2Months),
+            ),
+            ListTile(
+              title: const Text('Custom range...'),
+              trailing: _datePreset == _DatePreset.custom
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.custom),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    if (choice == _DatePreset.custom) {
+      final now = DateTime.now();
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(now.year - 5),
+        lastDate: now,
+        initialDateRange: _customRange,
+      );
+      if (picked == null || !mounted) return;
+      setState(() {
+        _datePreset = _DatePreset.custom;
+        _customRange = picked;
+        _currentPage = 0;
+      });
+      return;
+    }
+
+    setState(() {
+      _datePreset = choice;
+      _currentPage = 0;
+    });
+  }
 
   dynamic _setupAutoRefresh() {
     return Stream.periodic(const Duration(seconds: 30)).listen((_) {
@@ -52,6 +161,8 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
       plotId: _selectedPlotId,
       controlUnitId: _selectedControlUnitId,
       sortAscending: _sortAscending,
+      createdAfter: _dateFrom,
+      createdBefore: _dateTo,
     )));
 
     return Scaffold(
@@ -344,7 +455,9 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: Colors.white,
-      child: Row(
+      child: Column(
+        children: [
+          Row(
         children: [
           Expanded(
             child: plotsAsync.when(
@@ -395,6 +508,38 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
               ),
               loading: () => const LinearProgressIndicator(),
               error: (_, __) => const Text('Error loading units'),
+            ),
+          ),
+        ],
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              onTap: _pickDateFilter,
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.calendar_today_outlined,
+                        size: 14, color: Colors.grey.shade700),
+                    const SizedBox(width: 6),
+                    Text(_dateFilterLabel,
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.grey.shade800)),
+                    const SizedBox(width: 4),
+                    Icon(Icons.arrow_drop_down,
+                        size: 18, color: Colors.grey.shade700),
+                  ],
+                ),
+              ),
             ),
           ),
         ],

@@ -7,6 +7,8 @@ abstract class ReportRepository {
     String? plotId,
     String? controlUnitId,
     bool sortAscending = false,
+    DateTime? createdAfter,
+    DateTime? createdBefore,
   });
   Future<Report> getReport(String id);
   Future<void> deleteReport(String id);
