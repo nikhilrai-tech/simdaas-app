@@ -14,6 +14,8 @@ class ReportRepositoryImpl implements ReportRepository {
     String? plotId,
     String? controlUnitId,
     bool sortAscending = false,
+    DateTime? createdAfter,
+    DateTime? createdBefore,
   }) async {
     final result = await remoteDataSource.getReportsPage(
       page: page,
@@ -21,6 +23,8 @@ class ReportRepositoryImpl implements ReportRepository {
       plotId: plotId,
       controlUnitId: controlUnitId,
       sortAscending: sortAscending,
+      createdAfter: createdAfter,
+      createdBefore: createdBefore,
     );
     return (reports: result.reports, totalCount: result.totalCount);
   }

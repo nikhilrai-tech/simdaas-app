@@ -13,6 +13,8 @@ class ReportsPageParams {
   final String? plotId;
   final String? controlUnitId;
   final bool sortAscending;
+  final DateTime? createdAfter;
+  final DateTime? createdBefore;
 
   const ReportsPageParams({
     required this.page,
@@ -20,6 +22,8 @@ class ReportsPageParams {
     this.plotId,
     this.controlUnitId,
     this.sortAscending = false,
+    this.createdAfter,
+    this.createdBefore,
   });
 
   @override
@@ -29,11 +33,13 @@ class ReportsPageParams {
       other.pageSize == pageSize &&
       other.plotId == plotId &&
       other.controlUnitId == controlUnitId &&
-      other.sortAscending == sortAscending;
+      other.sortAscending == sortAscending &&
+      other.createdAfter == createdAfter &&
+      other.createdBefore == createdBefore;
 
   @override
-  int get hashCode =>
-      Object.hash(page, pageSize, plotId, controlUnitId, sortAscending);
+  int get hashCode => Object.hash(page, pageSize, plotId, controlUnitId,
+      sortAscending, createdAfter, createdBefore);
 }
 
 /// One page fetched directly from the backend, filtered/sorted server-side
@@ -51,6 +57,8 @@ final reportsListProvider = FutureProvider.family<
       plotId: params.plotId,
       controlUnitId: params.controlUnitId,
       sortAscending: params.sortAscending,
+      createdAfter: params.createdAfter,
+      createdBefore: params.createdBefore,
     );
   },
 );

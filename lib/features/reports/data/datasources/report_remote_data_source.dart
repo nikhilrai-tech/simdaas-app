@@ -13,6 +13,8 @@ abstract class ReportRemoteDataSource {
     String? plotId,
     String? controlUnitId,
     bool sortAscending = false,
+    DateTime? createdAfter,
+    DateTime? createdBefore,
   });
   Future<ReportModel> getReport(String id);
   Future<void> deleteReport(String id);
@@ -31,6 +33,8 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
     String? plotId,
     String? controlUnitId,
     bool sortAscending = false,
+    DateTime? createdAfter,
+    DateTime? createdBefore,
   }) async {
     try {
       final params = <String, String>{
@@ -39,6 +43,10 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
         'ordering': sortAscending ? 'created_at' : '-created_at',
         if (plotId != null) 'plot': plotId,
         if (controlUnitId != null) 'control_unit': controlUnitId,
+        if (createdAfter != null)
+          'created_after': createdAfter.toUtc().toIso8601String(),
+        if (createdBefore != null)
+          'created_before': createdBefore.toUtc().toIso8601String(),
       };
       final query = params.entries
           .map((e) =>
