@@ -447,6 +447,40 @@ void main() {
       // forced onto laneA forever.
       expect(laneBCoverage, greaterThan(40.0));
     });
+
+    test('a genuine row-to-row turn (no jump involved) fills the turn '
+        'instead of leaving a gap, then confirms the new lane', () {
+      LatLng outside(double m) =>
+          LatLng(lat0 + dLat * m / 200.0, lon0 - 2 * dLon);
+      final track = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        // Turning at the row end: driving out to a headland and back in,
+        // well outside either lane's tolerance -- none of this is flagged
+        // as a jump (ordinary, continuous driving speed the whole way).
+        for (final m in [45.0, 50.0, 55.0])
+          _pt(outside(m).latitude, outside(m).longitude),
+        // Settles into laneB -- the switch only confirms on the 7th
+        // matching point (maxJitterStreak=6, so pendingStreak > 6), so
+        // enough points here for a meaningful confirmed stretch afterwards.
+        for (final m in [60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0,
+            100.0, 105.0, 110.0, 115.0, 120.0, 125.0, 130.0, 135.0])
+          _pt(laneB(m).latitude, laneB(m).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneACoverage = lengthNear(bands, lon0 + 0.5 * dLon);
+      final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
+      // laneA covers the driven stretch AND the turn (forced onto laneA
+      // while the switch to laneB isn't confirmed yet) -- not just 0-40m.
+      expect(laneACoverage, greaterThan(50.0));
+      // laneB gets properly confirmed and credited once actually reached.
+      expect(laneBCoverage, greaterThan(30.0));
+    });
   });
   group('RowLineGeometry.shiftRow', () {
     const lat0 = 20.0, lon0 = 73.0;

@@ -888,10 +888,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   polylines:
                       _buildHeatmapPolylines(report.trajectory, report.plot),
                 ),
-                if (_heatmapType == HeatmapType.gps)
+                if (_heatmapType == HeatmapType.gps) ...[
                   PolylineLayer(
                     polylines: _buildGpsJumpLines(report.trajectory),
                   ),
+                  MarkerLayer(
+                    markers: _buildGpsJumpMarkers(report.trajectory),
+                  ),
+                ],
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -1437,6 +1441,13 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     );
   }
 
+  List<Marker> _buildGpsJumpMarkers(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpMarkers(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
+  }
+
   List<Polyline> _buildHeatmapPolylines(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final List<Polyline> result = [];
@@ -1654,10 +1665,14 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
               PolylineLayer(
                 polylines: _buildHeatmapPolylines(report.trajectory, report.plot),
               ),
-              if (_heatmapType == HeatmapType.gps)
+              if (_heatmapType == HeatmapType.gps) ...[
                 PolylineLayer(
                   polylines: _buildGpsJumpLines(report.trajectory),
                 ),
+                MarkerLayer(
+                  markers: _buildGpsJumpMarkers(report.trajectory),
+                ),
+              ],
               if (points.isNotEmpty)
                 MarkerLayer(
                   markers: [
@@ -1941,6 +1956,13 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
   // membership. See GpsJumpDetector.
   List<Polyline> _buildGpsJumpLines(List<GPSPointData> trajectory) {
     return GpsJumpDetector.buildJumpLines(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
+  }
+
+  List<Marker> _buildGpsJumpMarkers(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpMarkers(
       trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
       trajectory.map((p) => p.timestamp).toList(),
     );

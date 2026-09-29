@@ -50,6 +50,13 @@ class GpsJumpDetector {
   /// Pink dashed segments, one per jump in `jumpIndices(points, timestamps)`.
   /// Meant to be shown on the GPS heatmap only, regardless of whether either
   /// end is inside or outside the plot.
+  ///
+  /// A jump that only covers a few metres (a brief GPS glitch snapping back
+  /// almost immediately) draws as a near-invisible sliver at normal zoom --
+  /// on a real session with several jumps of very different sizes, only the
+  /// largest one ends up actually noticeable. Pair this with
+  /// [buildJumpMarkers], which gives every jump a constant-size endpoint
+  /// regardless of how physically short it is.
   static List<Polyline> buildJumpLines(
       List<LatLng> points, List<DateTime> timestamps) {
     final jumps = jumpIndices(points, timestamps);
@@ -63,5 +70,37 @@ class GpsJumpDetector {
           pattern: StrokePattern.dashed(segments: const [10.0, 6.0]),
         ),
     ];
+  }
+
+  /// Small fixed-pixel-size markers at both ends of every jump in
+  /// `jumpIndices(points, timestamps)`. [buildJumpLines]'s line is drawn in
+  /// map (ground) coordinates, so a short jump (a glitch that snaps back a
+  /// few metres away) shrinks to nothing as you zoom out -- these markers
+  /// stay the same size on screen regardless of zoom or how short the jump
+  /// physically was, so a farmer scanning the map can spot every jump, not
+  /// just the largest one.
+  static List<Marker> buildJumpMarkers(
+      List<LatLng> points, List<DateTime> timestamps) {
+    final jumps = jumpIndices(points, timestamps);
+    if (jumps.isEmpty) return const [];
+    const size = 10.0;
+    Marker dot(LatLng p) => Marker(
+          point: p,
+          width: size,
+          height: size,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.pinkAccent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+          ),
+        );
+    final markers = <Marker>[];
+    for (final i in jumps) {
+      markers.add(dot(points[i]));
+      markers.add(dot(points[i + 1]));
+    }
+    return markers;
   }
 }
