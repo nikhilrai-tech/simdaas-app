@@ -16,7 +16,7 @@ class ReportsListScreen extends ConsumerStatefulWidget {
   ConsumerState<ReportsListScreen> createState() => _ReportsListScreenState();
 }
 
-enum _DatePreset { allTime, thisMonth, past2Months, custom }
+enum _DatePreset { today, thisWeek, thisMonth, custom }
 
 class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   late final javaTimer = _setupAutoRefresh();
@@ -25,7 +25,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   String? _selectedControlUnitId;
   bool _sortAscending = false; // Default Newest first
 
-  _DatePreset _datePreset = _DatePreset.allTime;
+  _DatePreset _datePreset = _DatePreset.today;
   DateTimeRange? _customRange;
 
   static const _pageSize = 10;
@@ -37,26 +37,27 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
     // never-equal ReportsPageParams (and so a fresh backend request) on
     // every single rebuild, including the one caused by the previous
     // request finishing -- the list never actually settled into a loaded
-    // state. "This month" was accidentally immune (DateTime(y, m, 1) is
-    // already stable within a day); "past 2 months" wasn't.
+    // state (see the "Past 2 months" fix this replaced). Every branch below
+    // must stay stable within the same day for the same reason.
     final today = DateTime.now();
     final startOfToday = DateTime(today.year, today.month, today.day);
     switch (_datePreset) {
-      case _DatePreset.allTime:
-        return null;
+      case _DatePreset.today:
+        return startOfToday;
+      case _DatePreset.thisWeek:
+        // Monday as the start of the week.
+        return startOfToday.subtract(Duration(days: today.weekday - DateTime.monday));
       case _DatePreset.thisMonth:
         return DateTime(today.year, today.month, 1);
-      case _DatePreset.past2Months:
-        return startOfToday.subtract(const Duration(days: 60));
       case _DatePreset.custom:
         return _customRange?.start;
     }
   }
 
   DateTime? get _dateTo {
-    // "This month" / "past 2 months" both mean "...through now" -- no upper
-    // bound needed. Only a custom range has a real end date, and it should
-    // include that whole day.
+    // "Today" / "This week" / "This month" all mean "...through now" -- no
+    // upper bound needed. Only a custom range has a real end date, and it
+    // should include that whole day.
     if (_datePreset == _DatePreset.custom && _customRange != null) {
       final end = _customRange!.end;
       return DateTime(end.year, end.month, end.day, 23, 59, 59);
@@ -66,12 +67,12 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
 
   String get _dateFilterLabel {
     switch (_datePreset) {
-      case _DatePreset.allTime:
-        return 'All time';
+      case _DatePreset.today:
+        return 'Today';
+      case _DatePreset.thisWeek:
+        return 'This week';
       case _DatePreset.thisMonth:
         return 'This month';
-      case _DatePreset.past2Months:
-        return 'Past 2 months';
       case _DatePreset.custom:
         if (_customRange == null) return 'Custom range';
         final f = DateFormat.yMMMd();
@@ -87,11 +88,18 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: const Text('All time'),
-              trailing: _datePreset == _DatePreset.allTime
+              title: const Text('Today'),
+              trailing: _datePreset == _DatePreset.today
                   ? const Icon(Icons.check, color: Colors.green)
                   : null,
-              onTap: () => Navigator.pop(context, _DatePreset.allTime),
+              onTap: () => Navigator.pop(context, _DatePreset.today),
+            ),
+            ListTile(
+              title: const Text('This week'),
+              trailing: _datePreset == _DatePreset.thisWeek
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.thisWeek),
             ),
             ListTile(
               title: const Text('This month'),
@@ -99,13 +107,6 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                   ? const Icon(Icons.check, color: Colors.green)
                   : null,
               onTap: () => Navigator.pop(context, _DatePreset.thisMonth),
-            ),
-            ListTile(
-              title: const Text('Past 2 months'),
-              trailing: _datePreset == _DatePreset.past2Months
-                  ? const Icon(Icons.check, color: Colors.green)
-                  : null,
-              onTap: () => Navigator.pop(context, _DatePreset.past2Months),
             ),
             ListTile(
               title: const Text('Custom range...'),
