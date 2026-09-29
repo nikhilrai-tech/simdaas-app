@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -57,6 +58,33 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   // whole separate mode like L/R) -- Speed/Spray/L-R never show it.
   bool _showBackfillOverlay = true;
 
+  // reportDetailProvider is a plain FutureProvider.family (no autoDispose)
+  // -- once fetched it stays cached for the rest of the app session, unlike
+  // the reports LIST screen (which already re-fetches every 30s and on
+  // pull-to-refresh). Without this, a report opened while still Pending/
+  // Verifying kept showing that stale snapshot here even after the backend
+  // finished verifying it minutes later -- the list screen behind it showed
+  // the right status, but coming back into this same report showed the old
+  // one, until the whole app was killed and reopened (the only thing that
+  // actually clears the provider cache).
+  late final StreamSubscription<void> _autoRefreshSub = _setupAutoRefresh();
+
+  StreamSubscription<void> _setupAutoRefresh() {
+    return Stream.periodic(const Duration(seconds: 30)).listen((_) {
+      if (mounted) _refreshReport();
+    });
+  }
+
+  Future<void> _refreshReport() async {
+    ref.invalidate(reportDetailProvider(widget.report.id));
+  }
+
+  @override
+  void dispose() {
+    _autoRefreshSub.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(reportDetailProvider(widget.report.id));
@@ -111,7 +139,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: RefreshIndicator(
+        onRefresh: _refreshReport,
+        child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -737,6 +768,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
             const SizedBox(height: 24),
           ],
+        ),
         ),
       ),
     );
