@@ -364,7 +364,72 @@ class RowLineCoverage {
     int? pendingRow; // candidate row (or null = "outside every corridor")
     int pendingStreak = 0;
 
+    // A run of implausible GPS jumps (a glitch that lasts several points,
+    // not just one bad fix) used to fall through to the "nearest row" search
+    // below like any other point: if the glitchy positions happened to land
+    // near a DIFFERENT row for long enough (past maxJitterStreak), that
+    // neighbor row got wrongly credited with coverage it never actually got,
+    // and the row the sprayer was really driving got a blank gap instead.
+    // Once a jump is seen, every following point is instead force-credited
+    // to the row trusted just before the jump (glitchAnchorRow) -- ignoring
+    // its own untrustworthy position for row SELECTION, but still
+    // projecting it onto that row and bridging normally, so the row shows
+    // as sprayed through the glitch instead of gapped or wrongly attributed.
+    // Recovery: the first point that's naturally back within the anchor
+    // row's own tolerance ends the episode and resumes normal per-point
+    // logic. If recovery never happens (the sprayer genuinely changed rows
+    // during/after the glitch), forcing gives up after
+    // maxGlitchForcedPoints and falls back to normal nearest-row logic, so
+    // a real, sustained move to a new row is never permanently stuck
+    // pinned to the old one.
+    const maxGlitchForcedPoints = 20;
+    int? glitchAnchorRow;
+    int glitchForcedCount = 0;
+
     for (final pt in insidePoints) {
+      if (pt.isJumpFromPrevious && currentRow != null && glitchAnchorRow == null) {
+        glitchAnchorRow = currentRow;
+        glitchForcedCount = 0;
+      }
+
+      if (glitchAnchorRow != null) {
+        final anchorGeo = corridors[glitchAnchorRow];
+        final anchorInfo = anchorGeo?.project(pt.position);
+        final backToAnchor = anchorGeo != null &&
+            anchorInfo != null &&
+            anchorInfo.distance <= anchorGeo.halfWidthAt(anchorInfo.t);
+        if (!backToAnchor && glitchForcedCount < maxGlitchForcedPoints) {
+          glitchForcedCount++;
+          currentRow = glitchAnchorRow;
+          pendingRow = null;
+          pendingStreak = 0;
+          final ri = glitchAnchorRow;
+          final geo = corridors[ri]!;
+          _creditPoint(
+            pt: pt,
+            ri: ri,
+            geo: geo,
+            heatmapType: heatmapType,
+            asBackfillOverlay: asBackfillOverlay,
+            isForcedGlitchCredit: true,
+            corridorPassCount: corridorPassCount,
+            prevIdxInCorridor: prevIdxInCorridor,
+            subBandMaxPass: subBandMaxPass,
+            hasBuffered: hasBuffered,
+            accumulated: accumulated,
+            accumulatedCount: accumulatedCount,
+            gpsMaxPriority: gpsMaxPriority,
+            latestColor: latestColor,
+          );
+          continue;
+        }
+        // Either naturally back near the trusted row, or forced for long
+        // enough without recovering -- stop forcing and let this point run
+        // through the normal logic below (it may re-confirm the same row,
+        // or -- given enough further points -- a genuinely new one).
+        glitchAnchorRow = null;
+      }
+
       // Home-row advantage: if this point still satisfies the CURRENT row's
       // own tolerance, stay there — don't even look at other corridors.
       // Without this, a point near the shared boundary between two
@@ -438,58 +503,22 @@ class RowLineCoverage {
 
       final ri = currentRow;
       final geo = corridors[ri]!;
-      final info =
-          geo.project(pt.position);
-
-      if (prevIdxInCorridor[ri] == null) {
-        corridorPassCount[ri]++; // entered (or re-entered) the corridor
-      }
-
-      final idx = (info.t * geo.numSub).floor().clamp(0, geo.numSub - 1);
-      final color = heatmapType == HeatmapType.spraying
-          ? null
-          : HeatmapColorUtils.getColorForInsidePoint(pt, heatmapType);
-
-      // Fill every sub-band from the previous in-corridor index to this one
-      // so that GPS sampling gaps don't leave blank stripes -- except across
-      // an implausible GPS jump (see GpsJumpDetector), where bridging the
-      // gap would paint the jump itself as if it had been sprayed.
-      final prev =
-          pt.isJumpFromPrevious ? null : prevIdxInCorridor[ri];
-      final lo = prev != null ? math.min(prev, idx) : idx;
-      final hi = prev != null ? math.max(prev, idx) : idx;
-
-      for (int s = lo; s <= hi; s++) {
-        subBandMaxPass[ri][s] =
-            math.max(subBandMaxPass[ri][s], corridorPassCount[ri]);
-        if (asBackfillOverlay) {
-          if (pt.isBuffered) hasBuffered[ri][s] = true;
-          continue;
-        }
-        if (heatmapType == HeatmapType.spraying) {
-          accumulated[ri][s] += pt.flowRate ?? 0.0;
-          accumulatedCount[ri][s]++;
-        } else if (heatmapType == HeatmapType.gps) {
-          // Never downgrade: a sub-band that reached Auto must stay Auto
-          // even if a later sample here is PTO-off/Manual (GPS jitter, a
-          // momentary pause) — only an equal-or-higher priority sample
-          // updates the shown color.
-          final priority =
-              HeatmapColorUtils.gpsPriority(ptoOn: pt.ptoOn, isAuto: pt.isAuto);
-          if (priority >= gpsMaxPriority[ri][s]) {
-            gpsMaxPriority[ri][s] = priority;
-            latestColor[ri][s] = color;
-          }
-        } else {
-          // Latest-write wins for Speed/Left-Right heatmaps — a re-pass
-          // over the same sub-band reflects the sprayer's current state
-          // there. Only the Spray heatmap accumulates on re-pass, and
-          // only the GPS heatmap has a no-downgrade priority rule.
-          latestColor[ri][s] = color;
-        }
-      }
-
-      prevIdxInCorridor[ri] = idx;
+      _creditPoint(
+        pt: pt,
+        ri: ri,
+        geo: geo,
+        heatmapType: heatmapType,
+        asBackfillOverlay: asBackfillOverlay,
+        isForcedGlitchCredit: false,
+        corridorPassCount: corridorPassCount,
+        prevIdxInCorridor: prevIdxInCorridor,
+        subBandMaxPass: subBandMaxPass,
+        hasBuffered: hasBuffered,
+        accumulated: accumulated,
+        accumulatedCount: accumulatedCount,
+        gpsMaxPriority: gpsMaxPriority,
+        latestColor: latestColor,
+      );
     }
 
     for (int ri = 0; ri < n; ri++) {
@@ -576,6 +605,83 @@ class RowLineCoverage {
     }
 
     return bands;
+  }
+
+  /// Credit one point to corridor [ri], bridging from the last credited
+  /// sub-band there so GPS sampling gaps (or a glitch run force-credited
+  /// here by the caller, see [buildHeatmapCoverageBands]) don't leave a
+  /// blank stripe. [isForcedGlitchCredit] is true only when the caller has
+  /// already decided [ri] is the trustworthy pre-glitch row for a jump-
+  /// flagged point that would otherwise have gone through normal nearest-
+  /// row selection -- in that case the bridge always runs, since filling
+  /// through the glitch (on the right row) is the entire point of forcing
+  /// it here. A jump-flagged point that reaches this method WITHOUT being
+  /// forced (no trusted row existed yet to anchor to) still suppresses its
+  /// own bridge -- there's nothing to justify filling across it.
+  static void _creditPoint({
+    required HeatmapTrackPoint pt,
+    required int ri,
+    required _CorridorGeometry geo,
+    required HeatmapType heatmapType,
+    required bool asBackfillOverlay,
+    required bool isForcedGlitchCredit,
+    required List<int> corridorPassCount,
+    required List<int?> prevIdxInCorridor,
+    required List<List<int>> subBandMaxPass,
+    required List<List<bool>> hasBuffered,
+    required List<List<double>> accumulated,
+    required List<List<int>> accumulatedCount,
+    required List<List<int>> gpsMaxPriority,
+    required List<List<Color?>> latestColor,
+  }) {
+    final info = geo.project(pt.position);
+
+    if (prevIdxInCorridor[ri] == null) {
+      corridorPassCount[ri]++; // entered (or re-entered) the corridor
+    }
+
+    final idx = (info.t * geo.numSub).floor().clamp(0, geo.numSub - 1);
+    final color = heatmapType == HeatmapType.spraying
+        ? null
+        : HeatmapColorUtils.getColorForInsidePoint(pt, heatmapType);
+
+    final prev = (!isForcedGlitchCredit && pt.isJumpFromPrevious)
+        ? null
+        : prevIdxInCorridor[ri];
+    final lo = prev != null ? math.min(prev, idx) : idx;
+    final hi = prev != null ? math.max(prev, idx) : idx;
+
+    for (int s = lo; s <= hi; s++) {
+      subBandMaxPass[ri][s] =
+          math.max(subBandMaxPass[ri][s], corridorPassCount[ri]);
+      if (asBackfillOverlay) {
+        if (pt.isBuffered) hasBuffered[ri][s] = true;
+        continue;
+      }
+      if (heatmapType == HeatmapType.spraying) {
+        accumulated[ri][s] += pt.flowRate ?? 0.0;
+        accumulatedCount[ri][s]++;
+      } else if (heatmapType == HeatmapType.gps) {
+        // Never downgrade: a sub-band that reached Auto must stay Auto
+        // even if a later sample here is PTO-off/Manual (GPS jitter, a
+        // momentary pause) — only an equal-or-higher priority sample
+        // updates the shown color.
+        final priority =
+            HeatmapColorUtils.gpsPriority(ptoOn: pt.ptoOn, isAuto: pt.isAuto);
+        if (priority >= gpsMaxPriority[ri][s]) {
+          gpsMaxPriority[ri][s] = priority;
+          latestColor[ri][s] = color;
+        }
+      } else {
+        // Latest-write wins for Speed/Left-Right heatmaps — a re-pass
+        // over the same sub-band reflects the sprayer's current state
+        // there. Only the Spray heatmap accumulates on re-pass, and
+        // only the GPS heatmap has a no-downgrade priority rule.
+        latestColor[ri][s] = color;
+      }
+    }
+
+    prevIdxInCorridor[ri] = idx;
   }
 
   /// Build the planned row line polylines (tree rows).
