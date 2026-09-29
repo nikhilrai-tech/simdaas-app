@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
@@ -314,6 +315,137 @@ void main() {
         return sum + (lats.reduce(math.max) - lats.reduce(math.min));
       });
       expect(coveredLength, greaterThan(100.0));
+    });
+  });
+
+  group('GPS-jump glitch run stays credited to the row driven before it', () {
+    // Three tree rows 4 m apart -> two driving lanes: laneA (between tree
+    // rows 0/1) and laneB (between tree rows 1/2), 200 m long.
+    const lat0 = 20.0, lon0 = 73.0;
+    final cosLat = math.cos(lat0 * math.pi / 180);
+    final dLon = 4.0 / (_mPerDeg * cosLat);
+    final dLat = 200.0 / _mPerDeg;
+    final treeRows = [
+      [LatLng(lat0, lon0), LatLng(lat0 + dLat, lon0)],
+      [LatLng(lat0, lon0 + dLon), LatLng(lat0 + dLat, lon0 + dLon)],
+      [LatLng(lat0, lon0 + 2 * dLon), LatLng(lat0 + dLat, lon0 + 2 * dLon)],
+    ];
+    LatLng laneA(double m) =>
+        LatLng(lat0 + dLat * m / 200.0, lon0 + 0.5 * dLon);
+    LatLng laneB(double m) =>
+        LatLng(lat0 + dLat * m / 200.0, lon0 + 1.5 * dLon);
+
+    double lengthNear(List<Polygon> bands, double lonTarget) {
+      final matching = bands.where((b) {
+        final avgLon =
+            b.points.map((p) => p.longitude).reduce((a, c) => a + c) /
+                b.points.length;
+        return (avgLon - lonTarget).abs() < dLon * 0.4;
+      });
+      return matching.fold<double>(0, (sum, b) {
+        final lats = b.points.map((p) => (p.latitude - lat0) * _mPerDeg);
+        return sum + (lats.reduce(math.max) - lats.reduce(math.min));
+      });
+    }
+
+    test('a glitch cluster landing near the neighbouring lane is credited '
+        'to the lane actually driven, not the neighbour', () {
+      final track = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        // Glitch: 8 points landing consistently near laneB instead. Only
+        // the entry is individually flagged -- the points inside the
+        // cluster are close to each other, same as a real stable-but-wrong
+        // GPS fix would look, which never trips the pairwise jump check on
+        // its own.
+        for (var i = 0; i < 8; i++)
+          HeatmapTrackPoint(
+            position: laneB(45.0 + i * 5),
+            isInPlot: true,
+            ptoOn: true,
+            isAuto: true,
+            speed: 4,
+            flowRate: 10,
+            isJumpFromPrevious: i == 0,
+          ),
+        // Recovery: naturally back on laneA.
+        _pt(laneA(90).latitude, laneA(90).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneACoverage = lengthNear(bands, lon0 + 0.5 * dLon);
+      final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
+      // The whole 0-90m stretch is credited to laneA, glitch included --
+      // not left as a gap, and not bled into laneB.
+      expect(laneACoverage, greaterThan(70.0));
+      expect(laneBCoverage, lessThan(20.0));
+    });
+
+    test('recovery resumes normal per-point tracking on the same lane', () {
+      final track = [
+        for (final m in [0.0, 10.0, 20.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        HeatmapTrackPoint(
+          position: laneB(25.0),
+          isInPlot: true,
+          ptoOn: true,
+          isAuto: true,
+          speed: 4,
+          flowRate: 10,
+          isJumpFromPrevious: true,
+        ),
+        // Recovers immediately, then several more genuine laneA points.
+        for (final m in [30.0, 40.0, 50.0, 60.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneACoverage = lengthNear(bands, lon0 + 0.5 * dLon);
+      final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
+      expect(laneACoverage, greaterThan(50.0));
+      expect(laneBCoverage, lessThan(10.0));
+    });
+
+    test('a sustained, never-recovering move to a new lane eventually wins '
+        'once forcing gives up', () {
+      final track = [
+        for (final m in [0.0, 10.0, 20.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        // A genuine, sustained move to laneB that never returns to laneA --
+        // only the first point is flagged (a real single jump onto the new
+        // lane), the rest is ordinary driving on laneB from then on.
+        // maxGlitchForcedPoints (20) worth of forcing, plus enough further
+        // points for the normal jitter-streak (maxJitterStreak=6, so 7 to
+        // confirm) to actually re-establish laneB once forcing gives up.
+        for (var i = 0; i < 40; i++)
+          HeatmapTrackPoint(
+            position: laneB(25.0 + i * 5),
+            isInPlot: true,
+            ptoOn: true,
+            isAuto: true,
+            speed: 4,
+            flowRate: 10,
+            isJumpFromPrevious: i == 0,
+          ),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
+      // The sustained move to laneB is real coverage eventually, not
+      // forced onto laneA forever.
+      expect(laneBCoverage, greaterThan(40.0));
     });
   });
   group('RowLineGeometry.shiftRow', () {
