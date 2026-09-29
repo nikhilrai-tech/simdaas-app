@@ -32,14 +32,22 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   int _currentPage = 0;
 
   DateTime? get _dateFrom {
-    final now = DateTime.now();
+    // Truncated to a whole day, NOT DateTime.now() as-is -- this getter runs
+    // on every build(), and a millisecond-precise "now" made a fresh,
+    // never-equal ReportsPageParams (and so a fresh backend request) on
+    // every single rebuild, including the one caused by the previous
+    // request finishing -- the list never actually settled into a loaded
+    // state. "This month" was accidentally immune (DateTime(y, m, 1) is
+    // already stable within a day); "past 2 months" wasn't.
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
     switch (_datePreset) {
       case _DatePreset.allTime:
         return null;
       case _DatePreset.thisMonth:
-        return DateTime(now.year, now.month, 1);
+        return DateTime(today.year, today.month, 1);
       case _DatePreset.past2Months:
-        return now.subtract(const Duration(days: 60));
+        return startOfToday.subtract(const Duration(days: 60));
       case _DatePreset.custom:
         return _customRange?.start;
     }
