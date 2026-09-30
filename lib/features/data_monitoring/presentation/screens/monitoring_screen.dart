@@ -110,6 +110,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   StreamSubscription<ReportAmendedEvent>? _reportAmendedSub;
   // True while a virtual start/stop request is in flight.
   bool _manualBusy = false;
+  // Completed by _sessionAckSub's listener with the device's own ack for
+  // whichever start/stop request is currently showing a status dialog --
+  // see _waitForSessionAck. Only one manual request is ever in flight at a
+  // time (guarded by _manualBusy / the confirm dialog before End Session),
+  // so a single field is enough; not scoped per-request.
+  Completer<SessionAckEvent>? _pendingSessionAck;
 
   @override
   void initState() {
@@ -292,15 +298,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       _sessionAckSub = svc.deviceSessionAckStream(normId).listen((ack) {
         if (!mounted || ack.messageType != 'session') return;
         setState(() => _manualBusy = false);
-        final message = switch (ack.status) {
-          'session_started' => 'Session started on the device',
-          'session_closed' => 'Session stopped on the device',
-          'previous_session_closed' => 'Previous session closed, new session started',
-          'already_inactive' => 'The device had no running session',
-          'invalid_payload' => 'The device rejected the command',
-          _ => null,
-        };
-        if (message != null) {
+        final message = _sessionAckMessage(ack);
+        final pending = _pendingSessionAck;
+        if (pending != null && !pending.isCompleted) {
+          // A status dialog (_waitForSessionAck) is actively waiting on
+          // this exact ack -- let it show the result instead of also
+          // popping a separate SnackBar with the same message.
+          pending.complete(ack);
+        } else if (message != null) {
           _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
         }
         // The device's own ack is the fastest signal that a session really
@@ -502,34 +507,62 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   // ── Manual (device-managed) mode helpers ───────────────────────────────────
 
+  // Shared with _sessionAckSub's listener (background SnackBar) and
+  // _waitForSessionAck (status-dialog confirmation) so both show the exact
+  // same wording for the same ack.
+  static String? _sessionAckMessage(SessionAckEvent ack) => switch (ack.status) {
+        'session_started' => 'Session started on the device',
+        'session_closed' => 'Session stopped on the device',
+        'previous_session_closed' => 'Previous session closed, new session started',
+        'already_inactive' => 'The device had no running session',
+        'invalid_payload' => 'The device rejected the command',
+        _ => null,
+      };
+
+  /// Waits for the device's own ack (via _sessionAckSub) to the start/stop
+  /// request just sent, racing a [timeout] -- the single mechanism behind
+  /// the status dialog's persistent "waiting for device" phase for BOTH
+  /// start and stop, so a request is never silently assumed to have
+  /// succeeded just because the SERVER accepted it. Returns the ack's
+  /// message on a real confirmation, or null if the device never answers
+  /// in time (the caller shows this as a dismissible "no response" state,
+  /// not a silent success).
+  Future<String?> _waitForSessionAck({
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    final completer = Completer<SessionAckEvent>();
+    _pendingSessionAck = completer;
+    try {
+      final ack = await completer.future.timeout(timeout, onTimeout: () {
+        throw TimeoutException('no ack');
+      });
+      return _sessionAckMessage(ack) ?? 'The device responded.';
+    } on TimeoutException {
+      return null;
+    } finally {
+      if (identical(_pendingSessionAck, completer)) _pendingSessionAck = null;
+    }
+  }
+
   /// Virtual start button. The session itself appears when the device confirms
   /// (its START heartbeat / ack), so this only sends the request.
   Future<void> _startManualSession() async {
     final mac = widget.deviceId;
     if (mac == null || mac.isEmpty || _manualBusy) return;
     setState(() => _manualBusy = true);
-    final sent = await _sendWithStatusDialog(
+    await _sendWithStatusDialog(
       sendingText: 'Sending start request to the device…',
       action: () => ref.read(eq_provs.equipmentControllerProvider).startDeviceSession(mac),
       sentTextBuilder: () =>
           'Request reached the server. Waiting for the device to confirm…',
+      waitForDeviceConfirmation: _waitForSessionAck,
     );
     if (!mounted) return;
-    if (!sent) {
-      setState(() => _manualBusy = false);
-      return;
-    }
-    // Safety: never leave the button spinning if the device never answers.
-    Future.delayed(const Duration(seconds: 20), () {
-      if (mounted && _manualBusy) {
-        setState(() => _manualBusy = false);
-        _messengerKey.currentState?.showSnackBar(const SnackBar(
-          content: Text(
-              "Device hasn't responded yet — it may be offline or have a weak connection."),
-          duration: Duration(seconds: 6),
-        ));
-      }
-    });
+    // _manualBusy is otherwise cleared by _sessionAckSub the moment the
+    // real ack arrives (possibly well before the dialog itself finishes its
+    // brief confirmation flash) -- this only covers the "gave up" paths
+    // (send failed, or the wait timed out) where no ack is ever coming.
+    setState(() => _manualBusy = false);
   }
 
   // True only for a request that never got an HTTP response at all (DNS/
@@ -563,16 +596,27 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   /// Shows a "Sending…" dialog while [action] runs, so a slow or failed
   /// request to start/stop a manual session is never silently invisible.
-  /// On success it briefly confirms (unless [sentTextBuilder] returns null,
-  /// e.g. when the caller's own immediate-success UI -- the cooldown banner
-  /// for an Automatic end -- already covers it) then pops `true`. On
-  /// failure it shows a clear, actionable message -- distinguishing "no
+  ///
+  /// [sentTextBuilder] returning null skips any confirmation phase and pops
+  /// `true` immediately (e.g. the cooldown banner for an Automatic end
+  /// already covers it). A non-null value is otherwise flashed briefly
+  /// before popping `true` -- UNLESS [waitForDeviceConfirmation] is also
+  /// given, in which case [sentTextBuilder]'s text becomes a *persistent*
+  /// "waiting for device" phase (spinner, stays open) instead of a brief
+  /// flash: the dialog then stays open until [waitForDeviceConfirmation]
+  /// resolves to the device's own real confirmation message (brief flash,
+  /// then pop `true`) or times out to null (a dismissible "no response"
+  /// state the user must actively close, rather than a silent assumed
+  /// success -- pops `false`).
+  ///
+  /// On failure it shows a clear, actionable message -- distinguishing "no
   /// internet" from a server-side rejection -- with an OK button, and pops
   /// `false` once dismissed.
   Future<bool> _sendWithStatusDialog({
     required String sendingText,
     required Future<void> Function() action,
     String? Function()? sentTextBuilder,
+    Future<String?> Function()? waitForDeviceConfirmation,
   }) async {
     if (!mounted) return false;
     final result = await showDialog<bool>(
@@ -582,6 +626,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         sendingText: sendingText,
         action: action,
         sentTextBuilder: sentTextBuilder,
+        waitForDeviceConfirmation: waitForDeviceConfirmation,
         errorTextBuilder: _manualErrorText,
         isNetworkError: _isNetworkError,
       ),
@@ -731,11 +776,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               .endSession(resolvedSessionId, deviceId: deviceMac);
         },
         // Automatic mode ends immediately -- the cooldown banner below is
-        // the real feedback, so no extra confirmation phase in the dialog.
-        // Manual mode only ever *requests* the stop, so it gets one.
+        // the real feedback, so no extra confirmation phase in the dialog
+        // (sentTextBuilder returning null skips waitForDeviceConfirmation
+        // entirely). Manual mode only ever *requests* the stop, so it gets
+        // the same persistent wait-for-device-ack treatment Start does.
         sentTextBuilder: () => endedNow == false
             ? 'Request reached the server. Waiting for the device to confirm…'
             : null,
+        waitForDeviceConfirmation: _waitForSessionAck,
       );
       if (!sent || endedNow == null) return; // error already shown by the dialog
 
@@ -2721,19 +2769,27 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 }
 
-enum _SessionRequestPhase { sending, sent, error }
+enum _SessionRequestPhase { sending, waitingForDevice, sent, error, timedOut }
 
 /// Runs [action] behind a modal dialog so a manual start/stop request is
 /// never silently invisible while the server call is in flight -- see
-/// _MonitoringScreenState._sendWithStatusDialog. Three phases: a spinner
-/// while [action] runs, a brief checkmark confirmation on success (skipped
-/// when [sentTextBuilder] returns null), or a blocking error message
-/// (network vs server-rejected, via [isNetworkError]/[errorTextBuilder])
-/// that stays until the user taps OK.
+/// _MonitoringScreenState._sendWithStatusDialog. Phases: a spinner while
+/// [action] runs; then either (a) nothing further ([sentTextBuilder]
+/// returns null -- pops immediately), (b) a brief checkmark flash
+/// ([sentTextBuilder] non-null, no [waitForDeviceConfirmation] given), or
+/// (c) a *persistent* "waiting for device" spinner using [sentTextBuilder]'s
+/// text, staying open until [waitForDeviceConfirmation] resolves -- a real
+/// device ack (brief checkmark flash, then pops `true`) or a timeout (a
+/// blocking "no response" state the user must dismiss, pops `false`) --
+/// so a request is never assumed to have succeeded just because the SERVER
+/// accepted it. Or a blocking error message (network vs server-rejected,
+/// via [isNetworkError]/[errorTextBuilder]) that stays until the user taps
+/// OK.
 class _SessionRequestDialog extends StatefulWidget {
   final String sendingText;
   final Future<void> Function() action;
   final String? Function()? sentTextBuilder;
+  final Future<String?> Function()? waitForDeviceConfirmation;
   final String Function(Object err) errorTextBuilder;
   final bool Function(Object err) isNetworkError;
 
@@ -2743,6 +2799,7 @@ class _SessionRequestDialog extends StatefulWidget {
     required this.errorTextBuilder,
     required this.isNetworkError,
     this.sentTextBuilder,
+    this.waitForDeviceConfirmation,
   });
 
   @override
@@ -2752,6 +2809,7 @@ class _SessionRequestDialog extends StatefulWidget {
 class _SessionRequestDialogState extends State<_SessionRequestDialog> {
   _SessionRequestPhase _phase = _SessionRequestPhase.sending;
   String _sentText = '';
+  String _waitingText = '';
   String _errorText = '';
   bool _errorIsNetwork = false;
 
@@ -2768,6 +2826,25 @@ class _SessionRequestDialogState extends State<_SessionRequestDialog> {
       final sentText = widget.sentTextBuilder?.call();
       if (sentText == null) {
         Navigator.of(context).pop(true);
+        return;
+      }
+      if (widget.waitForDeviceConfirmation != null) {
+        setState(() {
+          _phase = _SessionRequestPhase.waitingForDevice;
+          _waitingText = sentText;
+        });
+        final confirmed = await widget.waitForDeviceConfirmation!();
+        if (!mounted) return;
+        if (confirmed != null) {
+          setState(() {
+            _phase = _SessionRequestPhase.sent;
+            _sentText = confirmed;
+          });
+          await Future.delayed(const Duration(milliseconds: 1200));
+          if (mounted) Navigator.of(context).pop(true);
+        } else {
+          setState(() => _phase = _SessionRequestPhase.timedOut);
+        }
         return;
       }
       setState(() {
@@ -2804,6 +2881,21 @@ class _SessionRequestDialogState extends State<_SessionRequestDialog> {
             ],
           ),
         );
+      case _SessionRequestPhase.waitingForDevice:
+        return AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: Text(_waitingText)),
+            ],
+          ),
+        );
       case _SessionRequestPhase.sent:
         return AlertDialog(
           content: Row(
@@ -2819,6 +2911,20 @@ class _SessionRequestDialogState extends State<_SessionRequestDialog> {
         return AlertDialog(
           title: Text(_errorIsNetwork ? 'No connection' : 'Request failed'),
           content: Text(_errorText),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      case _SessionRequestPhase.timedOut:
+        return AlertDialog(
+          title: const Text('No response from device'),
+          content: const Text(
+              "The server accepted the request, but the device hasn't "
+              'confirmed it yet — it may be offline or have a weak '
+              'connection. Check the device before trying again.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
