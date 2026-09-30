@@ -476,6 +476,51 @@ void main() {
       expect(laneBCoverage, lessThan(20.0));
     });
 
+    test('a jump landing implausibly far from the anchor row is never '
+        'force-credited to it, even with forced-point budget left', () {
+      // Regression test for a real session: the row's own mapped line
+      // gradually diverged from the sprayer's actual path (found to be a
+      // row-tilt-vs-straight-path mismatch), so by the time a jump
+      // happened, the "glitch" points that followed were already well
+      // outside any plausible distance from the anchor row -- but the old
+      // logic force-credited them anyway (only maxGlitchForcedPoints ever
+      // bounded it), painting a real farm's plot with coverage in the
+      // wrong place. far(m) sits 10 row-spacings east of laneA -- well past
+      // maxGlitchForcedDistanceMultiplier (2x the 2m half-width) and well
+      // outside laneB's own tolerance too, so there's nothing at all for it
+      // to plausibly match.
+      LatLng far(double metres) =>
+          LatLng(lat0 + dLat * metres / 200.0, lon0 + 0.5 * dLon + 10 * dLon);
+      final track = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        for (var i = 0; i < 8; i++)
+          HeatmapTrackPoint(
+            position: far(45.0 + i * 5),
+            isInPlot: true,
+            ptoOn: true,
+            isAuto: true,
+            speed: 4,
+            flowRate: 10,
+            isJumpFromPrevious: i == 0,
+          ),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneACoverage = lengthNear(bands, lon0 + 0.5 * dLon);
+      final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
+      // Only the genuinely-driven 0-40m of laneA is covered -- the far,
+      // implausible points are never painted onto laneA (must not exceed
+      // the driven stretch), and never wrongly bled into laneB either
+      // (there's nothing there to attribute them to).
+      expect(laneACoverage, lessThan(50.0));
+      expect(laneBCoverage, lessThan(5.0));
+    });
+
     test('recovery resumes normal per-point tracking on the same lane', () {
       final track = [
         for (final m in [0.0, 10.0, 20.0])

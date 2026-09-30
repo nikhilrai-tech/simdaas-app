@@ -431,11 +431,27 @@ class RowLineCoverage {
     // Recovery: the first point that's naturally back within the anchor
     // row's own tolerance ends the episode and resumes normal per-point
     // logic. If recovery never happens (the sprayer genuinely changed rows
-    // during/after the glitch), forcing gives up after
-    // maxGlitchForcedPoints and falls back to normal nearest-row logic, so
-    // a real, sustained move to a new row is never permanently stuck
-    // pinned to the old one.
+    // during/after the glitch), forcing gives up after maxGlitchForcedPoints
+    // OR once a forced point is more than maxGlitchForcedDistanceMultiplier
+    // tolerances away from the anchor row (whichever comes first) and falls
+    // back to normal nearest-row logic -- so a real, sustained move to a new
+    // row is never permanently stuck pinned to the old one, AND a forced
+    // point is never painted onto a row it's implausibly far from (found on
+    // a real session: a jump combined with the sprayer's path gradually
+    // diverging from the row's own mapped line meant later forced points,
+    // while still under the 20-point budget, were already 100+ m from the
+    // anchor row -- distance has to bound this independently of count).
     const maxGlitchForcedPoints = 20;
+    // A forced point beyond this multiple of the anchor row's own tolerance
+    // is no longer "probably still this row, just a glitchy fix" -- it's
+    // evidence of a real, larger divergence (the sprayer genuinely moved, or
+    // -- observed on a real session -- the row's own mapped line doesn't
+    // track the sprayer's actual path closely enough that far from where it
+    // was drawn). Forcing must never paint a row that far from what was
+    // actually measured, no matter how many of the maxGlitchForcedPoints
+    // budget are left -- the two bounds (distance and count) are
+    // independent, either one ends the forcing.
+    const maxGlitchForcedDistanceMultiplier = 2.0;
     int? glitchAnchorRow;
     int glitchForcedCount = 0;
 
@@ -448,10 +464,17 @@ class RowLineCoverage {
       if (glitchAnchorRow != null) {
         final anchorGeo = corridors[glitchAnchorRow];
         final anchorInfo = anchorGeo?.project(pt.position);
-        final backToAnchor = anchorGeo != null &&
-            anchorInfo != null &&
-            anchorInfo.distance <= anchorGeo.halfWidthAt(anchorInfo.t);
-        if (!backToAnchor && glitchForcedCount < maxGlitchForcedPoints) {
+        final tolerance = anchorGeo != null && anchorInfo != null
+            ? anchorGeo.halfWidthAt(anchorInfo.t)
+            : null;
+        final backToAnchor =
+            tolerance != null && anchorInfo!.distance <= tolerance;
+        final plausiblyStillThisRow = tolerance != null &&
+            anchorInfo!.distance <=
+                tolerance * maxGlitchForcedDistanceMultiplier;
+        if (!backToAnchor &&
+            plausiblyStillThisRow &&
+            glitchForcedCount < maxGlitchForcedPoints) {
           glitchForcedCount++;
           // A GPS jump interrupting an in-progress row-transition attempt
           // abandons that attempt -- fall the buffered points back to the
@@ -480,10 +503,13 @@ class RowLineCoverage {
           );
           continue;
         }
-        // Either naturally back near the trusted row, or forced for long
-        // enough without recovering -- stop forcing and let this point run
-        // through the normal logic below (it may re-confirm the same row,
-        // or -- given enough further points -- a genuinely new one).
+        // Naturally back near the trusted row, forced for long enough
+        // without recovering, or too far from the anchor row to plausibly
+        // still be it -- stop forcing WITHOUT crediting this point to
+        // anything, and let it run through the normal logic below (it may
+        // re-confirm the same row, match a genuinely different one, or --
+        // if it matches nothing -- stay uncredited rather than risk
+        // painting a row it was never actually close to).
         glitchAnchorRow = null;
       }
 
