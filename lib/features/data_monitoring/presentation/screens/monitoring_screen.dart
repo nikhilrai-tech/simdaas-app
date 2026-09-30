@@ -2265,6 +2265,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     );
     if (key == _trackLayersKey) return _trackLayersCache;
     _trackLayersKey = key;
+    // Populated (as a side effect) by buildHeatmapCoverageBands below with
+    // every point plotted on a best-guess row while a genuine row-to-row
+    // transition was still unconfirmed -- see buildForcedTransitionMarkers.
+    final forcedTransitionPoints = <LatLng>[];
     _trackLayersCache = [
       // Heatmap-colored coverage bands between rows. Only inside-plot
       // positions fill the bands; color depends on the selected heatmap.
@@ -2276,10 +2280,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             rowSpacing: plot.rowSpacing ?? 3.0,
             heatmapType: _selectedHeatmap,
             polygon: plot.polygon,
+            forcedTransitionPoints: forcedTransitionPoints,
           ),
         ),
         PolylineLayer(
           polylines: RowLineCoverage.buildRowLines(rowLines: plot.rowLines!),
+        ),
+        MarkerLayer(
+          markers: RowLineCoverage.buildForcedTransitionMarkers(
+              forcedTransitionPoints),
         ),
       ],
       // Outside-plot trajectory lines only (inside -> no line, the filled
