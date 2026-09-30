@@ -19,7 +19,19 @@ class ReportsListScreen extends ConsumerStatefulWidget {
 enum _DatePreset { today, thisWeek, thisMonth, custom }
 
 class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
-  late final javaTimer = _setupAutoRefresh();
+  late final StreamSubscription<void> _autoRefreshSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // `late final javaTimer = _setupAutoRefresh();` at the declaration
+    // looked equivalent but never actually ran: a `late` field only
+    // evaluates its initializer on first READ, and the only other place it
+    // was read was dispose() -- so this auto-refresh timer never started
+    // while the screen was open. Assigning it here in initState() is what
+    // actually starts it.
+    _autoRefreshSub = _setupAutoRefresh();
+  }
 
   String? _selectedPlotId;
   String? _selectedControlUnitId;
@@ -144,7 +156,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
     });
   }
 
-  dynamic _setupAutoRefresh() {
+  StreamSubscription<void> _setupAutoRefresh() {
     return Stream.periodic(const Duration(seconds: 30)).listen((_) {
       if (mounted) _refreshData();
     });
@@ -156,9 +168,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
 
   @override
   void dispose() {
-    if (javaTimer is StreamSubscription) {
-      (javaTimer as StreamSubscription).cancel();
-    }
+    _autoRefreshSub.cancel();
     super.dispose();
   }
 

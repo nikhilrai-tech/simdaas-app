@@ -67,7 +67,26 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   // the right status, but coming back into this same report showed the old
   // one, until the whole app was killed and reopened (the only thing that
   // actually clears the provider cache).
-  late final StreamSubscription<void> _autoRefreshSub = _setupAutoRefresh();
+  late final StreamSubscription<void> _autoRefreshSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // `late final _autoRefreshSub = _setupAutoRefresh();` at the
+    // declaration looks equivalent but is a real bug: a `late` field only
+    // runs its initializer on first READ, and the only other place this
+    // field was read was dispose() -- so the timer never actually started
+    // until the screen was already being torn down. Assigning it here in
+    // initState() is what makes it actually run.
+    _autoRefreshSub = _setupAutoRefresh();
+    // Also refresh immediately on open, not just on the next 30s tick --
+    // reopening a report already cached from an earlier visit THIS app
+    // session (e.g. back to the list, then back into the same report)
+    // would otherwise keep showing whatever was cached from that earlier
+    // visit for up to 30s, even though the list screen behind it may have
+    // already moved on to a newer status.
+    _refreshReport();
+  }
 
   StreamSubscription<void> _setupAutoRefresh() {
     return Stream.periodic(const Duration(seconds: 30)).listen((_) {
