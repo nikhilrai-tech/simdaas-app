@@ -839,6 +839,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
     final points = report.trajectory.map((p) => LatLng(p.lat, p.lon)).toList();
     final centroid = _getCentroid(points);
+    // Populated (as a side effect) by buildHeatmapCoverageBands below with
+    // every point plotted on a best-guess row while a genuine row-to-row
+    // transition was still unconfirmed -- see buildForcedTransitionMarkers.
+    final forcedTransitionPoints = <LatLng>[];
 
     return Stack(
       children: [
@@ -883,7 +887,12 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       rowSpacing: report.plot!.rowSpacing ?? 3.0,
                       heatmapType: _heatmapType,
                       polygon: report.plot!.polygon,
+                      forcedTransitionPoints: forcedTransitionPoints,
                     ),
+                  ),
+                  MarkerLayer(
+                    markers: RowLineCoverage.buildForcedTransitionMarkers(
+                        forcedTransitionPoints),
                   ),
                   if (_heatmapType == HeatmapType.gps && _showBackfillOverlay)
                     PolygonLayer(
@@ -1624,6 +1633,10 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
     final report = widget.report;
     final points = report.trajectory.map((p) => LatLng(p.lat, p.lon)).toList();
     final centroid = _getCentroid(points);
+    // Populated (as a side effect) by buildHeatmapCoverageBands below with
+    // every point plotted on a best-guess row while a genuine row-to-row
+    // transition was still unconfirmed -- see buildForcedTransitionMarkers.
+    final forcedTransitionPoints = <LatLng>[];
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1662,7 +1675,12 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                     rowSpacing: report.plot!.rowSpacing ?? 3.0,
                     heatmapType: _heatmapType,
                     polygon: report.plot!.polygon,
+                    forcedTransitionPoints: forcedTransitionPoints,
                   ),
+                ),
+                MarkerLayer(
+                  markers: RowLineCoverage.buildForcedTransitionMarkers(
+                      forcedTransitionPoints),
                 ),
                 if (_heatmapType == HeatmapType.gps && _showBackfillOverlay)
                   PolygonLayer(

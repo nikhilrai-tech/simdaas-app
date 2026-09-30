@@ -133,6 +133,15 @@ class RowLineCoverage {
     // Without it the older behaviour is kept: corridors exist only where
     // both row segments overlap.
     List<LatLng>? polygon,
+    // Out-param: when given, every point force-credited to the row it was
+    // last confirmed in while a genuine row-to-row transition is still
+    // pending (see "pendingForcedCount" below) has its position appended
+    // here. Purely additive -- doesn't affect which band gets painted or
+    // what colour it gets, only lets the caller show where the plotted line
+    // was a best-guess rather than a confirmed row.
+    // Deliberately excludes GPS-jump forcing (glitchAnchorRow below), which
+    // already has its own marker (GpsJumpDetector.buildJumpMarkers).
+    List<LatLng>? forcedTransitionPoints,
   }) {
     if (rowLines.length < 2) return const [];
     final bands = <Polygon>[];
@@ -514,6 +523,7 @@ class RowLineCoverage {
           // it's confirmed, same as always.
           if (currentRow != null && pendingForcedCount < maxGlitchForcedPoints) {
             pendingForcedCount++;
+            forcedTransitionPoints?.add(pt.position);
             final ri = currentRow;
             _creditPoint(
               pt: pt,
@@ -647,6 +657,37 @@ class RowLineCoverage {
     }
 
     return bands;
+  }
+
+  /// Small fixed-pixel-size markers at every point collected via
+  /// [buildHeatmapCoverageBands]'s `forcedTransitionPoints` out-param --
+  /// i.e. every point plotted onto a row only because a genuine row-to-row
+  /// transition (turning at the end of a row) hadn't been confirmed yet, so
+  /// the point was credited to the row the sprayer was last confirmed in
+  /// instead of wherever it actually was. Hollow (not filled) and a
+  /// different colour from [GpsJumpDetector.buildJumpMarkers]'s solid dots,
+  /// so the two "this point is uncertain" reasons (an implausible GPS jump
+  /// vs. an ordinary in-progress row turn) stay visually distinguishable.
+  /// Drawn as Markers rather than adjusting the band colour itself so the
+  /// existing coverage colour scheme is completely untouched.
+  static List<Marker> buildForcedTransitionMarkers(List<LatLng> points) {
+    if (points.isEmpty) return const [];
+    const size = 10.0;
+    return [
+      for (final p in points)
+        Marker(
+          point: p,
+          width: size,
+          height: size,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.amber.shade800, width: 2.0),
+            ),
+          ),
+        ),
+    ];
   }
 
   /// Credit one point to corridor [ri], bridging from the last credited

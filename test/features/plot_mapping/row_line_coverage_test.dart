@@ -481,6 +481,58 @@ void main() {
       // laneB gets properly confirmed and credited once actually reached.
       expect(laneBCoverage, greaterThan(30.0));
     });
+
+    test('forcedTransitionPoints collects every point plotted before the '
+        'new lane is confirmed, and stays empty when there is no turn', () {
+      LatLng outside(double m) =>
+          LatLng(lat0 + dLat * m / 200.0, lon0 - 2 * dLon);
+      // Forced points are the 3 "outside every lane" turn points, PLUS the
+      // first 6 laneB points -- the switch to laneB only confirms once
+      // pendingStreak > maxJitterStreak (6), i.e. on the 7th matching point,
+      // so points 1-6 of the laneB run are still plotted (forced) onto
+      // laneA, same as the turn itself.
+      final expectedForced = [
+        for (final m in [45.0, 50.0, 55.0]) outside(m),
+        for (final m in [60.0, 65.0, 70.0, 75.0, 80.0, 85.0]) laneB(m),
+      ];
+      final track = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        for (final m in [45.0, 50.0, 55.0])
+          _pt(outside(m).latitude, outside(m).longitude),
+        for (final m in [60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0,
+            100.0, 105.0, 110.0, 115.0, 120.0, 125.0, 130.0, 135.0])
+          _pt(laneB(m).latitude, laneB(m).longitude),
+      ];
+
+      final forced = <LatLng>[];
+      RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps,
+          forcedTransitionPoints: forced);
+
+      expect(forced.length, expectedForced.length);
+      for (var i = 0; i < expectedForced.length; i++) {
+        expect(forced[i].latitude, closeTo(expectedForced[i].latitude, 1e-9));
+        expect(
+            forced[i].longitude, closeTo(expectedForced[i].longitude, 1e-9));
+      }
+
+      final steadyTrack = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0, 50.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+      ];
+      final forcedSteady = <LatLng>[];
+      RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: steadyTrack,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps,
+          forcedTransitionPoints: forcedSteady);
+      expect(forcedSteady, isEmpty);
+    });
   });
   group('RowLineGeometry.shiftRow', () {
     const lat0 = 20.0, lon0 = 73.0;
