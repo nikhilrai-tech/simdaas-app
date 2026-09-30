@@ -400,11 +400,11 @@ void main() {
       final t0 = DateTime(2026, 1, 1, 12, 0, 0);
       expect(
           GpsJumpDetector.isLongGap(
-              t0, t0.add(const Duration(seconds: 30))),
+              t0, t0.add(const Duration(seconds: 3))),
           isFalse);
       expect(
           GpsJumpDetector.isLongGap(
-              t0, t0.add(const Duration(seconds: 90))),
+              t0, t0.add(const Duration(seconds: 8))),
           isTrue);
     });
   });

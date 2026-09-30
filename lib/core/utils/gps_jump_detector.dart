@@ -21,14 +21,15 @@ class GpsJumpDetector {
   // A connectivity gap (device silent for a while, then reconnects) covers
   // real ground during the silence -- distance/time still looks like
   // plausible driving speed, so isJump alone doesn't catch it. Normal live
-  // telemetry arrives roughly once a second; 60s is comfortably above any
-  // ordinary network jitter/retry delay while still catching a genuine
+  // telemetry arrives roughly once a second; 5s is well above any ordinary
+  // single missed/delayed heartbeat, so it won't flag routine jitter, but
+  // still catches even a brief real connectivity blip, not just a
   // multi-minute dropout. Live monitoring has no data for what happened
   // during the gap (unlike a completed report, which gets the real recovered
   // path via /backfill) -- so unlike a jump, which still gets bridged once
   // its trusted anchor row is established, a long gap must never be bridged
   // at all: there's nothing trustworthy to bridge FROM.
-  static const int maxPlausibleGapSeconds = 60;
+  static const int maxPlausibleGapSeconds = 5;
 
   static const double _mPerDeg = 111320.0;
 
