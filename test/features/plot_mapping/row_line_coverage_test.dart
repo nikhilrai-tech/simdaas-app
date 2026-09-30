@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
@@ -583,6 +584,92 @@ void main() {
     test('signedDistance is positive on the row\'s left', () {
       expect(RowLineGeometry.signedDistance(row, at(20, 50)), closeTo(10.0, 0.05));
       expect(RowLineGeometry.signedDistance(row, at(45, 50)), closeTo(-15.0, 0.05));
+    });
+  });
+
+  group('GPS heatmap Auto/Manual/PTO-off precedence', () {
+    HeatmapTrackPoint modePt(double lat, double lon,
+            {required bool ptoOn, required bool isAuto}) =>
+        HeatmapTrackPoint(
+          position: LatLng(lat, lon),
+          isInPlot: true,
+          ptoOn: ptoOn,
+          isAuto: isAuto,
+          speed: 4,
+          flowRate: ptoOn ? 10 : 0,
+        );
+
+    Color? colorAt(List<Polygon> bands, double lat0, double lon0, double dLon) {
+      Polygon? best;
+      double bestDist = double.infinity;
+      for (final b in bands) {
+        final avgLat =
+            b.points.map((p) => p.latitude).reduce((a, c) => a + c) /
+                b.points.length;
+        final avgLon =
+            b.points.map((p) => p.longitude).reduce((a, c) => a + c) /
+                b.points.length;
+        final d = ((avgLat - lat0) * _mPerDeg).abs();
+        if ((avgLon - lon0).abs() < dLon * 0.4 && d < bestDist) {
+          bestDist = d;
+          best = b;
+        }
+      }
+      return best?.color;
+    }
+
+    test('a later Manual pass overrides an earlier Auto one (latest wins '
+        'between the two PTO-on modes), but a later PTO-off pass never '
+        'overrides either', () {
+      const lat0 = 20.0, lon0 = 73.0;
+      final dLon = 4.0 / (_mPerDeg * math.cos(lat0 * math.pi / 180));
+      final dLat = 20.0 / _mPerDeg;
+      final rows = [
+        [LatLng(lat0, lon0), LatLng(lat0 + dLat, lon0)],
+        [LatLng(lat0, lon0 + dLon), LatLng(lat0 + dLat, lon0 + dLon)],
+      ];
+      final midLat = lat0 + dLat * 0.5;
+      final midLon = lon0 + dLon / 2;
+
+      // Pass 1: Auto, PTO on -- the whole row.
+      final pass1 = [
+        for (var i = 0; i <= 10; i++)
+          modePt(lat0 + dLat * i / 10, midLon, ptoOn: true, isAuto: true),
+      ];
+      var bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows, insidePoints: pass1, rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+      // Bands are painted with alpha 200 (see the GPS branch of
+      // buildHeatmapCoverageBands' finalization loop) -- compare against
+      // that, not the bare (fully-opaque) Colors.* constant.
+      expect(colorAt(bands, midLat, midLon, dLon), Colors.blue.withAlpha(200));
+
+      // Pass 2: Manual, PTO on -- a later, deliberate re-pass in the other
+      // mode. Must be shown (latest PTO-on wins), not stuck on Auto.
+      final pass2 = [
+        for (var i = 0; i <= 10; i++)
+          modePt(lat0 + dLat * i / 10, midLon, ptoOn: true, isAuto: false),
+      ];
+      bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows, insidePoints: [...pass1, ...pass2], rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+      expect(colorAt(bands, midLat, midLon, dLon), Colors.grey.withAlpha(200),
+          reason: 'later Manual pass should override the earlier Auto one');
+
+      // Pass 3: PTO off -- driving back through (e.g. to refill the tank).
+      // Must NOT override the Manual colour just established.
+      final pass3 = [
+        for (var i = 0; i <= 10; i++)
+          modePt(lat0 + dLat * i / 10, midLon, ptoOn: false, isAuto: false),
+      ];
+      bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: [...pass1, ...pass2, ...pass3],
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+      expect(colorAt(bands, midLat, midLon, dLon), Colors.grey.withAlpha(200),
+          reason: 'a later PTO-off pass must never override an established '
+              'PTO-on colour, Auto or Manual');
     });
   });
 }

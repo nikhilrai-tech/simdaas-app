@@ -73,17 +73,19 @@ class HeatmapColorUtils {
   }
 
   // Priority order for the GPS heatmap's row-coverage bands: PTO off (0) <
-  // Manual (1) < Auto (2). A sub-band that has ever reached a given
-  // priority must never visually drop back to a lower one on a later
-  // sample/pass — e.g. once shown Auto (blue), a later PTO-off reading at
-  // the same spot (GPS jitter, a momentary pause) must not repaint it
-  // orange, since spraying already happened there. Only used by the GPS
-  // heatmap — Speed/Spray/Left-Right keep their existing "latest sample"
-  // or accumulation behavior.
+  // PTO on, either mode (1). A sub-band that has ever reached PTO-on must
+  // never visually drop back to PTO-off on a later sample/pass — e.g. once
+  // shown as sprayed, a later PTO-off reading at the same spot (GPS jitter,
+  // a momentary pause, or driving back through to refill the tank) must not
+  // repaint it orange, since spraying already happened there. Auto and
+  // Manual share the SAME priority on purpose: between two PTO-on passes,
+  // the latest one wins (a deliberate later re-pass in the other mode is
+  // real, current information, not noise to protect against) -- only
+  // PTO-off is the one state that must never override an established
+  // PTO-on. Only used by the GPS heatmap — Speed/Spray/Left-Right keep
+  // their existing "latest sample" or accumulation behavior.
   static int gpsPriority({required bool ptoOn, required bool isAuto}) {
-    if (!ptoOn) return 0;
-    if (!isAuto) return 1;
-    return 2;
+    return ptoOn ? 1 : 0;
   }
 
   // Left/Right: which solenoid(s) sprayed at this point — orange = left
