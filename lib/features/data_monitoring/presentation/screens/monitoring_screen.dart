@@ -1724,9 +1724,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     ]),
                               ),
                             ),
-                            // Positioned blue dot that sits slightly above the left
-                            // edge of the card. The negative top offset allows it to
-                            // overlap above the card.
+                            // Positioned live-position badge that sits slightly above
+                            // the left edge of the card. The negative top offset
+                            // allows it to overlap above the card. A plain colour
+                            // dot here used to be Colors.blue, the same blue as the
+                            // GPS heatmap's "Auto" legend colour -- easy to mistake
+                            // for a heatmap swatch rather than an app UI element. A
+                            // dark badge with a white location icon can't be
+                            // confused with any heatmap's legend colours (GPS,
+                            // Speed, Spray and Left/Right between them already use
+                            // blue, grey, orange, red, yellow, green, purple, teal
+                            // and white).
                             const Positioned(
                               left: 12,
                               top: -25,
@@ -1735,8 +1743,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 height: 20,
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                      color: Colors.blue,
+                                      color: Colors.black87,
                                       shape: BoxShape.circle),
+                                  child: Icon(Icons.my_location,
+                                      size: 13, color: Colors.white),
                                 ),
                               ),
                             ),
