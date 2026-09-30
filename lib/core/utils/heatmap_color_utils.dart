@@ -20,6 +20,16 @@ class HeatmapTrackPoint {
   // sprayer can actually reach. Stops the heatmap gap-fill from bridging
   // across it and painting the jump itself as sprayed.
   final bool isJumpFromPrevious;
+  // True when more than GpsJumpDetector.maxPlausibleGapSeconds of real time
+  // passed since the previous point in the track -- a connectivity gap, not
+  // just ordinary ~1s sampling. Only ever set by the LIVE monitoring screen
+  // (see MonitoringScreen._buildInsideTrackPoints): there's genuinely no
+  // data for what happened during the gap yet, unlike a completed report,
+  // which has the real recovered path via /backfill by the time it's
+  // viewed -- report_details_screen.dart never sets this, so it has no
+  // effect there. Stops the heatmap gap-fill from bridging across the gap
+  // and painting a stretch as covered that was never actually observed.
+  final bool isLongGapFromPrevious;
 
   const HeatmapTrackPoint({
     required this.position,
@@ -32,6 +42,7 @@ class HeatmapTrackPoint {
     this.rightSolenoidOn = false,
     this.isBuffered = false,
     this.isJumpFromPrevious = false,
+    this.isLongGapFromPrevious = false,
   });
 }
 

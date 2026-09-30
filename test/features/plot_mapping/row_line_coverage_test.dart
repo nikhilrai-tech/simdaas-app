@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/utils/gps_jump_detector.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'package:simdaas/features/plot_mapping/presentation/utils/corridor_strip.dart';
 import 'package:simdaas/features/plot_mapping/presentation/utils/row_line_coverage.dart';
@@ -316,6 +317,95 @@ void main() {
         return sum + (lats.reduce(math.max) - lats.reduce(math.min));
       });
       expect(coveredLength, greaterThan(100.0));
+    });
+  });
+
+  group('long-gap suppression (connectivity dropout, not a GPS jump)', () {
+    // Two north-south rows 4 m apart, 200 m long.
+    const lat0 = 20.0, lon0 = 73.0;
+    final cosLat = math.cos(lat0 * math.pi / 180);
+    final dLon = 4.0 / (_mPerDeg * cosLat);
+    final dLat = 200.0 / _mPerDeg;
+    final rows = [
+      [LatLng(lat0, lon0), LatLng(lat0 + dLat, lon0)],
+      [LatLng(lat0, lon0 + dLon), LatLng(lat0 + dLat, lon0 + dLon)],
+    ];
+    LatLng along(double metres) =>
+        LatLng(lat0 + dLat * metres / 200.0, lon0 + dLon / 2);
+
+    double coveredLength(List<Polygon> bands) => bands.fold<double>(0, (sum, b) {
+          final lats = b.points.map((p) => (p.latitude - lat0) * _mPerDeg);
+          return sum + (lats.reduce(math.max) - lats.reduce(math.min));
+        });
+
+    for (final type in [
+      HeatmapType.gps,
+      HeatmapType.speed,
+      HeatmapType.leftRight,
+    ]) {
+      test('a flagged long gap does not bridge/fill the sub-bands it spans '
+          '(${type.name})', () {
+        // Same shape as the GPS-jump gap-fill suppression test above, but
+        // isLongGapFromPrevious instead of isJumpFromPrevious -- and a
+        // plausible driving speed for the distance/time (unlike a jump),
+        // since a real connectivity gap looks like ordinary movement, just
+        // over a long silent stretch.
+        final track = [
+          HeatmapTrackPoint(
+            position: along(10),
+            isInPlot: true,
+            ptoOn: true,
+            isAuto: true,
+            speed: 4,
+            flowRate: 10,
+            leftSolenoidOn: true,
+            rightSolenoidOn: true,
+          ),
+          HeatmapTrackPoint(
+            position: along(160),
+            isInPlot: true,
+            ptoOn: true,
+            isAuto: true,
+            speed: 4,
+            flowRate: 10,
+            leftSolenoidOn: true,
+            rightSolenoidOn: true,
+            isLongGapFromPrevious: true,
+          ),
+        ];
+        final bands = RowLineCoverage.buildHeatmapCoverageBands(
+            rowLines: rows, insidePoints: track, rowSpacing: 4.0,
+            heatmapType: type);
+        // Only the two visited sub-bands (near 10 m and near 160 m) are
+        // covered -- nowhere close to the ~150 m a bridged fill would give.
+        expect(coveredLength(bands), lessThan(20.0));
+      });
+    }
+
+    test('the same gap without the long-gap flag fills normally', () {
+      final track = [
+        _pt(along(10).latitude, along(10).longitude),
+        _pt(along(160).latitude, along(160).longitude), // isLongGapFromPrevious: false
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+      expect(coveredLength(bands), greaterThan(100.0));
+    });
+
+    test('GpsJumpDetector.isLongGap: under the threshold is not a gap, '
+        'over it is', () {
+      final t0 = DateTime(2026, 1, 1, 12, 0, 0);
+      expect(
+          GpsJumpDetector.isLongGap(
+              t0, t0.add(const Duration(seconds: 30))),
+          isFalse);
+      expect(
+          GpsJumpDetector.isLongGap(
+              t0, t0.add(const Duration(seconds: 90))),
+          isTrue);
     });
   });
 

@@ -2342,6 +2342,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           prevTime != null &&
           time != null &&
           GpsJumpDetector.isJump(prevPoint, prevTime, point, time);
+      // A connectivity gap (device silent for a while, then reconnects) --
+      // only meaningful here, live: there's no recovered path for the gap
+      // yet, unlike a completed report (which has the real /backfill data
+      // by the time it's viewed) -- see HeatmapTrackPoint.
+      // isLongGapFromPrevious.
+      final isLongGap = prevTime != null &&
+          time != null &&
+          GpsJumpDetector.isLongGap(prevTime, time);
       prevPoint = point;
       prevTime = time;
 
@@ -2368,6 +2376,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         leftSolenoidOn: leftOn,
         rightSolenoidOn: rightOn,
         isJumpFromPrevious: isJump,
+        isLongGapFromPrevious: isLongGap,
       ));
     }
     return result;

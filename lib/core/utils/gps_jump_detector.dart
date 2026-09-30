@@ -18,6 +18,18 @@ class GpsJumpDetector {
   /// mistaken for a jump.
   static const double maxPlausibleSpeedKmph = 25.0;
 
+  // A connectivity gap (device silent for a while, then reconnects) covers
+  // real ground during the silence -- distance/time still looks like
+  // plausible driving speed, so isJump alone doesn't catch it. Normal live
+  // telemetry arrives roughly once a second; 60s is comfortably above any
+  // ordinary network jitter/retry delay while still catching a genuine
+  // multi-minute dropout. Live monitoring has no data for what happened
+  // during the gap (unlike a completed report, which gets the real recovered
+  // path via /backfill) -- so unlike a jump, which still gets bridged once
+  // its trusted anchor row is established, a long gap must never be bridged
+  // at all: there's nothing trustworthy to bridge FROM.
+  static const int maxPlausibleGapSeconds = 60;
+
   static const double _mPerDeg = 111320.0;
 
   static double _distanceMeters(LatLng a, LatLng b) {
@@ -33,6 +45,16 @@ class GpsJumpDetector {
     if (dtSec <= 0) return false;
     final speedKmph = (_distanceMeters(a, b) / dtSec) * 3.6;
     return speedKmph > maxPlausibleSpeedKmph;
+  }
+
+  /// True if more than [maxPlausibleGapSeconds] of real time passed between
+  /// `ta` and `tb`, regardless of how far apart the positions are (even
+  /// "no movement at all" is still a gap worth flagging -- the point is
+  /// "we have no data for this stretch of time", not "the sprayer moved
+  /// implausibly fast").
+  static bool isLongGap(DateTime ta, DateTime tb) {
+    final dtSec = tb.difference(ta).inMilliseconds / 1000.0;
+    return dtSec > maxPlausibleGapSeconds;
   }
 
   /// Indices `i` such that the step from `points[i]` to `points[i + 1]` is a

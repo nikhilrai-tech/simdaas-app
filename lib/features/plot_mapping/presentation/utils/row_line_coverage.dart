@@ -772,7 +772,13 @@ class RowLineCoverage {
         ? null
         : HeatmapColorUtils.getColorForInsidePoint(pt, heatmapType);
 
-    final prev = (!isForcedGlitchCredit && pt.isJumpFromPrevious)
+    // A long gap (see HeatmapTrackPoint.isLongGapFromPrevious) suppresses
+    // the bridge unconditionally, even under forced crediting -- unlike a
+    // jump (bad-but-correctable data, worth bridging through once anchored
+    // to a trusted row), a gap means there's genuinely no data for that
+    // stretch, so nothing justifies painting it either way.
+    final prev = ((!isForcedGlitchCredit && pt.isJumpFromPrevious) ||
+            pt.isLongGapFromPrevious)
         ? null
         : prevIdxInCorridor[ri];
     final lo = prev != null ? math.min(prev, idx) : idx;
