@@ -377,6 +377,45 @@ class RowLineCoverage {
     // yet" branch below. Reset whenever pendingRow changes or the pending
     // phase ends (confirmed switch, or reaffirming the current row).
     int pendingForcedCount = 0;
+    // Points in the current pending stretch, held back rather than credited
+    // immediately -- their real destination (the OLD row, if the candidate
+    // never pans out, or the NEW row, if it gets confirmed) isn't known
+    // until the streak resolves one way or the other. Crediting them to the
+    // old row right away (as an earlier version of this did) meant that even
+    // once a transition to a new row was confirmed, the turn itself stayed
+    // permanently attributed to the row being left -- both the coverage
+    // colour AND the forced-transition marker ended up on the wrong row,
+    // which is exactly what looked broken on a real report: the marker over
+    // here, the colour over there. flushPending (below) applies the buffered
+    // points to whichever row the streak actually resolves to.
+    final pendingBuffer = <HeatmapTrackPoint>[];
+
+    void flushPending(int? toRow) {
+      if (toRow != null) {
+        final geo = corridors[toRow]!;
+        for (final bufPt in pendingBuffer) {
+          final info = geo.project(bufPt.position);
+          forcedTransitionPoints?.add(geo.midpointAt(info.t));
+          _creditPoint(
+            pt: bufPt,
+            ri: toRow,
+            geo: geo,
+            heatmapType: heatmapType,
+            asBackfillOverlay: asBackfillOverlay,
+            isForcedGlitchCredit: true,
+            corridorPassCount: corridorPassCount,
+            prevIdxInCorridor: prevIdxInCorridor,
+            subBandMaxPass: subBandMaxPass,
+            hasBuffered: hasBuffered,
+            accumulated: accumulated,
+            accumulatedCount: accumulatedCount,
+            gpsMaxPriority: gpsMaxPriority,
+            latestColor: latestColor,
+          );
+        }
+      }
+      pendingBuffer.clear();
+    }
 
     // A run of implausible GPS jumps (a glitch that lasts several points,
     // not just one bad fix) used to fall through to the "nearest row" search
@@ -414,6 +453,10 @@ class RowLineCoverage {
             anchorInfo.distance <= anchorGeo.halfWidthAt(anchorInfo.t);
         if (!backToAnchor && glitchForcedCount < maxGlitchForcedPoints) {
           glitchForcedCount++;
+          // A GPS jump interrupting an in-progress row-transition attempt
+          // abandons that attempt -- fall the buffered points back to the
+          // row trusted before the jump (== currentRow here already).
+          flushPending(currentRow);
           currentRow = glitchAnchorRow;
           pendingRow = null;
           pendingStreak = 0;
@@ -493,59 +536,55 @@ class RowLineCoverage {
         if (pendingRow == nearestRow) {
           pendingStreak++;
         } else {
+          // A different candidate than whatever was building up before --
+          // that earlier attempt never got confirmed, so its buffered points
+          // fall back to the row we were last sure of.
+          flushPending(currentRow);
           pendingRow = nearestRow;
           pendingStreak = 1;
           pendingForcedCount = 0;
         }
         if (pendingStreak > maxJitterStreak) {
           // Confirmed: the sprayer genuinely moved to a different row (or
-          // left every row). Reset the old row's gap-fill anchor so a much
-          // later real re-pass over it starts a fresh pass count instead of
-          // bridging today's visit to a visit from ages ago.
+          // left every row). The buffered points spent while this was still
+          // unconfirmed turned out to really belong to the row just
+          // confirmed, not the one they were provisionally held against --
+          // apply them there now, so both the coverage colour and the
+          // forced-transition marker end up on the row the sprayer actually
+          // reached, not the one it was leaving. Reset the old row's gap-fill
+          // anchor so a much later real re-pass over it starts a fresh pass
+          // count instead of bridging today's visit to a visit from ages ago.
+          flushPending(nearestRow);
           if (currentRow != null) prevIdxInCorridor[currentRow] = null;
           currentRow = nearestRow;
           pendingRow = null;
           pendingStreak = 0;
           pendingForcedCount = 0;
         } else {
-          // Not confirmed yet -- credit this point to the row we were last
-          // sure of (if any) instead of dropping it outright. A genuine
-          // row-to-row transition (driving from the end of one row to the
-          // start of the next) spends several points outside every
-          // corridor's tolerance while turning; without this, that whole
-          // stretch showed as an uncredited gap even though the sprayer
-          // never actually stopped spraying. Bounded the same way a GPS-
-          // glitch episode is (maxGlitchForcedPoints, see glitchAnchorRow
+          // Not confirmed yet -- hold this point rather than crediting (or
+          // dropping) it outright. A genuine row-to-row transition (driving
+          // from the end of one row to the start of the next) spends several
+          // points outside every corridor's tolerance while turning; without
+          // this, that whole stretch showed as an uncredited gap even though
+          // the sprayer never actually stopped spraying. Which row it really
+          // belongs to isn't known yet -- see flushPending, called once the
+          // streak resolves one way or the other. Bounded the same way a
+          // GPS-glitch episode is (maxGlitchForcedPoints, see glitchAnchorRow
           // above) so a point that never settles into any row for a long
-          // time doesn't keep crediting a row it may have long since left
-          // -- the normal streak-confirm above still runs every point, so a
-          // genuinely new row gets picked up (and forcing stops) the moment
-          // it's confirmed, same as always.
+          // time doesn't keep piling up indefinitely -- the normal
+          // streak-confirm above still runs every point, so a genuinely new
+          // row gets picked up (and forcing stops) the moment it's
+          // confirmed, same as always.
           if (currentRow != null && pendingForcedCount < maxGlitchForcedPoints) {
             pendingForcedCount++;
-            forcedTransitionPoints?.add(pt.position);
-            final ri = currentRow;
-            _creditPoint(
-              pt: pt,
-              ri: ri,
-              geo: corridors[ri]!,
-              heatmapType: heatmapType,
-              asBackfillOverlay: asBackfillOverlay,
-              isForcedGlitchCredit: true,
-              corridorPassCount: corridorPassCount,
-              prevIdxInCorridor: prevIdxInCorridor,
-              subBandMaxPass: subBandMaxPass,
-              hasBuffered: hasBuffered,
-              accumulated: accumulated,
-              accumulatedCount: accumulatedCount,
-              gpsMaxPriority: gpsMaxPriority,
-              latestColor: latestColor,
-            );
+            pendingBuffer.add(pt);
           }
           continue;
         }
       } else {
-        // Reaffirms the current row — cancel any pending switch.
+        // Reaffirms the current row — cancel any pending switch, falling the
+        // buffered points back to it (the candidate never panned out).
+        flushPending(currentRow);
         pendingRow = null;
         pendingStreak = 0;
         pendingForcedCount = 0;
@@ -572,6 +611,11 @@ class RowLineCoverage {
         latestColor: latestColor,
       );
     }
+    // The track ended mid-transition (pending, never confirmed) -- nothing
+    // else will ever arrive to resolve it, so fall the buffered points back
+    // to the row they were last sure of, same as any other unconfirmed
+    // candidate.
+    flushPending(currentRow);
 
     for (int ri = 0; ri < n; ri++) {
       final geo = corridors[ri];
@@ -982,6 +1026,16 @@ class _CorridorGeometry {
           distance: r.distance, t: r.t, segmentLengthMeters: st.length);
     }
     return RowLineGenerator.pointToSegmentInfo(p, midStart, midEnd);
+  }
+
+  /// Midline point at axial parameter [t] -- i.e. where a point projecting
+  /// to this t is actually credited/painted, as opposed to its own (possibly
+  /// well off-corridor) raw position. Used so a "forced credit" marker sits
+  /// on the row it was credited to, not wherever the sprayer physically was.
+  LatLng midpointAt(double t) {
+    final st = strip;
+    if (st != null) return st.midpointAt(t);
+    return RowLineCoverage._lerp(midStart, midEnd, t.clamp(0.0, 1.0));
   }
 
   bool get hasRows =>

@@ -83,6 +83,14 @@ class CorridorStrip {
   LatLng get midStart => point(sMin, _midL(sMin));
   LatLng get midEnd => point(sMax, _midL(sMax));
 
+  /// Midline point at axial parameter [t] (0..1, matching [project]'s t) --
+  /// i.e. where a point projecting to this t is actually credited/painted,
+  /// as opposed to its own (possibly well off-corridor) raw position.
+  LatLng midpointAt(double t) {
+    final s = sMin + t.clamp(0.0, 1.0) * length;
+    return point(s, _midL(s));
+  }
+
   /// Position of [p] along the corridor (t in 0..1) and its lateral distance
   /// from the corridor's centre line, both measured on the corridor's own
   /// axes.
