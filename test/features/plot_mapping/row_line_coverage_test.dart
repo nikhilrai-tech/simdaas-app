@@ -486,14 +486,17 @@ void main() {
         'new lane is confirmed, and stays empty when there is no turn', () {
       LatLng outside(double m) =>
           LatLng(lat0 + dLat * m / 200.0, lon0 - 2 * dLon);
-      // Forced points are the 3 "outside every lane" turn points, PLUS the
-      // first 6 laneB points -- the switch to laneB only confirms once
-      // pendingStreak > maxJitterStreak (6), i.e. on the 7th matching point,
-      // so points 1-6 of the laneB run are still plotted (forced) onto
-      // laneA, same as the turn itself.
+      // Forced points are credited to laneA's own midline (where the
+      // coverage band is actually painted), not the turn/laneB points' own
+      // raw (off-corridor) positions -- so the marker lines up with the
+      // band instead of appearing to sit on a different row/plot. Covers
+      // the 3 "outside every lane" turn points, PLUS the first 6 laneB
+      // points: the switch to laneB only confirms once pendingStreak >
+      // maxJitterStreak (6), i.e. on the 7th matching point, so points 1-6
+      // of the laneB run are still credited to laneA, same as the turn.
       final expectedForced = [
-        for (final m in [45.0, 50.0, 55.0]) outside(m),
-        for (final m in [60.0, 65.0, 70.0, 75.0, 80.0, 85.0]) laneB(m),
+        for (final m in [45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0])
+          laneA(m),
       ];
       final track = [
         for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])

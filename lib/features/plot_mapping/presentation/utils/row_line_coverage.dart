@@ -523,12 +523,20 @@ class RowLineCoverage {
           // it's confirmed, same as always.
           if (currentRow != null && pendingForcedCount < maxGlitchForcedPoints) {
             pendingForcedCount++;
-            forcedTransitionPoints?.add(pt.position);
             final ri = currentRow;
+            final creditGeo = corridors[ri]!;
+            // The credited row's own midline at this point's projected
+            // position -- NOT pt.position -- so the marker lines up with
+            // where the coverage band is actually painted. pt.position is
+            // off-corridor by definition (that's why it's being forced), so
+            // it can visually land over a completely different row/plot,
+            // which is confusing rather than informative.
+            forcedTransitionPoints
+                ?.add(creditGeo.midpointAt(creditGeo.project(pt.position).t));
             _creditPoint(
               pt: pt,
               ri: ri,
-              geo: corridors[ri]!,
+              geo: creditGeo,
               heatmapType: heatmapType,
               asBackfillOverlay: asBackfillOverlay,
               isForcedGlitchCredit: true,
@@ -982,6 +990,16 @@ class _CorridorGeometry {
           distance: r.distance, t: r.t, segmentLengthMeters: st.length);
     }
     return RowLineGenerator.pointToSegmentInfo(p, midStart, midEnd);
+  }
+
+  /// Midline point at axial parameter [t] -- i.e. where a point projecting
+  /// to this t is actually credited/painted, as opposed to its own (possibly
+  /// well off-corridor) raw position. Used so a "forced credit" marker sits
+  /// on the row it was credited to, not wherever the sprayer physically was.
+  LatLng midpointAt(double t) {
+    final st = strip;
+    if (st != null) return st.midpointAt(t);
+    return RowLineCoverage._lerp(midStart, midEnd, t.clamp(0.0, 1.0));
   }
 
   bool get hasRows =>
