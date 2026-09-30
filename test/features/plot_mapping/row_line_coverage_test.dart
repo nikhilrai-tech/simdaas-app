@@ -475,28 +475,37 @@ void main() {
 
       final laneACoverage = lengthNear(bands, lon0 + 0.5 * dLon);
       final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
-      // laneA covers the driven stretch AND the turn (forced onto laneA
-      // while the switch to laneB isn't confirmed yet) -- not just 0-40m.
+      // laneA covers the driven stretch (0-40m) plus the "outside every
+      // lane" headland points (45-55m, ~56m total) -- that stretch's own
+      // candidacy (pendingRow == null) never gets confirmed before the
+      // candidate changes to laneB at m=60, so it falls back to laneA.
       expect(laneACoverage, greaterThan(50.0));
-      // laneB gets properly confirmed and credited once actually reached.
-      expect(laneBCoverage, greaterThan(30.0));
+      expect(laneACoverage, lessThan(65.0));
+      // laneB gets the FULL confirmed stretch (60-135m, ~76m), including the
+      // 6 points (60-85) that were held pending before laneB was confirmed --
+      // retroactively credited to laneB once the streak resolves, not left
+      // on laneA the way an earlier version of this did.
+      expect(laneBCoverage, greaterThan(70.0));
     });
 
     test('forcedTransitionPoints collects every point plotted before the '
         'new lane is confirmed, and stays empty when there is no turn', () {
       LatLng outside(double m) =>
           LatLng(lat0 + dLat * m / 200.0, lon0 - 2 * dLon);
-      // Forced points are credited to laneA's own midline (where the
-      // coverage band is actually painted), not the turn/laneB points' own
-      // raw (off-corridor) positions -- so the marker lines up with the
-      // band instead of appearing to sit on a different row/plot. Covers
-      // the 3 "outside every lane" turn points, PLUS the first 6 laneB
-      // points: the switch to laneB only confirms once pendingStreak >
-      // maxJitterStreak (6), i.e. on the 7th matching point, so points 1-6
-      // of the laneB run are still credited to laneA, same as the turn.
+      // Forced points are credited to whichever row the pending streak
+      // actually resolves to (retroactively, via flushPending), not their
+      // own raw (off-corridor) positions -- so the marker lines up with
+      // wherever the coverage band ends up painted. The 3 "outside every
+      // lane" turn points are their own (never-confirmed) candidacy: it
+      // gets abandoned the moment the candidate changes to laneB at m=60,
+      // so they fall back to laneA (the row trusted before the turn). The
+      // next 6 points (60-85) build a laneB candidacy that DOES get
+      // confirmed (on the 7th matching point, m=90, once pendingStreak >
+      // maxJitterStreak(6)) -- so unlike the old (pre-retroactive-fix)
+      // behaviour, they end up credited to laneB, not laneA.
       final expectedForced = [
-        for (final m in [45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0])
-          laneA(m),
+        for (final m in [45.0, 50.0, 55.0]) laneA(m),
+        for (final m in [60.0, 65.0, 70.0, 75.0, 80.0, 85.0]) laneB(m),
       ];
       final track = [
         for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
