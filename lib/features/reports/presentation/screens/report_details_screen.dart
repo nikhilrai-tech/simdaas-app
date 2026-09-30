@@ -578,6 +578,56 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               const SizedBox(height: 16),
             ],
 
+            // TEMP DEBUG (2026-09-30): old-vs-new values for whichever
+            // totals a log-verification correction changed, for manual
+            // spot-checking. Remove this block once the investigation is
+            // done -- see matching TEMP DEBUG markers in
+            // jobs/serializers.py and lib/features/reports/domain/report.dart.
+            if (report.verificationMismatchesDebug != null &&
+                report.verificationMismatchesDebug!.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.purple.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.bug_report_outlined,
+                            color: Colors.purple.shade800, size: 18),
+                        const SizedBox(width: 8),
+                        Text('DEBUG: old vs new values (Log Updated)',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Colors.purple.shade900)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    for (final entry
+                        in report.verificationMismatchesDebug!.entries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '${(entry.value as Map)['label'] ?? entry.key}: '
+                          '${(entry.value as Map)['report']} -> '
+                          '${(entry.value as Map)['log']}',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.purple.shade900),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             if (report.gpsUnavailableNote != null) ...[
               Container(
                 width: double.infinity,
