@@ -194,7 +194,17 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
     // We need a Consumer to access ref, but we are in a StatefulWidget.
     // Use Consumer widget locally.
     return Consumer(builder: (context, ref, child) {
-      final plot = widget.plot;
+      // Watch plotByIdProvider (derived from plotsListProvider, already
+      // invalidated at every save point below -- row lines, map polygon,
+      // plot details) instead of the static widget.plot -- otherwise this
+      // screen kept showing whatever snapshot it was first opened with even
+      // after a save, since invalidating a provider elsewhere doesn't touch
+      // a StatefulWidget's own constructor argument. Falls back to
+      // widget.plot before the first fetch resolves, so there's no loading
+      // flicker on normal open.
+      final plot =
+          ref.watch(plotByIdProvider(widget.plot.id)).valueOrNull ??
+              widget.plot;
       return Scaffold(
       appBar: AppBar(
         title: Text(plot.name),
