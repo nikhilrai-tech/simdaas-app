@@ -76,6 +76,13 @@ class Report {
   // to verifying/verified/needs_review once the log-check pipeline picks
   // the report up and no longer says whether it started out backfilled.
   final bool hadBackfillData;
+  // TEMP DEBUG (2026-09-30): {field: {label, report, log}} for whichever
+  // totals a log-verification correction changed -- lets the report screen
+  // show old-vs-new for manual spot-checking. Remove this field, its
+  // fromJson wiring, and the debug UI block in report_details_screen.dart
+  // once the investigation is done -- see matching TEMP DEBUG markers in
+  // jobs/serializers.py on the backend.
+  final Map<String, dynamic>? verificationMismatchesDebug;
 
   const Report({
     this.plotId,
@@ -119,6 +126,7 @@ class Report {
     this.verificationStatus,
     this.verificationNote,
     this.hadBackfillData = false,
+    this.verificationMismatchesDebug,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,

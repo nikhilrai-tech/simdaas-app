@@ -44,6 +44,7 @@ class ReportModel extends Report {
     super.verificationStatus,
     super.verificationNote,
     super.hadBackfillData,
+    super.verificationMismatchesDebug,
     super.driverName,
     super.fertilizersUsed,
     super.agrochemicalUsed,
@@ -138,6 +139,11 @@ class ReportModel extends Report {
       verificationStatus: json['verification_status']?.toString(),
       verificationNote: json['verification_note']?.toString(),
       hadBackfillData: json['had_backfill_data'] == true,
+      verificationMismatchesDebug:
+          json['verification_mismatches_debug'] is Map
+              ? Map<String, dynamic>.from(
+                  json['verification_mismatches_debug'] as Map)
+              : null,
       driverName: json['driver_name']?.toString(),
       fertilizersUsed: json['fertilizers_used']?.toString(),
       agrochemicalUsed: json['agrochemical_used']?.toString(),
