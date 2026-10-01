@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:signal_strength_indicator/signal_strength_indicator.dart';
@@ -116,6 +117,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   // time (guarded by _manualBusy / the confirm dialog before End Session),
   // so a single field is enough; not scoped per-request.
   Completer<SessionAckEvent>? _pendingSessionAck;
+  // Live count of backend retry attempts (jobs.tasks.retry_session_command)
+  // for whichever request _pendingSessionAck is currently waiting on -- fed
+  // to _SessionRequestDialog so its "waiting for device" phase can show
+  // retry progress instead of a single static spinner for the whole ~20s
+  // window. Reset to 0 at the start of each _waitForSessionAck call.
+  final ValueNotifier<int> _retryAttempts = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -296,7 +303,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         setState(() => _manualBusy = false);
       });
       _sessionAckSub = svc.deviceSessionAckStream(normId).listen((ack) {
-        if (!mounted || ack.messageType != 'session') return;
+        if (!mounted) return;
+        if (ack.messageType == 'session_retry') {
+          // Live progress only -- not a real device confirmation, so it
+          // never completes _pendingSessionAck or clears _manualBusy.
+          final attempt = ack.attempt;
+          if (attempt != null) _retryAttempts.value = attempt;
+          return;
+        }
+        if (ack.messageType != 'session') return;
         setState(() => _manualBusy = false);
         final message = _sessionAckMessage(ack);
         final pending = _pendingSessionAck;
@@ -457,6 +472,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     _reportAmendedSub?.cancel();
     _countdownTimer?.cancel();
     _cooldownBannerDismissTimer?.cancel();
+    _retryAttempts.dispose();
     super.dispose();
   }
 
@@ -530,6 +546,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   Future<String?> _waitForSessionAck({
     Duration timeout = const Duration(seconds: 20),
   }) async {
+    _retryAttempts.value = 0;
     final completer = Completer<SessionAckEvent>();
     _pendingSessionAck = completer;
     try {
@@ -629,6 +646,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         waitForDeviceConfirmation: waitForDeviceConfirmation,
         errorTextBuilder: _manualErrorText,
         isNetworkError: _isNetworkError,
+        retryAttempts: _retryAttempts,
       ),
     );
     return result ?? false;
@@ -2792,6 +2810,10 @@ class _SessionRequestDialog extends StatefulWidget {
   final Future<String?> Function()? waitForDeviceConfirmation;
   final String Function(Object err) errorTextBuilder;
   final bool Function(Object err) isNetworkError;
+  // Live backend retry-attempt count (jobs.tasks.retry_session_command) for
+  // the waitingForDevice phase -- lets the dialog show "retried 2x" instead
+  // of a single static spinner for the whole ~20s wait-for-ack window.
+  final ValueListenable<int>? retryAttempts;
 
   const _SessionRequestDialog({
     required this.sendingText,
@@ -2800,6 +2822,7 @@ class _SessionRequestDialog extends StatefulWidget {
     required this.isNetworkError,
     this.sentTextBuilder,
     this.waitForDeviceConfirmation,
+    this.retryAttempts,
   });
 
   @override
@@ -2885,14 +2908,43 @@ class _SessionRequestDialogState extends State<_SessionRequestDialog> {
         return AlertDialog(
           content: Row(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
               const SizedBox(width: 16),
-              Expanded(child: Text(_waitingText)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_waitingText),
+                    if (widget.retryAttempts != null)
+                      ValueListenableBuilder<int>(
+                        valueListenable: widget.retryAttempts!,
+                        builder: (context, attempt, _) {
+                          if (attempt <= 0) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Retrying… (attempt $attempt)',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: Theme.of(context).hintColor),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         );

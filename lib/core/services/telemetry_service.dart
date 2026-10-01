@@ -168,6 +168,13 @@ class SessionAckEvent {
 
   String? get status => data['status']?.toString();
   String? get event => data['event']?.toString();
+
+  /// Only set on a `session_retry` event (jobs.device_state.
+  /// broadcast_session_retry) -- which attempt number the backend just
+  /// re-sent to the device.
+  int? get attempt => data['attempt'] is int
+      ? data['attempt'] as int
+      : int.tryParse(data['attempt']?.toString() ?? '');
 }
 
 /// A finished session's report was recomputed (or a session was recovered)
