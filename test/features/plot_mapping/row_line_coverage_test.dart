@@ -722,6 +722,85 @@ void main() {
           forcedTransitionPoints: forcedSteady);
       expect(forcedSteady, isEmpty);
     });
+
+    test('a sustained run confidently matching a DIFFERENT specific lane '
+        'ends forcing well before the full forced-point budget', () {
+      // Regression test for a real session: after a jump, laneB sat exactly
+      // at the maxGlitchForcedDistanceMultiplier boundary from laneA (the
+      // anchor) -- "plausibly still laneA" by distance alone -- while every
+      // one of the next 15 points landed EXACTLY on laneB's own centreline
+      // (confidently laneB, not just "plausible"). The old logic kept
+      // forcing all of them onto laneA for the full 20-point budget
+      // regardless, since the normal streak-confirm never runs while a
+      // point is being force-credited. 15 points is deliberately more than
+      // maxGlitchAltRowStreak (10) but still within maxGlitchForcedPoints
+      // (20), so this only passes once the alt-row streak can end forcing
+      // early.
+      final track = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        for (var i = 0; i < 15; i++)
+          HeatmapTrackPoint(
+            position: laneB(45.0 + i * 5),
+            isInPlot: true,
+            ptoOn: true,
+            isAuto: true,
+            speed: 4,
+            flowRate: 10,
+            isJumpFromPrevious: i == 0,
+          ),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
+      // maxGlitchAltRowStreak (10) is reached partway through the 15-point
+      // run, so the back half of it (and the sub-bands the retroactive
+      // confirm credits) ends up on laneB (measured ~22m) -- well short of
+      // the full ~70m the 15 points would cover if every one of them were
+      // credited there, but clearly more than the 0m the unfixed forcing
+      // budget gave it (it would have exhausted at point 20, never
+      // confirming laneB within this 15-point run at all).
+      expect(laneBCoverage, inInclusiveRange(15.0, 50.0));
+    });
+
+    test('the 8-point glitch-cluster protection still holds just below the '
+        'alt-row streak threshold', () {
+      // maxGlitchAltRowStreak (10) is deliberately set above this cluster's
+      // length (8) -- re-asserts the original "glitch cluster lands near
+      // the neighbouring lane, credited to the lane actually driven" case
+      // specifically against the NEW alt-row-streak logic, not just the
+      // older distance/count bounds, so a future change to the threshold
+      // can't silently break the original protection.
+      final track = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        for (var i = 0; i < 8; i++)
+          HeatmapTrackPoint(
+            position: laneB(45.0 + i * 5),
+            isInPlot: true,
+            ptoOn: true,
+            isAuto: true,
+            speed: 4,
+            flowRate: 10,
+            isJumpFromPrevious: i == 0,
+          ),
+        _pt(laneA(90).latitude, laneA(90).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneACoverage = lengthNear(bands, lon0 + 0.5 * dLon);
+      final laneBCoverage = lengthNear(bands, lon0 + 1.5 * dLon);
+      expect(laneACoverage, greaterThan(70.0));
+      expect(laneBCoverage, lessThan(20.0));
+    });
   });
   group('RowLineGeometry.shiftRow', () {
     const lat0 = 20.0, lon0 = 73.0;
