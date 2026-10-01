@@ -331,8 +331,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         if (ack.messageType == 'session_retry') {
           // Live progress only -- not a real device confirmation, so it
           // never completes _pendingSessionConfirmation or clears _manualBusy.
+          // Only ever bumps the counter UP: _waitForSessionAck's local
+          // timer is the primary, guaranteed driver (see its doc comment),
+          // this just lets a real broadcast pull it forward if it happens
+          // to arrive ahead of the next local tick, never backward.
           final attempt = ack.attempt;
-          if (attempt != null) _retryAttempts.value = attempt;
+          if (attempt != null && attempt > _retryAttempts.value) {
+            _retryAttempts.value = attempt;
+          }
           return;
         }
         if (ack.messageType != 'session') return;
@@ -574,6 +580,19 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     _retryAttempts.value = 0;
     final completer = Completer<String>();
     _pendingSessionConfirmation = completer;
+    // Ticks _retryAttempts on the backend's own known retry cadence
+    // (jobs.tasks.retry_session_command re-sends every 5s) instead of
+    // waiting for its session_retry broadcast to actually arrive and be
+    // parsed -- a healthy request usually resolves via the heartbeat
+    // fallback above within a second or two, well before the backend's own
+    // first retry at 5s would ever fire, so a WebSocket-broadcast-driven
+    // counter almost never got a chance to show anything under normal
+    // conditions. This local timer shows live progress deterministically,
+    // matching what the backend is doing regardless of whether its
+    // broadcast is received in time to be useful.
+    final localTicker = Timer.periodic(const Duration(seconds: 5), (_) {
+      _retryAttempts.value++;
+    });
     try {
       return await completer.future.timeout(timeout, onTimeout: () {
         throw TimeoutException('no ack');
@@ -581,6 +600,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     } on TimeoutException {
       return null;
     } finally {
+      localTicker.cancel();
       if (identical(_pendingSessionConfirmation, completer)) {
         _pendingSessionConfirmation = null;
       }
