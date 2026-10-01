@@ -31,6 +31,25 @@ class RowLineCoverage {
   /// How many telemetry samples inside a sub-band counts as "one pass".
   static const double samplesPerPass = 3.0;
 
+  /// A forced-glitch credit's own raw position is untrustworthy (that's the
+  /// whole premise of glitchAnchorRow forcing, see buildHeatmapCoverageBands)
+  /// -- its projection onto the anchor row's length (rows are treated as
+  /// infinite lines for this) can land far from the sub-band it was last
+  /// confirmed in, even when its PERPENDICULAR distance from the row passed
+  /// maxGlitchForcedDistanceMultiplier's check, if the glitch happens to
+  /// land close enough to a far-off part of the SAME row's line. Without
+  /// this bound, _creditPoint's gap-fill bridges every sub-band in between
+  /// as "covered" -- found on a real session: the sprayer jumped to a
+  /// different row and back, the jump's perpendicular distance from the
+  /// original row was still within tolerance, and the bridge painted nearly
+  /// the entire corridor even though the sprayer was never actually there
+  /// during that stretch. Caps how many sub-bands (~2m each) a single
+  /// forced credit may bridge-fill -- generous enough for ordinary one-
+  /// sample GPS jitter (which doesn't represent real travel), tight enough
+  /// that a jump to a genuinely different part of the field can't paint a
+  /// long stretch it never covered.
+  static const int maxForcedCreditBridgeSubBands = 3;
+
   /// A corridor whose measured gap exceeds rowSpacing by more than this is
   /// treated as "a row is missing here" rather than a genuine tapering
   /// field — see the anomalous-gap check in [buildHeatmapCoverageBands].
@@ -452,13 +471,33 @@ class RowLineCoverage {
     // budget are left -- the two bounds (distance and count) are
     // independent, either one ends the forcing.
     const maxGlitchForcedDistanceMultiplier = 2.0;
+    // While forcing is active, a point that confidently matches a DIFFERENT
+    // specific corridor's own (1x) tolerance -- not just "plausibly still
+    // the anchor" -- for this many CONSECUTIVE points is treated as a
+    // genuine, confirmed row change, ending the forcing immediately instead
+    // of exhausting the full maxGlitchForcedPoints budget first. Found on a
+    // real session: after a jump, every point for the next ~20 (the whole
+    // budget) was comfortably within a DIFFERENT row's own tolerance the
+    // entire time (never ambiguous), yet forcing kept painting them onto
+    // the stale anchor row regardless, because the normal streak-confirm
+    // mechanism never runs at all while a point is being force-credited.
+    // Set higher than the longest glitch cluster this is tuned against
+    // (an 8-point stable-but-wrong GPS fix staying correctly anchored, see
+    // the dedicated test) so an ordinary glitch is never mistaken for a
+    // real transition, while a sustained one still resolves well before
+    // the full 20-point budget.
+    const maxGlitchAltRowStreak = 10;
     int? glitchAnchorRow;
     int glitchForcedCount = 0;
+    int? glitchAltRow;
+    int glitchAltStreak = 0;
 
     for (final pt in insidePoints) {
       if (pt.isJumpFromPrevious && currentRow != null && glitchAnchorRow == null) {
         glitchAnchorRow = currentRow;
         glitchForcedCount = 0;
+        glitchAltRow = null;
+        glitchAltStreak = 0;
       }
 
       if (glitchAnchorRow != null) {
@@ -472,7 +511,42 @@ class RowLineCoverage {
         final plausiblyStillThisRow = tolerance != null &&
             anchorInfo!.distance <=
                 tolerance * maxGlitchForcedDistanceMultiplier;
-        if (!backToAnchor &&
+
+        int? altMatch;
+        for (int ri = 0; ri < n; ri++) {
+          if (ri == glitchAnchorRow) continue;
+          final geo = corridors[ri];
+          if (geo == null) continue;
+          final info = geo.project(pt.position);
+          if (info.distance <= geo.halfWidthAt(info.t)) {
+            altMatch = ri;
+            break;
+          }
+        }
+        if (altMatch != null && altMatch == glitchAltRow) {
+          glitchAltStreak++;
+        } else {
+          glitchAltRow = altMatch;
+          glitchAltStreak = altMatch != null ? 1 : 0;
+        }
+
+        if (glitchAltStreak > maxGlitchAltRowStreak) {
+          // Several consecutive points confidently match the SAME different
+          // row the entire time, even while still "plausibly" the anchor by
+          // distance alone -- confirm the new row now instead of waiting
+          // out the rest of the forcing budget. Falls through to the normal
+          // crediting below (not `continue`) so this point itself is
+          // credited the same way any other confirmed-row point is.
+          flushPending(glitchAltRow);
+          if (currentRow != null) prevIdxInCorridor[currentRow] = null;
+          currentRow = glitchAltRow;
+          glitchAnchorRow = null;
+          pendingRow = null;
+          pendingStreak = 0;
+          pendingForcedCount = 0;
+          glitchAltRow = null;
+          glitchAltStreak = 0;
+        } else if (!backToAnchor &&
             plausiblyStillThisRow &&
             glitchForcedCount < maxGlitchForcedPoints) {
           glitchForcedCount++;
@@ -502,15 +576,16 @@ class RowLineCoverage {
             latestColor: latestColor,
           );
           continue;
+        } else {
+          // Naturally back near the trusted row, forced for long enough
+          // without recovering, or too far from the anchor row to plausibly
+          // still be it -- stop forcing WITHOUT crediting this point to
+          // anything, and let it run through the normal logic below (it may
+          // re-confirm the same row, match a genuinely different one, or --
+          // if it matches nothing -- stay uncredited rather than risk
+          // painting a row it was never actually close to).
+          glitchAnchorRow = null;
         }
-        // Naturally back near the trusted row, forced for long enough
-        // without recovering, or too far from the anchor row to plausibly
-        // still be it -- stop forcing WITHOUT crediting this point to
-        // anything, and let it run through the normal logic below (it may
-        // re-confirm the same row, match a genuinely different one, or --
-        // if it matches nothing -- stay uncredited rather than risk
-        // painting a row it was never actually close to).
-        glitchAnchorRow = null;
       }
 
       // Home-row advantage: if this point still satisfies the CURRENT row's
@@ -803,10 +878,21 @@ class RowLineCoverage {
     // jump (bad-but-correctable data, worth bridging through once anchored
     // to a trusted row), a gap means there's genuinely no data for that
     // stretch, so nothing justifies painting it either way.
+    //
+    // A forced-glitch credit is still capped separately (see
+    // maxForcedCreditBridgeSubBands): its own position is untrustworthy, so
+    // a bridge that would span further than ordinary GPS jitter could
+    // explain is suppressed too, even though forced credits are otherwise
+    // allowed to bridge.
+    final rawPrev = prevIdxInCorridor[ri];
+    final forcedBridgeTooFar = isForcedGlitchCredit &&
+        rawPrev != null &&
+        (idx - rawPrev).abs() > maxForcedCreditBridgeSubBands;
     final prev = ((!isForcedGlitchCredit && pt.isJumpFromPrevious) ||
-            pt.isLongGapFromPrevious)
+            pt.isLongGapFromPrevious ||
+            forcedBridgeTooFar)
         ? null
-        : prevIdxInCorridor[ri];
+        : rawPrev;
     final lo = prev != null ? math.min(prev, idx) : idx;
     final hi = prev != null ? math.max(prev, idx) : idx;
 
