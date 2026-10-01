@@ -112,14 +112,27 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   StreamSubscription<ReportAmendedEvent>? _reportAmendedSub;
   // True while a virtual start/stop request is in flight.
   bool _manualBusy = false;
-  // Completed by _sessionAckSub's listener with the device's own ack for
-  // whichever start/stop request is currently showing a status dialog --
-  // see _waitForSessionAck. Only one manual request is ever in flight at a
-  // time (guarded by _manualBusy / the confirm dialog before End Session),
-  // so a single field is enough; not scoped per-request.
-  Completer<SessionAckEvent>? _pendingSessionAck;
+  // Completed by EITHER _sessionAckSub (the device's own explicit ack) OR
+  // _sessionEventSub (the heartbeat-driven session_event) -- whichever
+  // confirms first -- with the message to show, for whichever start/stop
+  // request is currently showing a status dialog. See _waitForSessionAck.
+  //
+  // Two sources matter because the explicit ack is just one more MQTT
+  // publish that can itself get lost on a weak connection even when the
+  // original command got through and the device genuinely started/stopped
+  // -- jobs.tasks.retry_session_command only re-sends the ORIGINAL command,
+  // which doesn't help if it's the device's REPLY that went missing, not
+  // the request. The heartbeat is a second, independent, much more
+  // reliable confirmation signal (it's already flowing continuously once a
+  // session is running) that the dialog shouldn't block on waiting for the
+  // ack alone to answer "did it actually work?".
+  //
+  // Only one manual request is ever in flight at a time (guarded by
+  // _manualBusy / the confirm dialog before End Session), so a single field
+  // is enough; not scoped per-request.
+  Completer<String>? _pendingSessionConfirmation;
   // Live count of backend retry attempts (jobs.tasks.retry_session_command)
-  // for whichever request _pendingSessionAck is currently waiting on -- fed
+  // for whichever request _pendingSessionConfirmation is currently waiting on -- fed
   // to _SessionRequestDialog so its "waiting for device" phase can show
   // retry progress instead of a single static spinner for the whole ~20s
   // window. Reset to 0 at the start of each _waitForSessionAck call.
@@ -302,12 +315,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           positions = svc.getPositions(normId);
         }
         setState(() => _manualBusy = false);
+        // See _pendingSessionConfirmation's doc comment: this heartbeat-
+        // driven signal confirms the request worked even if the device's
+        // own explicit ack packet (the other, less reliable path below)
+        // never arrives.
+        final pending = _pendingSessionConfirmation;
+        if (pending != null && !pending.isCompleted) {
+          pending.complete(e.event == 'START'
+              ? 'Session started on the device'
+              : 'Session stopped on the device');
+        }
       });
       _sessionAckSub = svc.deviceSessionAckStream(normId).listen((ack) {
         if (!mounted) return;
         if (ack.messageType == 'session_retry') {
           // Live progress only -- not a real device confirmation, so it
-          // never completes _pendingSessionAck or clears _manualBusy.
+          // never completes _pendingSessionConfirmation or clears _manualBusy.
           final attempt = ack.attempt;
           if (attempt != null) _retryAttempts.value = attempt;
           return;
@@ -315,12 +338,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         if (ack.messageType != 'session') return;
         setState(() => _manualBusy = false);
         final message = _sessionAckMessage(ack);
-        final pending = _pendingSessionAck;
+        final pending = _pendingSessionConfirmation;
         if (pending != null && !pending.isCompleted) {
           // A status dialog (_waitForSessionAck) is actively waiting on
           // this exact ack -- let it show the result instead of also
           // popping a separate SnackBar with the same message.
-          pending.complete(ack);
+          pending.complete(message ?? 'The device responded.');
         } else if (message != null) {
           _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
         }
@@ -536,29 +559,31 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         _ => null,
       };
 
-  /// Waits for the device's own ack (via _sessionAckSub) to the start/stop
-  /// request just sent, racing a [timeout] -- the single mechanism behind
-  /// the status dialog's persistent "waiting for device" phase for BOTH
-  /// start and stop, so a request is never silently assumed to have
-  /// succeeded just because the SERVER accepted it. Returns the ack's
-  /// message on a real confirmation, or null if the device never answers
-  /// in time (the caller shows this as a dismissible "no response" state,
-  /// not a silent success).
+  /// Waits for the device to confirm the start/stop request just sent --
+  /// via EITHER its explicit ack (_sessionAckSub) OR the heartbeat-driven
+  /// session_event (_sessionEventSub), whichever arrives first -- racing a
+  /// [timeout]. The single mechanism behind the status dialog's persistent
+  /// "waiting for device" phase for BOTH start and stop, so a request is
+  /// never silently assumed to have succeeded just because the SERVER
+  /// accepted it. Returns the confirmation message on success, or null if
+  /// neither signal arrives in time (the caller shows this as a dismissible
+  /// "no response" state, not a silent success).
   Future<String?> _waitForSessionAck({
     Duration timeout = const Duration(seconds: 20),
   }) async {
     _retryAttempts.value = 0;
-    final completer = Completer<SessionAckEvent>();
-    _pendingSessionAck = completer;
+    final completer = Completer<String>();
+    _pendingSessionConfirmation = completer;
     try {
-      final ack = await completer.future.timeout(timeout, onTimeout: () {
+      return await completer.future.timeout(timeout, onTimeout: () {
         throw TimeoutException('no ack');
       });
-      return _sessionAckMessage(ack) ?? 'The device responded.';
     } on TimeoutException {
       return null;
     } finally {
-      if (identical(_pendingSessionAck, completer)) _pendingSessionAck = null;
+      if (identical(_pendingSessionConfirmation, completer)) {
+        _pendingSessionConfirmation = null;
+      }
     }
   }
 
