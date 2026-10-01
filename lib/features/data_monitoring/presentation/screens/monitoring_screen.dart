@@ -18,6 +18,7 @@ import '../../../equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/telemetry_service.dart';
+import 'package:simdaas/core/services/heatmap_preferences_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'dart:async';
@@ -963,6 +964,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   Widget build(BuildContext context) {
     final conn = ref.watch(isOnlineStreamProvider);
     final online = conn.asData?.value ?? true;
+    // Not read directly -- watching is what makes every heatmap on this
+    // screen repaint immediately after Profile > Settings > Heatmap colors
+    // is saved, since HeatmapColorUtils's static fields it updates don't
+    // trigger a rebuild on their own. See heatmap_preferences_service.dart.
+    ref.watch(heatmapThresholdsProvider);
 
     final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));

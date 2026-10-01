@@ -6,6 +6,7 @@ import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
+import 'package:simdaas/core/services/heatmap_preferences_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
 import 'package:simdaas/core/utils/gps_jump_detector.dart';
 import '../../domain/report.dart';
@@ -108,6 +109,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(reportDetailProvider(widget.report.id));
     final report = detailAsync.asData?.value ?? widget.report;
+    // Not read directly -- watching is what makes the heatmaps below
+    // repaint immediately after Profile > Settings > Heatmap colors is
+    // saved. See heatmap_preferences_service.dart.
+    ref.watch(heatmapThresholdsProvider);
     final dateFormat = DateFormat('h:mm a, dd MMM yyyy');
 
     final startTime = report.startedAt ??
@@ -1651,7 +1656,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
 // ── Full-screen map page ────────────────────────────────────────────────────
 
-class _FullScreenMapPage extends StatefulWidget {
+class _FullScreenMapPage extends ConsumerStatefulWidget {
   final Report report;
   final HeatmapType initialHeatmapType;
   final bool initialIsSatelliteView;
@@ -1663,10 +1668,10 @@ class _FullScreenMapPage extends StatefulWidget {
   });
 
   @override
-  State<_FullScreenMapPage> createState() => _FullScreenMapPageState();
+  ConsumerState<_FullScreenMapPage> createState() => _FullScreenMapPageState();
 }
 
-class _FullScreenMapPageState extends State<_FullScreenMapPage> {
+class _FullScreenMapPageState extends ConsumerState<_FullScreenMapPage> {
   late HeatmapType _heatmapType;
   late bool _isSatelliteView;
   bool _showBackfillOverlay = true;
@@ -1680,6 +1685,10 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Not read directly -- watching is what makes this repaint immediately
+    // after Profile > Settings > Heatmap colors is saved while this
+    // full-screen view is open. See heatmap_preferences_service.dart.
+    ref.watch(heatmapThresholdsProvider);
     final report = widget.report;
     final points = report.trajectory.map((p) => LatLng(p.lat, p.lon)).toList();
     final centroid = _getCentroid(points);

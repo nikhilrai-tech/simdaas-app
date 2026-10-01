@@ -5,6 +5,7 @@ import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/utils/api_error.dart';
+import 'package:simdaas/core/utils/session_pin_prompt.dart';
 import 'package:simdaas/features/auth/presentation/providers/users_providers.dart';
 import '../../domain/entities/equipment.dart';
 import '../providers/equipment_providers.dart';
@@ -14,11 +15,6 @@ import 'create_control_unit_screen.dart';
 import 'create_sprayer_screen.dart';
 import 'create_tractor_screen.dart';
 import 'package:simdaas/features/firmware_update/presentation/screens/firmware_update_workspace_screen.dart';
-
-/// Thrown internally when the user backs out of the session-PIN prompt
-/// (_SessionModeCardState) -- caught to abort the mode switch quietly, not
-/// as an error.
-class _PinCancelled implements Exception {}
 
 class EquipmentDetailsScreen extends ConsumerStatefulWidget {
   final EquipmentEntity equipment;
@@ -892,89 +888,22 @@ class _SessionModeCardState extends ConsumerState<_SessionModeCard> {
 
     setState(() => _loading = true);
     try {
-      await _runWithPinRetry((pin) => ref
-          .read(equipmentControllerProvider)
-          .setSessionMode(widget.equipment.id, mode: mode, pin: pin));
+      await runWithPinRetry(
+        context,
+        action: (pin) => ref
+            .read(equipmentControllerProvider)
+            .setSessionMode(widget.equipment.id, mode: mode, pin: pin),
+        isMounted: () => mounted,
+        promptMessage: 'Changing the session mode on this device requires a PIN.',
+      );
       if (mounted) setState(() => _mode = mode);
-    } on _PinCancelled {
+    } on PinCancelled {
       // User backed out of the PIN prompt -- no error, just stop.
     } catch (err) {
       if (mounted) await _showError(err);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  /// Tries [action] with no PIN first (the common case: no PIN set for this
-  /// user — see userauth/admin.py). If the backend replies pin_required/
-  /// invalid_pin, prompts for the session PIN and retries, looping on a
-  /// wrong entry rather than making the user re-select the mode. Throws
-  /// [_PinCancelled] if the user backs out of the prompt.
-  Future<T> _runWithPinRetry<T>(Future<T> Function(String? pin) action) async {
-    String? pin;
-    while (true) {
-      try {
-        return await action(pin);
-      } on ApiException catch (err) {
-        final code = _errorCode(err);
-        if (code != 'pin_required' && code != 'invalid_pin') rethrow;
-        if (!mounted) throw _PinCancelled();
-        final entered = await _promptSessionPin(
-          errorText: code == 'invalid_pin' ? 'Incorrect PIN. Try again.' : null,
-        );
-        if (entered == null || entered.isEmpty) throw _PinCancelled();
-        pin = entered;
-      }
-    }
-  }
-
-  String? _errorCode(ApiException err) {
-    if (err.body == null) return null;
-    try {
-      final body = json.decode(err.body!);
-      if (body is Map) return body['code']?.toString();
-    } catch (_) {}
-    return null;
-  }
-
-  Future<String?> _promptSessionPin({String? errorText}) async {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enter Session PIN'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Changing the session mode on this device requires a PIN.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              obscureText: true,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              decoration: InputDecoration(
-                labelText: 'PIN',
-                errorText: errorText,
-                counterText: '',
-              ),
-              onSubmitted: (v) => Navigator.pop(ctx, v),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
-    );
   }
 
   /// Backend errors carry a stable `code` (see ControlUnitSessionModeView).

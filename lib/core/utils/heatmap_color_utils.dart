@@ -47,27 +47,41 @@ class HeatmapTrackPoint {
 }
 
 class HeatmapColorUtils {
-  // Speed: 0-3 → yellow, 3-7 → green, 7+ → red
+  // Color-band boundaries for the Speed/Spray heatmaps below. Mutable so
+  // HeatmapPreferencesNotifier (lib/core/services/heatmap_preferences_service.dart)
+  // can apply the signed-in user's own values (Profile > Settings > Heatmap
+  // colors, GET/PATCH /api/auth/heatmap-preferences/) on top of these
+  // defaults -- the defaults below are exactly what used to be hardcoded
+  // here, so an account that never visits that screen behaves unchanged.
+  // The COLORS themselves (yellow/green/red, white/blue/red/black) are
+  // fixed, only where one band ends and the next begins is configurable.
+  static double speedYellowMax = 3.0;
+  static double speedGreenMax = 7.0;
+  static double sprayBlueMax = 70.0;
+  static double sprayRedMax = 200.0;
+
+  // Speed: 0-speedYellowMax → yellow, ..speedGreenMax → green, above → red
   static Color getColorForSpeed(double? speed) {
     if (speed == null) return Colors.grey;
-    if (speed <= 3.0) return Colors.yellow;
-    if (speed <= 7.0) return Colors.green;
+    if (speed <= speedYellowMax) return Colors.yellow;
+    if (speed <= speedGreenMax) return Colors.green;
     return Colors.red;
   }
 
-  // Spray: 0 → white (no spray), 1-70 → light-to-dark blue scale (wide
-  // range so low vs high flow is easy to tell apart at a glance),
-  // 70.1-200 → red scale, <0 or >200 → black
+  // Spray: 0 → white (no spray), 0-sprayBlueMax → light-to-dark blue scale
+  // (wide range so low vs high flow is easy to tell apart at a glance),
+  // ..sprayRedMax → red scale, <0 or above sprayRedMax → black
   static Color getColorForSpray(double? flow) {
     if (flow == null) return Colors.grey;
     if (flow == 0) return Colors.white;
-    if (flow < 0 || flow > 200) return Colors.black;
-    if (flow <= 70) {
-      final ratio = (flow / 70.0).clamp(0.0, 1.0);
+    if (flow < 0 || flow > sprayRedMax) return Colors.black;
+    if (flow <= sprayBlueMax) {
+      final ratio = (flow / sprayBlueMax).clamp(0.0, 1.0);
       return Color.lerp(Colors.blue.shade200, Colors.blue.shade900, ratio) ??
           Colors.blue;
     }
-    final ratio = ((flow - 70.0) / 130.0).clamp(0.0, 1.0);
+    final ratio =
+        ((flow - sprayBlueMax) / (sprayRedMax - sprayBlueMax)).clamp(0.0, 1.0);
     return Color.lerp(Colors.red.shade200, Colors.red.shade900, ratio) ??
         Colors.red;
   }
