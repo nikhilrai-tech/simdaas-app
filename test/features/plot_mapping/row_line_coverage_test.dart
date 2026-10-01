@@ -521,6 +521,47 @@ void main() {
       expect(laneBCoverage, lessThan(5.0));
     });
 
+    test('a forced-glitch credit close to the anchor row\'s own line does '
+        'not bridge-fill all the way to a position far along its length',
+        () {
+      // Regression test for a real session: the sprayer jumped from laneA to
+      // a different row and back. The jump landed perpendicular-close enough
+      // to laneA's own (infinite) line to pass maxGlitchForcedDistanceMultiplier
+      // (so the previous fix above doesn't catch it), but its projection
+      // onto laneA's length landed 110m past where the sprayer was last
+      // confirmed -- bridging the gap between painted the entire intervening
+      // stretch as "covered" even though the sprayer was never actually
+      // there. nearButFarAlong sits 3m off laneA's centerline (between the
+      // 2m backToAnchor tolerance and the 4m plausiblyStillThisRow bound) at
+      // metre 150, well past the last confirmed point at metre 40.
+      LatLng nearButFarAlong(double metres) => LatLng(
+          lat0 + dLat * metres / 200.0,
+          lon0 + 0.5 * dLon + 3.0 / (_mPerDeg * cosLat));
+      final track = [
+        for (final m in [0.0, 10.0, 20.0, 30.0, 40.0])
+          _pt(laneA(m).latitude, laneA(m).longitude),
+        HeatmapTrackPoint(
+          position: nearButFarAlong(150.0),
+          isInPlot: true,
+          ptoOn: true,
+          isAuto: true,
+          speed: 4,
+          flowRate: 10,
+          isJumpFromPrevious: true,
+        ),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: treeRows,
+          insidePoints: track,
+          rowSpacing: 4.0,
+          heatmapType: HeatmapType.gps);
+
+      final laneACoverage = lengthNear(bands, lon0 + 0.5 * dLon);
+      // Only the genuinely-driven 0-40m plus a small patch around the
+      // forced point itself -- NOT bridged all the way to 150m.
+      expect(laneACoverage, lessThan(60.0));
+    });
+
     test('recovery resumes normal per-point tracking on the same lane', () {
       final track = [
         for (final m in [0.0, 10.0, 20.0])

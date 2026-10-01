@@ -31,6 +31,25 @@ class RowLineCoverage {
   /// How many telemetry samples inside a sub-band counts as "one pass".
   static const double samplesPerPass = 3.0;
 
+  /// A forced-glitch credit's own raw position is untrustworthy (that's the
+  /// whole premise of glitchAnchorRow forcing, see buildHeatmapCoverageBands)
+  /// -- its projection onto the anchor row's length (rows are treated as
+  /// infinite lines for this) can land far from the sub-band it was last
+  /// confirmed in, even when its PERPENDICULAR distance from the row passed
+  /// maxGlitchForcedDistanceMultiplier's check, if the glitch happens to
+  /// land close enough to a far-off part of the SAME row's line. Without
+  /// this bound, _creditPoint's gap-fill bridges every sub-band in between
+  /// as "covered" -- found on a real session: the sprayer jumped to a
+  /// different row and back, the jump's perpendicular distance from the
+  /// original row was still within tolerance, and the bridge painted nearly
+  /// the entire corridor even though the sprayer was never actually there
+  /// during that stretch. Caps how many sub-bands (~2m each) a single
+  /// forced credit may bridge-fill -- generous enough for ordinary one-
+  /// sample GPS jitter (which doesn't represent real travel), tight enough
+  /// that a jump to a genuinely different part of the field can't paint a
+  /// long stretch it never covered.
+  static const int maxForcedCreditBridgeSubBands = 3;
+
   /// A corridor whose measured gap exceeds rowSpacing by more than this is
   /// treated as "a row is missing here" rather than a genuine tapering
   /// field — see the anomalous-gap check in [buildHeatmapCoverageBands].
@@ -803,10 +822,21 @@ class RowLineCoverage {
     // jump (bad-but-correctable data, worth bridging through once anchored
     // to a trusted row), a gap means there's genuinely no data for that
     // stretch, so nothing justifies painting it either way.
+    //
+    // A forced-glitch credit is still capped separately (see
+    // maxForcedCreditBridgeSubBands): its own position is untrustworthy, so
+    // a bridge that would span further than ordinary GPS jitter could
+    // explain is suppressed too, even though forced credits are otherwise
+    // allowed to bridge.
+    final rawPrev = prevIdxInCorridor[ri];
+    final forcedBridgeTooFar = isForcedGlitchCredit &&
+        rawPrev != null &&
+        (idx - rawPrev).abs() > maxForcedCreditBridgeSubBands;
     final prev = ((!isForcedGlitchCredit && pt.isJumpFromPrevious) ||
-            pt.isLongGapFromPrevious)
+            pt.isLongGapFromPrevious ||
+            forcedBridgeTooFar)
         ? null
-        : prevIdxInCorridor[ri];
+        : rawPrev;
     final lo = prev != null ? math.min(prev, idx) : idx;
     final hi = prev != null ? math.max(prev, idx) : idx;
 
