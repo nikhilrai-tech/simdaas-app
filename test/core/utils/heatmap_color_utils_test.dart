@@ -70,5 +70,23 @@ void main() {
       // Above the new red cap -- black, well below the old 200 cutoff.
       expect(HeatmapColorUtils.getColorForSpray(150), Colors.black);
     });
+
+    test('speedLegendLabels reflects the current thresholds', () {
+      expect(HeatmapColorUtils.speedLegendLabels(),
+          ['0-3 km/h', '3-7 km/h', '7+ km/h']);
+      HeatmapColorUtils.speedYellowMax = 10.0;
+      HeatmapColorUtils.speedGreenMax = 20.0;
+      expect(HeatmapColorUtils.speedLegendLabels(),
+          ['0-10 km/h', '10-20 km/h', '20+ km/h']);
+    });
+
+    test('sprayLegendLabels reflects the current thresholds', () {
+      expect(HeatmapColorUtils.sprayLegendLabels(),
+          ['0 L/m (No Spray)', '0-70 L/m', '70-200 L/m', '>200 L/m']);
+      HeatmapColorUtils.sprayBlueMax = 50.0;
+      HeatmapColorUtils.sprayRedMax = 100.0;
+      expect(HeatmapColorUtils.sprayLegendLabels(),
+          ['0 L/m (No Spray)', '0-50 L/m', '50-100 L/m', '>100 L/m']);
+    });
   });
 }

@@ -60,6 +60,26 @@ class HeatmapColorUtils {
   static double sprayBlueMax = 70.0;
   static double sprayRedMax = 200.0;
 
+  static String _fmtNum(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
+
+  // Legend labels for the Speed/Spray heatmaps, reflecting whatever the
+  // thresholds above currently are -- used by monitoring_screen.dart and
+  // report_details_screen.dart's map legend cards so they never show stale
+  // numbers after Profile > Settings > Heatmap colors changes them.
+  static List<String> speedLegendLabels() => [
+        '0-${_fmtNum(speedYellowMax)} km/h',
+        '${_fmtNum(speedYellowMax)}-${_fmtNum(speedGreenMax)} km/h',
+        '${_fmtNum(speedGreenMax)}+ km/h',
+      ];
+
+  static List<String> sprayLegendLabels() => [
+        '0 L/m (No Spray)',
+        '0-${_fmtNum(sprayBlueMax)} L/m',
+        '${_fmtNum(sprayBlueMax)}-${_fmtNum(sprayRedMax)} L/m',
+        '>${_fmtNum(sprayRedMax)} L/m',
+      ];
+
   // Speed: 0-speedYellowMax → yellow, ..speedGreenMax → green, above → red
   static Color getColorForSpeed(double? speed) {
     if (speed == null) return Colors.grey;
