@@ -2711,18 +2711,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         ];
         break;
       case HeatmapType.speed:
+        final labels = HeatmapColorUtils.speedLegendLabels();
         items = [
-          _legendItem('0-3 km/h', Colors.yellow),
-          _legendItem('3-7 km/h', Colors.green),
-          _legendItem('7+ km/h', Colors.red),
+          _legendItem(labels[0], Colors.yellow),
+          _legendItem(labels[1], Colors.green),
+          _legendItem(labels[2], Colors.red),
         ];
         break;
       case HeatmapType.spraying:
+        final labels = HeatmapColorUtils.sprayLegendLabels();
         items = [
-          _legendItem('0 L/m (No Spray)', Colors.white),
-          _legendItem('1-70 L/m', Colors.blue.shade800),
-          _legendItem('70-200 L/m', Colors.red.shade400),
-          _legendItem('>200 L/m', Colors.black),
+          _legendItem(labels[0], Colors.white),
+          _legendItem(labels[1], Colors.blue.shade800),
+          _legendItem(labels[2], Colors.red.shade400),
+          _legendItem(labels[3], Colors.black),
         ];
         break;
       case HeatmapType.leftRight:
