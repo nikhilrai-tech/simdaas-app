@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 
@@ -27,6 +28,47 @@ void main() {
       final autoOn = HeatmapColorUtils.gpsPriority(ptoOn: true, isAuto: true);
       final manualOn = HeatmapColorUtils.gpsPriority(ptoOn: true, isAuto: false);
       expect(autoOn, equals(manualOn));
+    });
+  });
+
+  group('HeatmapColorUtils speed/spray thresholds', () {
+    // speedYellowMax/speedGreenMax/sprayBlueMax/sprayRedMax are mutable
+    // static fields (HeatmapPreferencesNotifier applies the signed-in
+    // user's own values to them) -- reset after each test so a change here
+    // never leaks into other test files sharing the same process.
+    tearDown(() {
+      HeatmapColorUtils.speedYellowMax = 3.0;
+      HeatmapColorUtils.speedGreenMax = 7.0;
+      HeatmapColorUtils.sprayBlueMax = 70.0;
+      HeatmapColorUtils.sprayRedMax = 200.0;
+    });
+
+    test('getColorForSpeed uses the default bands unless changed', () {
+      expect(HeatmapColorUtils.getColorForSpeed(2.0), Colors.yellow);
+      expect(HeatmapColorUtils.getColorForSpeed(5.0), Colors.green);
+      expect(HeatmapColorUtils.getColorForSpeed(8.0), Colors.red);
+    });
+
+    test('getColorForSpeed follows updated thresholds', () {
+      HeatmapColorUtils.speedYellowMax = 10.0;
+      HeatmapColorUtils.speedGreenMax = 20.0;
+      expect(HeatmapColorUtils.getColorForSpeed(8.0), Colors.yellow);
+      expect(HeatmapColorUtils.getColorForSpeed(15.0), Colors.green);
+      expect(HeatmapColorUtils.getColorForSpeed(25.0), Colors.red);
+    });
+
+    test('getColorForSpray uses the default bands unless changed', () {
+      expect(HeatmapColorUtils.getColorForSpray(0), Colors.white);
+      expect(HeatmapColorUtils.getColorForSpray(300), Colors.black);
+    });
+
+    test('getColorForSpray follows updated thresholds', () {
+      HeatmapColorUtils.sprayBlueMax = 50.0;
+      HeatmapColorUtils.sprayRedMax = 100.0;
+      // Below the new blue cap -- blue scale, not the old 70 cutoff.
+      expect(HeatmapColorUtils.getColorForSpray(60), isNot(Colors.white));
+      // Above the new red cap -- black, well below the old 200 cutoff.
+      expect(HeatmapColorUtils.getColorForSpray(150), Colors.black);
     });
   });
 }
