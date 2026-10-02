@@ -5,6 +5,7 @@ import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/services/battery_optimization_service.dart';
 import 'package:simdaas/core/services/gps_calibration_service.dart';
 import 'package:simdaas/core/services/heatmap_preferences_service.dart';
+import 'package:simdaas/core/theme/app_theme.dart';
 import 'package:simdaas/core/utils/session_pin_prompt.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -205,177 +206,180 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     if (_syncedGpsCalibration != gpsCalibration) {
       _syncGpsCalibrationControllers(gpsCalibration);
     }
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text('Background activity',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-          ),
-          ListTile(
-            leading: const Icon(Icons.battery_charging_full_outlined),
-            title: const Text('Run in background'),
-            subtitle: Text(
-              _batteryOptExempt == null
-                  ? 'Checking…'
-                  : _batteryOptExempt!
-                      ? 'Allowed — live monitoring keeps running when the app is backgrounded'
-                      : 'Not allowed — Android may pause live monitoring and cooldown timers to save battery',
-            ),
-            trailing: _batteryOptExempt == false
-                ? FilledButton(
-                    onPressed: () async {
-                      await BatteryOptimizationService.request();
-                      await _refreshBatteryOptStatus();
-                    },
-                    child: const Text('Allow'),
-                  )
-                : _batteryOptExempt == true
-                    ? const Icon(Icons.check_circle, color: Colors.green)
-                    : null,
-          ),
-          const Divider(height: 32),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Text('Heatmap colors',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Text(
-              'Choose where each color band starts on the Speed and Spray '
-              'heatmaps shown on the monitoring and report screens. The '
-              'colors stay the same — only the values do.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+          _SectionHeader(icon: Icons.battery_charging_full_outlined, title: 'Background activity'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: ListTile(
+              title: const Text('Run in background'),
+              subtitle: Text(
+                _batteryOptExempt == null
+                    ? 'Checking…'
+                    : _batteryOptExempt!
+                        ? 'Allowed — live monitoring keeps running when the app is backgrounded'
+                        : 'Not allowed — Android may pause live monitoring and cooldown timers to save battery',
+                style: textTheme.bodySmall,
+              ),
+              trailing: _batteryOptExempt == false
+                  ? TextButton(
+                      onPressed: () async {
+                        await BatteryOptimizationService.request();
+                        await _refreshBatteryOptStatus();
+                      },
+                      child: const Text('Allow'),
+                    )
+                  : _batteryOptExempt == true
+                      ? Icon(Icons.check_circle, color: AppTheme.primaryGreen)
+                      : null,
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Speed (km/h)', style: TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    _ColorBandRow(color: Colors.yellow.shade700, label: 'Yellow: 0 up to'),
-                    _NumberField(controller: _speedYellowCtrl, suffix: 'km/h'),
-                    const SizedBox(height: 8),
-                    _ColorBandRow(color: Colors.green, label: 'Green: up to'),
-                    _NumberField(controller: _speedGreenCtrl, suffix: 'km/h'),
-                    const SizedBox(height: 4),
-                    const _ColorBandRow(color: Colors.red, label: 'Red: above that'),
-                    if (_heatmapSpeedError != null) ...[
-                      const SizedBox(height: 8),
-                      Text(_heatmapSpeedError!,
-                          style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
-                    ],
-                  ],
-                ),
+          const SizedBox(height: 8),
+          _SectionHeader(
+            icon: Icons.palette_outlined,
+            title: 'Heatmap colors',
+            description: 'Choose where each color band starts on the Speed and '
+                'Spray heatmaps shown on the monitoring and report screens. '
+                'The colors stay the same — only the values do.',
+          ),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Speed (km/h)', style: textTheme.titleMedium),
+                  const SizedBox(height: 10),
+                  _BandRow(
+                    color: Colors.amber.shade600,
+                    label: 'Yellow — up to',
+                    controller: _speedYellowCtrl,
+                    suffix: 'km/h',
+                  ),
+                  const Divider(height: 20),
+                  _BandRow(
+                    color: AppTheme.primaryGreen,
+                    label: 'Green — up to',
+                    controller: _speedGreenCtrl,
+                    suffix: 'km/h',
+                  ),
+                  const Divider(height: 20),
+                  const _BandRow(color: Colors.red, label: 'Red — above that'),
+                  if (_heatmapSpeedError != null)
+                    _InlineError(_heatmapSpeedError!),
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Spray (L/min)', style: TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    const _ColorBandRow(color: Colors.white, label: 'White: exactly 0 (fixed)', bordered: true),
-                    const SizedBox(height: 8),
-                    _ColorBandRow(color: Colors.blue.shade400, label: 'Blue: 0 up to'),
-                    _NumberField(controller: _sprayBlueCtrl, suffix: 'L/min'),
-                    const SizedBox(height: 8),
-                    _ColorBandRow(color: Colors.red.shade400, label: 'Red: up to'),
-                    _NumberField(controller: _sprayRedCtrl, suffix: 'L/min'),
-                    const SizedBox(height: 4),
-                    const _ColorBandRow(color: Colors.black, label: 'Black: above that'),
-                    if (_heatmapSprayError != null) ...[
-                      const SizedBox(height: 8),
-                      Text(_heatmapSprayError!,
-                          style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
-                    ],
-                  ],
-                ),
+          const SizedBox(height: 10),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Spray (L/min)', style: textTheme.titleMedium),
+                  const SizedBox(height: 10),
+                  const _BandRow(
+                    color: Colors.white,
+                    label: 'White — exactly 0 (fixed)',
+                    bordered: true,
+                  ),
+                  const Divider(height: 20),
+                  _BandRow(
+                    color: Colors.blue.shade400,
+                    label: 'Blue — up to',
+                    controller: _sprayBlueCtrl,
+                    suffix: 'L/min',
+                  ),
+                  const Divider(height: 20),
+                  _BandRow(
+                    color: Colors.red.shade400,
+                    label: 'Red — up to',
+                    controller: _sprayRedCtrl,
+                    suffix: 'L/min',
+                  ),
+                  const Divider(height: 20),
+                  const _BandRow(color: Colors.black, label: 'Black — above that'),
+                  if (_heatmapSprayError != null)
+                    _InlineError(_heatmapSprayError!),
+                ],
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: SizedBox(
               width: double.infinity,
-              child: FilledButton(
+              child: ElevatedButton.icon(
                 onPressed: _savingHeatmapPrefs ? null : _saveHeatmapPreferences,
-                child: _savingHeatmapPrefs
+                icon: _savingHeatmapPrefs
                     ? const SizedBox(
-                        width: 18, height: 18,
+                        width: 16, height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('Save heatmap colors'),
+                    : const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Save heatmap colors'),
               ),
             ),
           ),
-          const Divider(height: 32),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Text('GPS calibration',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          const SizedBox(height: 8),
+          _SectionHeader(
+            icon: Icons.gps_fixed,
+            title: 'GPS calibration',
+            description: 'If your device\'s GPS consistently reads a few '
+                'metres off from its real position, correct it here — this '
+                'only affects your own devices, on both the monitoring and '
+                'report screens.',
           ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Text(
-              'If your device\'s GPS consistently reads a few metres off from '
-              'its real position, correct it here — this only affects your '
-              'own devices, on both the monitoring and report screens.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Offset', style: TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    const Text('North (negative = south)', style: TextStyle(fontSize: 13)),
-                    _NumberField(controller: _gpsNorthCtrl, suffix: 'm'),
-                    const SizedBox(height: 8),
-                    const Text('East (negative = west)', style: TextStyle(fontSize: 13)),
-                    _NumberField(controller: _gpsEastCtrl, suffix: 'm'),
-                    if (_gpsCalibrationError != null) ...[
-                      const SizedBox(height: 8),
-                      Text(_gpsCalibrationError!,
-                          style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
-                    ],
-                  ],
-                ),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Offset', style: textTheme.titleMedium),
+                  const SizedBox(height: 10),
+                  _OffsetRow(
+                    icon: Icons.north,
+                    label: 'North',
+                    helper: 'negative = south',
+                    controller: _gpsNorthCtrl,
+                  ),
+                  const Divider(height: 20),
+                  _OffsetRow(
+                    icon: Icons.east,
+                    label: 'East',
+                    helper: 'negative = west',
+                    controller: _gpsEastCtrl,
+                  ),
+                  if (_gpsCalibrationError != null)
+                    _InlineError(_gpsCalibrationError!),
+                ],
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: SizedBox(
               width: double.infinity,
-              child: FilledButton(
+              child: ElevatedButton.icon(
                 onPressed: _savingGpsCalibration ? null : _saveGpsCalibration,
-                child: _savingGpsCalibration
+                icon: _savingGpsCalibration
                     ? const SizedBox(
-                        width: 18, height: 18,
+                        width: 16, height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('Save GPS calibration'),
+                    : const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Save GPS calibration'),
               ),
             ),
           ),
@@ -385,12 +389,58 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   }
 }
 
-class _ColorBandRow extends StatelessWidget {
+/// A section's leading icon + title, with an optional helper description
+/// underneath -- the same shape used ahead of every settings card on this
+/// screen, so each section reads consistently at a glance.
+class _SectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? description;
+
+  const _SectionHeader({required this.icon, required this.title, this.description});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AppTheme.primaryGreen),
+              const SizedBox(width: 8),
+              Text(title, style: theme.textTheme.titleMedium),
+            ],
+          ),
+          if (description != null) ...[
+            const SizedBox(height: 4),
+            Text(description!, style: theme.textTheme.bodySmall),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// One color band: a swatch, its label, and (when editable) the boundary
+/// value field, all on a single row so a whole card reads as a tidy list
+/// rather than stacked label-then-field pairs.
+class _BandRow extends StatelessWidget {
   final Color color;
   final String label;
   final bool bordered;
+  final TextEditingController? controller;
+  final String? suffix;
 
-  const _ColorBandRow({required this.color, required this.label, this.bordered = false});
+  const _BandRow({
+    required this.color,
+    required this.label,
+    this.bordered = false,
+    this.controller,
+    this.suffix,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -405,35 +455,105 @@ class _ColorBandRow extends StatelessWidget {
             border: bordered ? Border.all(color: Colors.grey.shade400) : null,
           ),
         ),
-        const SizedBox(width: 8),
-        Text(label, style: const TextStyle(fontSize: 13)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        ),
+        if (controller != null)
+          SizedBox(
+            width: 92,
+            child: _NumberField(controller: controller!, suffix: suffix),
+          ),
       ],
+    );
+  }
+}
+
+/// A GPS offset row: direction icon + label + helper text on the left,
+/// value field on the right.
+class _OffsetRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String helper;
+  final TextEditingController controller;
+
+  const _OffsetRow({
+    required this.icon,
+    required this.label,
+    required this.helper,
+    required this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: theme.textTheme.bodyMedium),
+              Text(helper, style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+        SizedBox(width: 92, child: _NumberField(controller: controller, suffix: 'm')),
+      ],
+    );
+  }
+}
+
+class _InlineError extends StatelessWidget {
+  final String message;
+  const _InlineError(this.message);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline, size: 16, color: Theme.of(context).colorScheme.error),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(message,
+                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _NumberField extends StatelessWidget {
   final TextEditingController controller;
-  final String suffix;
+  final String? suffix;
 
-  const _NumberField({required this.controller, required this.suffix});
+  const _NumberField({required this.controller, this.suffix});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 22, top: 4),
-      child: SizedBox(
-        width: 140,
-        child: TextField(
-          controller: controller,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            isDense: true,
-            suffixText: suffix,
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          ),
-        ),
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+    );
+    return TextField(
+      controller: controller,
+      textAlign: TextAlign.end,
+      style: Theme.of(context).textTheme.bodyMedium,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(
+        isDense: true,
+        suffixText: suffix,
+        suffixStyle: Theme.of(context).textTheme.bodySmall,
+        border: border,
+        enabledBorder: border,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       ),
     );
   }
