@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/api_exception.dart';
 import 'package:simdaas/core/services/battery_optimization_service.dart';
+import 'package:simdaas/core/services/gps_calibration_service.dart';
 import 'package:simdaas/core/services/heatmap_preferences_service.dart';
 import 'package:simdaas/core/utils/session_pin_prompt.dart';
 
@@ -30,6 +31,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
   String? _heatmapSpeedError;
   String? _heatmapSprayError;
 
+  final _gpsNorthCtrl = TextEditingController();
+  final _gpsEastCtrl = TextEditingController();
+  // Same reseed-on-change pattern as _syncedThresholds above.
+  GpsCalibration? _syncedGpsCalibration;
+  bool _savingGpsCalibration = false;
+  String? _gpsCalibrationError;
+
   @override
   void initState() {
     super.initState();
@@ -44,6 +52,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     _speedGreenCtrl.dispose();
     _sprayBlueCtrl.dispose();
     _sprayRedCtrl.dispose();
+    _gpsNorthCtrl.dispose();
+    _gpsEastCtrl.dispose();
     super.dispose();
   }
 
@@ -123,7 +133,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     }
   }
 
-  String _heatmapErrorMessage(Object err) {
+  String _heatmapErrorMessage(Object err) =>
+      _apiErrorMessage(err, fallbackPrefix: 'Could not save heatmap colors');
+
+  String _apiErrorMessage(Object err, {required String fallbackPrefix}) {
     if (err is ApiException && err.body != null) {
       try {
         final body = json.decode(err.body!);
@@ -135,13 +148,63 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         }
       } catch (_) {}
     }
-    return 'Could not save heatmap colors: $err';
+    return '$fallbackPrefix: $err';
+  }
+
+  void _syncGpsCalibrationControllers(GpsCalibration c) {
+    _syncedGpsCalibration = c;
+    _gpsNorthCtrl.text = _fmt(c.offsetNorthM);
+    _gpsEastCtrl.text = _fmt(c.offsetEastM);
+  }
+
+  Future<void> _saveGpsCalibration() async {
+    final north = double.tryParse(_gpsNorthCtrl.text.trim());
+    final east = double.tryParse(_gpsEastCtrl.text.trim());
+
+    setState(() => _gpsCalibrationError = null);
+
+    if (north == null || east == null || north.abs() > 1000 || east.abs() > 1000) {
+      setState(() => _gpsCalibrationError =
+          'Enter two numbers (positive or negative), each within ±1000 metres.');
+      return;
+    }
+
+    setState(() => _savingGpsCalibration = true);
+    try {
+      await runWithPinRetry(
+        context,
+        action: (pin) => ref.read(gpsCalibrationProvider.notifier).update(
+              GpsCalibration(offsetNorthM: north, offsetEastM: east),
+              pin: pin,
+            ),
+        isMounted: () => mounted,
+        promptMessage: 'Changing GPS calibration requires a PIN.',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('GPS calibration updated.')),
+        );
+      }
+    } on PinCancelled {
+      // User backed out of the PIN prompt -- no error, just stop.
+    } catch (err) {
+      if (mounted) {
+        setState(() => _gpsCalibrationError =
+            _apiErrorMessage(err, fallbackPrefix: 'Could not save GPS calibration'));
+      }
+    } finally {
+      if (mounted) setState(() => _savingGpsCalibration = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final heatmapPrefs = ref.watch(heatmapThresholdsProvider);
     if (_syncedThresholds != heatmapPrefs) _syncHeatmapControllers(heatmapPrefs);
+    final gpsCalibration = ref.watch(gpsCalibrationProvider);
+    if (_syncedGpsCalibration != gpsCalibration) {
+      _syncGpsCalibrationControllers(gpsCalibration);
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -258,6 +321,61 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
                     : const Text('Save heatmap colors'),
+              ),
+            ),
+          ),
+          const Divider(height: 32),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Text('GPS calibration',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              'If your device\'s GPS consistently reads a few metres off from '
+              'its real position, correct it here — this only affects your '
+              'own devices, on both the monitoring and report screens.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Offset', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    const Text('North (negative = south)', style: TextStyle(fontSize: 13)),
+                    _NumberField(controller: _gpsNorthCtrl, suffix: 'm'),
+                    const SizedBox(height: 8),
+                    const Text('East (negative = west)', style: TextStyle(fontSize: 13)),
+                    _NumberField(controller: _gpsEastCtrl, suffix: 'm'),
+                    if (_gpsCalibrationError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(_gpsCalibrationError!,
+                          style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _savingGpsCalibration ? null : _saveGpsCalibration,
+                child: _savingGpsCalibration
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Save GPS calibration'),
               ),
             ),
           ),
