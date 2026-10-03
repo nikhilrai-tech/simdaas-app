@@ -1,7 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -13,6 +20,7 @@ import '../../domain/report.dart';
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
 import '../providers/report_providers.dart';
+import '../utils/report_pdf_builder.dart';
 import '../widgets/plot_snapshot.dart';
 import '../widgets/saved_donut_chart.dart';
 
@@ -58,6 +66,12 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   // Recovered-via-backfill overlay: GPS heatmap only (a toggle there, not a
   // whole separate mode like L/R) -- Speed/Spray/L-R never show it.
   bool _showBackfillOverlay = true;
+
+  // Wraps the map Card below so _shareReport can screenshot the live
+  // FlutterMap (trajectory present -- no pre-rendered bitmap exists for
+  // that case, see report_pdf_builder.dart's doc comment).
+  final GlobalKey _mapRepaintKey = GlobalKey();
+  bool _isSharing = false;
 
   // reportDetailProvider is a plain FutureProvider.family (no autoDispose)
   // -- once fetched it stays cached for the rest of the app session, unlike
@@ -154,8 +168,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         ),
         actions: [
           IconButton(
-              icon: const Icon(Icons.share_outlined, color: Colors.black),
-              onPressed: () {}),
+              icon: _isSharing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.share_outlined, color: Colors.black),
+              onPressed: _isSharing ? null : () => _shareReport(context, report)),
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red),
             tooltip: 'Delete report',
@@ -219,11 +239,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               ),
               const SizedBox(height: 16),
             ],
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              clipBehavior: Clip.antiAlias,
-              child: _buildMapHeader(report),
+            RepaintBoundary(
+              key: _mapRepaintKey,
+              child: Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                clipBehavior: Clip.antiAlias,
+                child: _buildMapHeader(report),
+              ),
             ),
             const SizedBox(height: 12),
             _buildHeatmapToggles(),
@@ -879,6 +902,59 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       if (context.mounted) {
         showGenericErrorSnackBar(context, 'Failed to delete report');
       }
+    }
+  }
+
+  // ── Share as a branded PDF (WhatsApp/Email/etc.) ─────────────────────────
+  Future<void> _shareReport(BuildContext context, Report report) async {
+    setState(() => _isSharing = true);
+    try {
+      final mapImageBytes = await _captureMapImageForShare(report);
+      final pdfBytes = await buildReportPdf(report: report, mapImageBytes: mapImageBytes);
+
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/agrios_report_${report.id}.pdf');
+      await file.writeAsBytes(pdfBytes, flush: true);
+
+      final plotName = report.plot?.name ?? 'report';
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile(file.path, mimeType: 'application/pdf')],
+        text: 'Agrios spray report — $plotName (Report #${report.id})',
+        subject: 'Agrios Report #${report.id}',
+      ));
+    } catch (e) {
+      if (context.mounted) {
+        showGenericErrorSnackBar(context, 'Failed to share report');
+      }
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  // No live map was ever rendered for a trajectory-less report (see
+  // _buildMapHeader) -- PlotSnapshot there just shows the backend's own
+  // plot-polygon PNG, already base64, so reuse that directly instead of
+  // screenshotting nothing. Otherwise, there's no pre-rendered bitmap for
+  // the real heatmap at all (see report_pdf_builder.dart's doc comment), so
+  // screenshot the live FlutterMap via the RepaintBoundary wrapping it.
+  Future<Uint8List?> _captureMapImageForShare(Report report) async {
+    if (report.trajectory.isEmpty) {
+      if (report.plotSnapshot == null || report.plotSnapshot!.isEmpty) return null;
+      try {
+        return base64Decode(report.plotSnapshot!);
+      } catch (_) {
+        return null;
+      }
+    }
+    try {
+      final boundary =
+          _mapRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return null;
+      final image = await boundary.toImage(pixelRatio: 2.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } catch (_) {
+      return null;
     }
   }
 
