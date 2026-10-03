@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -905,6 +906,26 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     }
   }
 
+  // Hand-rolled MethodChannel, backed by MainActivity.kt's own code (not a
+  // third-party plugin) -- path_provider_android kept failing to register
+  // on real devices across several pub resolutions/overrides (see git log
+  // on this method), throwing MissingPluginException despite every local
+  // check showing it should work. MainActivity is the app's own entry
+  // point, so there's no separate package version that can ever drift out
+  // of registration the way a pub plugin can. iOS/desktop still have no
+  // reported issue, so they keep using path_provider.
+  static const _androidCacheDirChannel = MethodChannel('com.simdaas.agrios/cache_dir');
+
+  Future<String> _scratchDirPath() async {
+    if (Platform.isAndroid) {
+      final path = await _androidCacheDirChannel.invokeMethod<String>('getCacheDir');
+      if (path != null && path.isNotEmpty) return path;
+      throw 'Android cache_dir channel returned no path';
+    }
+    final dir = await getTemporaryDirectory();
+    return dir.path;
+  }
+
   // ── Share as a branded PDF (WhatsApp/Email/etc.) ─────────────────────────
   //
   // Each step below is wrapped in its own try/catch -- rather than one catch
@@ -929,16 +950,8 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
       final File file;
       try {
-        // dart:io's Directory.systemTemp was tried here first to dodge a
-        // MissingPluginException from a broken path_provider_android
-        // resolution -- turned out worse: Android has no TMPDIR, so
-        // systemTemp throws "Unsupported operation: _Namespace" there
-        // (confirmed on a real device). path_provider is the only correct
-        // way to get a writable scratch directory on Android; the actual
-        // fix for the plugin-registration issue is the path_provider_android
-        // version pin in pubspec.yaml's dependency_overrides.
-        final dir = await getTemporaryDirectory();
-        file = File('${dir.path}/agrios_report_${report.id}.pdf');
+        final cacheDirPath = await _scratchDirPath();
+        file = File('$cacheDirPath/agrios_report_${report.id}.pdf');
         await file.writeAsBytes(pdfBytes, flush: true);
       } catch (e, st) {
         debugPrint('Share report: writing temp file failed: $e\n$st');
