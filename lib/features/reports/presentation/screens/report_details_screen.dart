@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show MethodChannel;
@@ -948,20 +949,39 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         throw 'building the PDF: $e';
       }
 
-      final File file;
-      try {
-        final cacheDirPath = await _scratchDirPath();
-        file = File('$cacheDirPath/agrios_report_${report.id}.pdf');
-        await file.writeAsBytes(pdfBytes, flush: true);
-      } catch (e, st) {
-        debugPrint('Share report: writing temp file failed: $e\n$st');
-        throw 'saving the file: $e';
+      // kIsWeb branch FIRST, before anything touches dart:io -- Platform,
+      // File, Directory all throw "Unsupported operation" on web (dart:io
+      // compiles there but most of it is a non-functional stub), which is
+      // exactly what broke here: a tester was using the web build
+      // (localhost:xxxx/#/dashboard) the whole time, so every earlier
+      // "fix" aimed at Android native plugins was chasing the wrong
+      // platform. XFile.fromData() keeps the PDF entirely in memory --
+      // share_plus_web's _fromXFile() just calls xFile.readAsBytes() on it
+      // and hands the bytes to the browser's Web Share API, no filesystem
+      // involved at all.
+      final XFile xfile;
+      if (kIsWeb) {
+        xfile = XFile.fromData(
+          pdfBytes,
+          name: 'agrios_report_${report.id}.pdf',
+          mimeType: 'application/pdf',
+        );
+      } else {
+        try {
+          final cacheDirPath = await _scratchDirPath();
+          final file = File('$cacheDirPath/agrios_report_${report.id}.pdf');
+          await file.writeAsBytes(pdfBytes, flush: true);
+          xfile = XFile(file.path, mimeType: 'application/pdf');
+        } catch (e, st) {
+          debugPrint('Share report: writing temp file failed: $e\n$st');
+          throw 'saving the file: $e';
+        }
       }
 
       final plotName = report.plot?.name ?? 'report';
       try {
         final result = await SharePlus.instance.share(ShareParams(
-          files: [XFile(file.path, mimeType: 'application/pdf')],
+          files: [xfile],
           text: 'Agrios spray report — $plotName (Report #${report.id})',
           subject: 'Agrios Report #${report.id}',
         ));
