@@ -906,25 +906,52 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   // ── Share as a branded PDF (WhatsApp/Email/etc.) ─────────────────────────
+  //
+  // Each step below is wrapped in its own try/catch -- rather than one catch
+  // around the whole method -- purely so a failure can say WHICH step broke
+  // (building the PDF vs. writing the temp file vs. the OS share sheet
+  // itself) instead of a single generic "something went wrong". The
+  // surfaced text is deliberately the raw exception, truncated -- this is
+  // temporary extra detail to diagnose the first real-device failure
+  // reports; a generic message can come back once that's root-caused.
   Future<void> _shareReport(BuildContext context, Report report) async {
     setState(() => _isSharing = true);
     try {
       final mapImageBytes = await _captureMapImageForShare(report);
-      final pdfBytes = await buildReportPdf(report: report, mapImageBytes: mapImageBytes);
 
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/agrios_report_${report.id}.pdf');
-      await file.writeAsBytes(pdfBytes, flush: true);
+      final Uint8List pdfBytes;
+      try {
+        pdfBytes = await buildReportPdf(report: report, mapImageBytes: mapImageBytes);
+      } catch (e, st) {
+        debugPrint('Share report: PDF build failed: $e\n$st');
+        throw 'building the PDF: $e';
+      }
+
+      final File file;
+      try {
+        final dir = await getTemporaryDirectory();
+        file = File('${dir.path}/agrios_report_${report.id}.pdf');
+        await file.writeAsBytes(pdfBytes, flush: true);
+      } catch (e, st) {
+        debugPrint('Share report: writing temp file failed: $e\n$st');
+        throw 'saving the file: $e';
+      }
 
       final plotName = report.plot?.name ?? 'report';
-      await SharePlus.instance.share(ShareParams(
-        files: [XFile(file.path, mimeType: 'application/pdf')],
-        text: 'Agrios spray report — $plotName (Report #${report.id})',
-        subject: 'Agrios Report #${report.id}',
-      ));
+      try {
+        final result = await SharePlus.instance.share(ShareParams(
+          files: [XFile(file.path, mimeType: 'application/pdf')],
+          text: 'Agrios spray report — $plotName (Report #${report.id})',
+          subject: 'Agrios Report #${report.id}',
+        ));
+        debugPrint('Share report: share sheet result = ${result.status}');
+      } catch (e, st) {
+        debugPrint('Share report: share sheet failed: $e\n$st');
+        throw 'opening the share sheet: $e';
+      }
     } catch (e) {
       if (context.mounted) {
-        showGenericErrorSnackBar(context, 'Failed to share report');
+        showGenericErrorSnackBar(context, 'Failed to share report — $e');
       }
     } finally {
       if (mounted) setState(() => _isSharing = false);
