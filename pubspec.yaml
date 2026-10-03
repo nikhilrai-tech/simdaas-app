@@ -59,9 +59,22 @@ dependencies:
   # Share a report as a branded PDF (lib/features/reports/presentation/utils/report_pdf_builder.dart)
   pdf: ^3.11.3
   share_plus: ^13.3.1
+  path_provider: ^2.1.5
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+# path_provider_android normally resolves to 2.3.1+, a JNI-based rewrite
+# that -- on this project's toolchain -- never ends up registered in
+# android/app/.../GeneratedPluginRegistrant.java, so every path_provider
+# call throws MissingPluginException on a real device (see PR history on
+# lib/features/reports/presentation/screens/report_details_screen.dart's
+# _shareReport). Pinned back to the last classic (pre-JNI, plain Kotlin
+# MethodChannel) release, which registers normally like every other
+# plugin here. Safe to drop once the JNI rewrite's registration is fixed
+# upstream and confirmed working on a real device again.
+dependency_overrides:
+  path_provider_android: 2.2.17
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
