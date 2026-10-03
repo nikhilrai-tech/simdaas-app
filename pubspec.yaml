@@ -59,7 +59,6 @@ dependencies:
   # Share a report as a branded PDF (lib/features/reports/presentation/utils/report_pdf_builder.dart)
   pdf: ^3.11.3
   share_plus: ^13.3.1
-  path_provider: ^2.1.5
 dev_dependencies:
   flutter_test:
     sdk: flutter

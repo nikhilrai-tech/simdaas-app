@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -929,8 +928,15 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
       final File file;
       try {
-        final dir = await getTemporaryDirectory();
-        file = File('${dir.path}/agrios_report_${report.id}.pdf');
+        // dart:io's Directory.systemTemp, not path_provider's
+        // getTemporaryDirectory() -- the two resolve to the same sandboxed
+        // app-cache directory on Android/iOS, but systemTemp needs no
+        // platform-channel plugin at all, sidestepping a real MissingPlugin-
+        // Exception hit on a real device: path_provider_android resolved to
+        // 2.3.1 (a JNI-based rewrite) which never registers the classic
+        // plugins.flutter.io/path_provider method channel the path_provider
+        // interface package still calls.
+        file = File('${Directory.systemTemp.path}/agrios_report_${report.id}.pdf');
         await file.writeAsBytes(pdfBytes, flush: true);
       } catch (e, st) {
         debugPrint('Share report: writing temp file failed: $e\n$st');
