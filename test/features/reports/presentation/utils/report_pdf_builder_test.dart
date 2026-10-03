@@ -50,6 +50,10 @@ Report _report({
 }
 
 void main() {
+  // buildReportPdf now loads the Agrios logo via rootBundle, which needs a
+  // real binding wired up (not just a plain test() runner default).
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('buildReportPdf', () {
     test('produces valid PDF bytes with a map image', () async {
       final report = _report();
