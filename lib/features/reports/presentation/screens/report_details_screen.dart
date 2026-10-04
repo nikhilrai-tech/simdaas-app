@@ -398,6 +398,36 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                         ),
                       ),
                     ),
+                  // Separate from the amended/hadBackfillData badge above
+                  // -- a report can be amended for an unrelated backfill
+                  // reason, or for this one, or both, independently. Never
+                  // replaces the badge above; always additional to it.
+                  if (report.plotCorrected)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.purple.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.edit_location_alt_outlined,
+                              size: 13, color: Colors.purple.shade800),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Plot Updated',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.purple.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   // Verification pipeline status -- Manual only, since
                   // Automatic reports are never checked against a device
                   // log.

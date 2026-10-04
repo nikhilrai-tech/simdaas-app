@@ -342,6 +342,13 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                                   _reportBadge('Backfill', Colors.amber)
                                 else
                                   _reportBadge('Normal', Colors.grey),
+                                // 2b. Separate from the badge above -- a
+                                // report can be amended for an unrelated
+                                // backfill reason, or for this one, or
+                                // both, independently. Never replaces the
+                                // badge above; always additional to it.
+                                if (r.plotCorrected)
+                                  _reportBadge('Plot Updated', Colors.purple),
                                 // 3. Verification pipeline status -- Manual
                                 // only, since Automatic reports are never
                                 // checked against a device log.
