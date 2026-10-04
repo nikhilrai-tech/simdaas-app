@@ -7,6 +7,7 @@ import 'package:simdaas/core/services/gps_calibration_service.dart';
 import 'package:simdaas/core/services/heatmap_preferences_service.dart';
 import 'package:simdaas/core/theme/app_theme.dart';
 import 'package:simdaas/core/utils/session_pin_prompt.dart';
+import 'fix_report_plot_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -380,6 +381,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                       )
                     : const Icon(Icons.save_outlined, size: 18),
                 label: const Text('Save GPS calibration'),
+              ),
+            ),
+          ),
+
+          _SectionHeader(
+            icon: Icons.edit_location_alt_outlined,
+            title: 'Fix report plot',
+            description:
+                'Sprayed a plot but the device wasn\'t mapped to it at the time? '
+                'Assign the correct plot to a past report here.',
+          ),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: ListTile(
+              leading: const Icon(Icons.map_outlined),
+              title: const Text('Fix a report\'s plot'),
+              subtitle: const Text('Requires your session PIN, if one is set'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FixReportPlotScreen()),
               ),
             ),
           ),

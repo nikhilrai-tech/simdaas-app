@@ -49,4 +49,9 @@ class ReportRepositoryImpl implements ReportRepository {
         fertilizersUsed: fertilizersUsed,
         agrochemicalUsed: agrochemicalUsed);
   }
+
+  @override
+  Future<Report> correctReportPlot(String reportId, String plotId, {String? pin}) async {
+    return await remoteDataSource.correctReportPlot(reportId, plotId, pin: pin);
+  }
 }

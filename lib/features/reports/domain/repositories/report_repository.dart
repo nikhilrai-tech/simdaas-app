@@ -14,4 +14,11 @@ abstract class ReportRepository {
   Future<void> deleteReport(String id);
   Future<Report> updateReportDetails(String id,
       {String? driverName, String? fertilizersUsed, String? agrochemicalUsed});
+
+  /// "The farmer sprayed this plot, but the device wasn't mapped to it (or
+  /// the wrong plot) at the time" -- assigns the correct plot after the
+  /// fact and regenerates the report's area/coverage numbers against it.
+  /// PIN-gated the same way session-mode switching and heatmap/GPS-
+  /// calibration settings are (jobs.views.ReportPlotCorrectionView).
+  Future<Report> correctReportPlot(String reportId, String plotId, {String? pin});
 }

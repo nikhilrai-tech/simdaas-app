@@ -20,6 +20,7 @@ abstract class ReportRemoteDataSource {
   Future<void> deleteReport(String id);
   Future<ReportModel> updateReportDetails(String id,
       {String? driverName, String? fertilizersUsed, String? agrochemicalUsed});
+  Future<ReportModel> correctReportPlot(String reportId, String plotId, {String? pin});
 }
 
 class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
@@ -111,5 +112,18 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
       debugPrint('Error updating report details: $e');
       rethrow;
     }
+  }
+
+  @override
+  Future<ReportModel> correctReportPlot(String reportId, String plotId, {String? pin}) async {
+    // No try/catch-and-rethrow-after-debugPrint here, unlike the other
+    // methods above -- this one's errors (ApiException with a pin_required/
+    // invalid_pin code) are meaningful to the caller's runWithPinRetry loop,
+    // not just noise to log before rethrowing unchanged.
+    final response = await api.postJson('/jobs/api/reports/$reportId/correct-plot/', jsonBody: {
+      'plot_id': plotId,
+      if (pin != null) 'pin': pin,
+    });
+    return ReportModel.fromJson(response);
   }
 }
