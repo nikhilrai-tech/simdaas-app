@@ -76,6 +76,15 @@ class Report {
   // to verifying/verified/needs_review once the log-check pipeline picks
   // the report up and no longer says whether it started out backfilled.
   final bool hadBackfillData;
+  // True if a device owner ever manually corrected which plot this report
+  // is scored against (Settings > "Fix report plot", PIN-gated) --
+  // SEPARATE from `amended`, which also flips true for an unrelated
+  // backfill correction and doesn't say which kind happened. Drives its
+  // own "Plot Updated" badge, additional to (never replacing) the
+  // existing amended/hadBackfillData "Log Updated"/"Backfill" badge.
+  // Persists for the rest of the report's life, not just the one
+  // regeneration the correction itself triggered.
+  final bool plotCorrected;
   // TEMP DEBUG (2026-09-30): {field: {label, report, log}} for whichever
   // totals a log-verification correction changed -- lets the report screen
   // show old-vs-new for manual spot-checking. Remove this field, its
@@ -126,6 +135,7 @@ class Report {
     this.verificationStatus,
     this.verificationNote,
     this.hadBackfillData = false,
+    this.plotCorrected = false,
     this.verificationMismatchesDebug,
     this.driverName,
     this.fertilizersUsed,

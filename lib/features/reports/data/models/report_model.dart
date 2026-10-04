@@ -44,6 +44,7 @@ class ReportModel extends Report {
     super.verificationStatus,
     super.verificationNote,
     super.hadBackfillData,
+    super.plotCorrected,
     super.verificationMismatchesDebug,
     super.driverName,
     super.fertilizersUsed,
@@ -139,6 +140,7 @@ class ReportModel extends Report {
       verificationStatus: json['verification_status']?.toString(),
       verificationNote: json['verification_note']?.toString(),
       hadBackfillData: json['had_backfill_data'] == true,
+      plotCorrected: json['plot_corrected'] == true,
       verificationMismatchesDebug:
           json['verification_mismatches_debug'] is Map
               ? Map<String, dynamic>.from(
