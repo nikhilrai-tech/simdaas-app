@@ -939,11 +939,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   Future<void> _shareReport(BuildContext context, Report report) async {
     setState(() => _isSharing = true);
     try {
-      final mapImageBytes = await _captureMapImageForShare(report);
+      final mapImages = await _captureHeatmapImages(report);
 
       final Uint8List pdfBytes;
       try {
-        pdfBytes = await buildReportPdf(report: report, mapImageBytes: mapImageBytes);
+        pdfBytes = await buildReportPdf(report: report, mapImages: mapImages);
       } catch (e, st) {
         debugPrint('Share report: PDF build failed: $e\n$st');
         throw 'building the PDF: $e';
@@ -1001,19 +1001,60 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
   // No live map was ever rendered for a trajectory-less report (see
   // _buildMapHeader) -- PlotSnapshot there just shows the backend's own
-  // plot-polygon PNG, already base64, so reuse that directly instead of
-  // screenshotting nothing. Otherwise, there's no pre-rendered bitmap for
-  // the real heatmap at all (see report_pdf_builder.dart's doc comment), so
-  // screenshot the live FlutterMap via the RepaintBoundary wrapping it.
-  Future<Uint8List?> _captureMapImageForShare(Report report) async {
+  // plot-polygon PNG, already base64, so reuse that directly (same bytes
+  // for every mode -- there's no live map to switch anyway) instead of
+  // screenshotting nothing. Otherwise, capture one screenshot PER heatmap
+  // mode the share PDF needs (GPS/Spray/Speed, see
+  // report_pdf_builder.dart) by switching _heatmapType, letting the map
+  // widget rebuild+repaint, then screenshotting the RepaintBoundary --
+  // there's no pre-rendered bitmap for any of these (no backend heatmap
+  // renderer exists at all), each one only exists on screen for as long as
+  // this mode switch holds.
+  Future<Map<HeatmapType, Uint8List?>> _captureHeatmapImages(Report report) async {
     if (report.trajectory.isEmpty) {
-      if (report.plotSnapshot == null || report.plotSnapshot!.isEmpty) return null;
-      try {
-        return base64Decode(report.plotSnapshot!);
-      } catch (_) {
-        return null;
+      Uint8List? snapshot;
+      if (report.plotSnapshot != null && report.plotSnapshot!.isNotEmpty) {
+        try {
+          snapshot = base64Decode(report.plotSnapshot!);
+        } catch (_) {
+          snapshot = null;
+        }
+      }
+      return {
+        HeatmapType.gps: snapshot,
+        HeatmapType.spraying: snapshot,
+        HeatmapType.speed: snapshot,
+      };
+    }
+
+    final originalType = _heatmapType;
+    final images = <HeatmapType, Uint8List?>{};
+    try {
+      for (final type in [HeatmapType.gps, HeatmapType.spraying, HeatmapType.speed]) {
+        if (!mounted) break;
+        setState(() => _heatmapType = type);
+        // Lets the map (PolygonLayer rebuilt for the new heatmap mode)
+        // actually repaint before the screenshot -- setState alone only
+        // schedules the frame, it doesn't wait for it to be painted. The
+        // extra delay is a known RepaintBoundary.toImage() gotcha: on some
+        // renderers endOfFrame resolves once paint commands are issued but
+        // before the GPU texture backing the boundary actually finishes
+        // compositing, so a screenshot taken immediately after can still
+        // show the PREVIOUS mode's colors.
+        await WidgetsBinding.instance.endOfFrame;
+        await Future.delayed(const Duration(milliseconds: 100));
+        images[type] = await _captureMapRepaintBoundary();
+      }
+    } finally {
+      if (mounted && _heatmapType != originalType) {
+        setState(() => _heatmapType = originalType);
+        await WidgetsBinding.instance.endOfFrame;
       }
     }
+    return images;
+  }
+
+  Future<Uint8List?> _captureMapRepaintBoundary() async {
     try {
       final boundary =
           _mapRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;

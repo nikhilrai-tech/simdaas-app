@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'package:simdaas/features/reports/domain/report.dart';
 import 'package:simdaas/features/reports/presentation/utils/report_pdf_builder.dart';
 
@@ -55,19 +56,32 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('buildReportPdf', () {
-    test('produces valid PDF bytes with a map image', () async {
+    test('produces valid 4-page PDF bytes with a map image per heatmap mode', () async {
       final report = _report();
       final bytes = await buildReportPdf(
         report: report,
-        mapImageBytes: _onePixelPng,
+        mapImages: {
+          HeatmapType.gps: _onePixelPng,
+          HeatmapType.spraying: _onePixelPng,
+          HeatmapType.speed: _onePixelPng,
+        },
       );
       expect(String.fromCharCodes(bytes.take(4)), '%PDF');
       expect(bytes.length, greaterThan(500));
     });
 
-    test('produces valid PDF bytes with no map image (placeholder branch)', () async {
+    test('produces valid PDF bytes with no map images at all (placeholder branch)', () async {
       final report = _report();
-      final bytes = await buildReportPdf(report: report, mapImageBytes: null);
+      final bytes = await buildReportPdf(report: report);
+      expect(String.fromCharCodes(bytes.take(4)), '%PDF');
+    });
+
+    test('produces valid PDF bytes with only some heatmap modes captured', () async {
+      final report = _report();
+      final bytes = await buildReportPdf(
+        report: report,
+        mapImages: {HeatmapType.gps: _onePixelPng},
+      );
       expect(String.fromCharCodes(bytes.take(4)), '%PDF');
     });
 
