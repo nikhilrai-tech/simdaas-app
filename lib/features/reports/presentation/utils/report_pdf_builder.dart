@@ -124,6 +124,78 @@ pw.Widget _heroCard(String label, String value, PdfColor color, {double? progres
   );
 }
 
+/// Headline "Chemical Saved" banner -- the first thing on page 1, matching
+/// the live Report Details screen's own "Saved" section now being first
+/// there too.
+pw.Widget _chemicalSavedBanner(Report report) {
+  final hasNote = report.chemicalSavedNote != null;
+  return pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+    decoration: pw.BoxDecoration(color: _blue, borderRadius: pw.BorderRadius.circular(10)),
+    child: pw.Row(
+      children: [
+        pw.Container(
+          width: 46,
+          height: 46,
+          decoration: const pw.BoxDecoration(color: PdfColors.white, shape: pw.BoxShape.circle),
+          alignment: pw.Alignment.center,
+          child: pw.Text('%', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: _blue)),
+        ),
+        pw.SizedBox(width: 16),
+        pw.Expanded(
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                hasNote ? '—' : _fmtNum(report.chemicalSavedPercentage, digits: 0, suffix: '%'),
+                style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+              ),
+              pw.SizedBox(height: 2),
+              pw.Text(
+                report.chemicalSavedNote ?? 'Chemical Saved (Auto mode)',
+                style: const pw.TextStyle(fontSize: 10, color: PdfColors.white),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// A small plot/heatmap snapshot for page 1, so the summary page alone
+/// (even if nobody flips to the Spray/GPS/Speed deep-dive pages) already
+/// shows what was actually sprayed. Uses the GPS mode capture as the most
+/// representative single view of plot coverage.
+pw.Widget _page1MapPreview(Uint8List? mapImageBytes) {
+  if (mapImageBytes == null) {
+    return pw.Container(
+      width: double.infinity,
+      height: 150,
+      alignment: pw.Alignment.center,
+      decoration: pw.BoxDecoration(
+        color: _cardBg,
+        border: pw.Border.all(color: _ruleGrey, width: 0.75),
+        borderRadius: pw.BorderRadius.circular(8),
+      ),
+      child: pw.Text('Plot map unavailable', style: const pw.TextStyle(fontSize: 9, color: _textGrey)),
+    );
+  }
+  return pw.Container(
+    height: 150,
+    decoration: pw.BoxDecoration(
+      borderRadius: pw.BorderRadius.circular(8),
+      border: pw.Border.all(color: _ruleGrey, width: 0.75),
+    ),
+    child: pw.ClipRRect(
+      horizontalRadius: 8,
+      verticalRadius: 8,
+      child: pw.Image(pw.MemoryImage(mapImageBytes), fit: pw.BoxFit.cover),
+    ),
+  );
+}
+
 pw.Widget _pill(String text, PdfColor fg, PdfColor bg) {
   return pw.Container(
     padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -424,6 +496,9 @@ Future<Uint8List> buildReportPdf({
           // next 3 pages gets its own, bigger one).
           // ==================================================================
           _masthead(logo, int.tryParse(report.id) ?? 0, report.createdAt),
+          pw.SizedBox(height: 4),
+          _chemicalSavedBanner(report),
+          pw.SizedBox(height: 16),
 
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -456,6 +531,8 @@ Future<Uint8List> buildReportPdf({
             _heroCard('Total Distance', _fmtNum(report.distanceTravelledKm, suffix: ' km'), _teal),
             _heroCard('Duration', _fmtDuration(startTime, endTime), _indigo),
           ]),
+          pw.SizedBox(height: 10),
+          _page1MapPreview(mapImages[HeatmapType.gps]),
 
           buildCoverageCard(),
           buildSprayCard(),

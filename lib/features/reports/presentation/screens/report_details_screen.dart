@@ -75,6 +75,37 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   final GlobalKey _mapRepaintKey = GlobalKey();
   bool _isSharing = false;
 
+  // Best-effort upload of whichever heatmap mode is actually on screen, so
+  // the verified-report email PDF (built server-side, no heatmap renderer
+  // of its own) has a real screenshot to embed instead of a bare plot
+  // outline -- see jobs.views.ReportHeatmapSnapshotView. Keyed by report id
+  // + mode so each one only uploads once per app session, not on every
+  // rebuild (this screen re-renders often: 30s auto-refresh, provider
+  // watches, etc). Deliberately only captures whatever's ALREADY rendered
+  // (no mode-cycling like _captureHeatmapImages does for Share) -- cycling
+  // here would visibly flash the map through 3 colors just from opening
+  // the screen, which nobody asked for.
+  final Set<String> _uploadedSnapshotKeys = {};
+
+  void _maybeUploadHeatmapSnapshot(Report report) {
+    if (report.trajectory.isEmpty) return;
+    final key = '${report.id}:${_heatmapType.name}';
+    if (_uploadedSnapshotKeys.contains(key)) return;
+    _uploadedSnapshotKeys.add(key);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final bytes = await _captureMapRepaintBoundary();
+      if (bytes == null || !mounted) return;
+      final b64 = base64Encode(bytes);
+      await ref.read(reportRepoProvider).uploadHeatmapSnapshot(
+            report.id,
+            gps: _heatmapType == HeatmapType.gps ? b64 : null,
+            spray: _heatmapType == HeatmapType.spraying ? b64 : null,
+            speed: _heatmapType == HeatmapType.speed ? b64 : null,
+          );
+    });
+  }
+
   // reportDetailProvider is a plain FutureProvider.family (no autoDispose)
   // -- once fetched it stays cached for the rest of the app session, unlike
   // the reports LIST screen (which already re-fetches every 30s and on
@@ -125,6 +156,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(reportDetailProvider(widget.report.id));
     final report = detailAsync.asData?.value ?? widget.report;
+    _maybeUploadHeatmapSnapshot(report);
     // Not read directly -- watching is what makes the heatmaps below
     // repaint immediately after Profile > Settings > Heatmap colors is
     // saved. See heatmap_preferences_service.dart.
@@ -193,6 +225,61 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ── Saved ─────────────────────────────────────────────────────
+            // Kept first -- the headline number for this report, ahead of
+            // the Verified banner and the map.
+            _sectionHeader('Saved'),
+            Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF015685), Color(0xFF0277B5)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
+              child: Row(
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.eco_outlined, color: Colors.white, size: 28),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          report.chemicalSavedNote != null
+                              ? '—'
+                              : '${report.chemicalSavedPercentage.toStringAsFixed(0)}%',
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            height: 1.1,
+                          ),
+                        ),
+                        Text(
+                          report.chemicalSavedNote ??
+                              'Chemical Saved (Auto mode)',
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
             if (report.verificationStatus == 'verified') ...[
               Container(
                 decoration: BoxDecoration(
@@ -253,60 +340,6 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             const SizedBox(height: 12),
             _buildHeatmapToggles(),
             const SizedBox(height: 20),
-
-            // ── Saved ─────────────────────────────────────────────────────
-            _sectionHeader('Saved'),
-            Container(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF015685), Color(0xFF0277B5)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
-              child: Row(
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.eco_outlined, color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          report.chemicalSavedNote != null
-                              ? '—'
-                              : '${report.chemicalSavedPercentage.toStringAsFixed(0)}%',
-                          style: const TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            height: 1.1,
-                          ),
-                        ),
-                        Text(
-                          report.chemicalSavedNote ??
-                              'Chemical Saved (Auto mode)',
-                          style: const TextStyle(
-                              fontSize: 13, color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
 
             if (report.sessionMode != null) ...[
               Wrap(

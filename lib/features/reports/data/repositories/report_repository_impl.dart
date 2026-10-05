@@ -54,4 +54,10 @@ class ReportRepositoryImpl implements ReportRepository {
   Future<Report> correctReportPlot(String reportId, String plotId, {String? pin}) async {
     return await remoteDataSource.correctReportPlot(reportId, plotId, pin: pin);
   }
+
+  @override
+  Future<void> uploadHeatmapSnapshot(String reportId,
+      {String? gps, String? spray, String? speed}) async {
+    await remoteDataSource.uploadHeatmapSnapshot(reportId, gps: gps, spray: spray, speed: speed);
+  }
 }

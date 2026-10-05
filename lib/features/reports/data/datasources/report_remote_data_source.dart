@@ -21,6 +21,14 @@ abstract class ReportRemoteDataSource {
   Future<ReportModel> updateReportDetails(String id,
       {String? driverName, String? fertilizersUsed, String? agrochemicalUsed});
   Future<ReportModel> correctReportPlot(String reportId, String plotId, {String? pin});
+  /// Best-effort: uploads whichever of gps/spray/speed base64 PNGs are
+  /// given, so the verified-report email PDF (built server-side, which has
+  /// no heatmap renderer of its own) can embed the real heatmap instead of
+  /// a bare plot outline. Never throws -- a failed upload just means that
+  /// email keeps using its existing fallback, nothing the caller needs to
+  /// react to.
+  Future<void> uploadHeatmapSnapshot(String reportId,
+      {String? gps, String? spray, String? speed});
 }
 
 class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
@@ -125,5 +133,19 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
       if (pin != null) 'pin': pin,
     });
     return ReportModel.fromJson(response);
+  }
+
+  @override
+  Future<void> uploadHeatmapSnapshot(String reportId,
+      {String? gps, String? spray, String? speed}) async {
+    try {
+      await api.postJson('/jobs/api/reports/$reportId/heatmap-snapshot/', jsonBody: {
+        if (gps != null) 'gps': gps,
+        if (spray != null) 'spray': spray,
+        if (speed != null) 'speed': speed,
+      });
+    } catch (e) {
+      debugPrint('Best-effort heatmap snapshot upload failed (ignored): $e');
+    }
   }
 }
