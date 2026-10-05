@@ -12,6 +12,7 @@ import '../core/services/telemetry_service.dart';
 import '../core/utils/mac_utils.dart';
 import '../features/data_monitoring/presentation/screens/monitoring_screen.dart';
 import '../features/reports/presentation/screens/reports_list_screen.dart';
+import '../features/reports/presentation/providers/report_providers.dart';
 import 'user_guide_pdf_screen.dart';
 import '../features/equipments/presentation/screens/create_control_unit_screen.dart';
 import '../features/equipments/presentation/screens/scan_control_unit_screen.dart';
@@ -203,6 +204,23 @@ class TempDashboard extends ConsumerWidget {
                           title: 'Reports',
                           subtitle: 'View recent application reports',
                           color: const Color(0xFF00897B),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const ReportsListScreen()),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _DashboardCard(
+                          icon: Icons.eco_outlined,
+                          title: 'Avg. Chemical Saved',
+                          subtitle: () {
+                            final statsAsync = ref.watch(reportStatsProvider);
+                            final avg = statsAsync.asData?.value;
+                            if (statsAsync.isLoading) return 'Loading…';
+                            if (avg == null) return 'No reports yet';
+                            return '${avg.toStringAsFixed(1)}% avg. across all your reports';
+                          }(),
+                          color: const Color(0xFF015685),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                                 builder: (_) => const ReportsListScreen()),

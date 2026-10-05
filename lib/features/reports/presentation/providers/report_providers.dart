@@ -67,3 +67,19 @@ final reportDetailProvider = FutureProvider.family((ref, String id) async {
   final repo = ref.read(reportRepoProvider);
   return repo.getReport(id);
 });
+
+/// The signed-in user's own cumulative average chemical-saved % across all
+/// their reports to date (null if they have none yet) -- backs the
+/// dashboard's headline stat. A dedicated backend aggregate
+/// (GET /jobs/api/reports/stats/), not computed by paging through every
+/// report client-side.
+final reportStatsProvider = FutureProvider<double?>((ref) async {
+  final api = ref.read(apiServiceProvider);
+  final response = await api.getJson('/jobs/api/reports/stats/');
+  if (response is Map) {
+    final v = response['avg_chemical_saved_percentage'];
+    if (v is num) return v.toDouble();
+    if (v != null) return double.tryParse(v.toString());
+  }
+  return null;
+});

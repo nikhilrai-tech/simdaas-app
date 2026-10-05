@@ -21,4 +21,8 @@ abstract class ReportRepository {
   /// PIN-gated the same way session-mode switching and heatmap/GPS-
   /// calibration settings are (jobs.views.ReportPlotCorrectionView).
   Future<Report> correctReportPlot(String reportId, String plotId, {String? pin});
+
+  /// Best-effort: see ReportRemoteDataSource.uploadHeatmapSnapshot.
+  Future<void> uploadHeatmapSnapshot(String reportId,
+      {String? gps, String? spray, String? speed});
 }
