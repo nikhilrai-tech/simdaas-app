@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/widgets/my_location_layer.dart';
 
 /// Renders map tile, polygon and vertex markers and forwards pointer events
@@ -59,7 +60,13 @@ class MapLayers extends StatelessWidget {
             urlTemplate: isSatellite
                 ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
                 : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-            subdomains: const ['a', 'b', 'c']),
+            subdomains: const ['a', 'b', 'c'],
+            // Cache-first: tiles already downloaded (via "Download for
+            // offline" on this screen) or simply seen before load instantly
+            // from disk, no network round-trip. See offline_tile_cache_
+            // service.dart for why this is a from-scratch implementation
+            // rather than the usual flutter_map_tile_caching package (GPL).
+            tileProvider: CachedTileProvider()),
         MyLocationLayer(onPosition: onMyLocation),
         if (points.isNotEmpty) ...[
           PolygonLayer(polygons: [

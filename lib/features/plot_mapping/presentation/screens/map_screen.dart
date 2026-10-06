@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -874,6 +875,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             mini: true,
             child: const Icon(Icons.remove),
           ),
+          const SizedBox(height: 8),
+          FloatingActionButton(
+            heroTag: 'download_offline',
+            tooltip: 'Download map for offline use',
+            mini: true,
+            onPressed: points.length < 3
+                ? null
+                : () => _showDownloadOfflineSheet(context, points),
+            child: const Icon(Icons.download_for_offline_outlined),
+          ),
           const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: 'locate_device',
@@ -888,6 +899,165 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // "Download for offline" -- lets a layer-select + tile-count-estimate +
+  // progress sheet (same shape as the reference app's own "select the
+  // layer to download" flow) pre-fetch every tile covering this plot's
+  // drawn boundary (padded so panning slightly past the edge still hits
+  // cache) at a zoom range useful for field work. Once downloaded, this
+  // same plot loads instantly on this screen and on the monitoring screen
+  // (both now use CachedTileProvider) even with no/poor connectivity.
+  static const int _offlineMinZoom = 15;
+  static const int _offlineMaxZoom = 20;
+
+  Future<void> _showDownloadOfflineSheet(BuildContext context, List<LatLng> points) async {
+    final bounds = paddedBoundsForPoints(points);
+    bool wantSatellite = true;
+    bool wantNormal = true;
+    bool downloading = false;
+    bool cancelled = false;
+    OfflineDownloadProgress? progress;
+
+    List<String> templatesFor(bool sat, bool normal) => [
+          if (sat) 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+          if (normal) 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+        ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isDismissible: true,
+      enableDrag: !downloading,
+      builder: (sheetContext) {
+        return StatefulBuilder(builder: (sheetContext, setSheetState) {
+          final selectedCount = (wantSatellite ? 1 : 0) + (wantNormal ? 1 : 0);
+          final tileEstimate = selectedCount == 0
+              ? 0
+              : estimateTileCount(
+                  bounds: bounds,
+                  minZoom: _offlineMinZoom,
+                  maxZoom: _offlineMaxZoom,
+                  templateCount: selectedCount,
+                );
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Download map for offline use',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      if (!downloading)
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'So this plot loads instantly here and on the monitoring '
+                    'screen, even with no signal in the field.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    value: wantSatellite,
+                    onChanged: downloading
+                        ? null
+                        : (v) => setSheetState(() => wantSatellite = v ?? false),
+                    title: const Text('Satellite'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  CheckboxListTile(
+                    value: wantNormal,
+                    onChanged: downloading
+                        ? null
+                        : (v) => setSheetState(() => wantNormal = v ?? false),
+                    title: const Text('Normal'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    selectedCount == 0
+                        ? 'Pick at least one map type'
+                        : '~$tileEstimate tiles to check/download',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: (selectedCount == 0 || downloading)
+                          ? null
+                          : () async {
+                              setSheetState(() => downloading = true);
+                              final result = await downloadRegion(
+                                bounds: bounds,
+                                minZoom: _offlineMinZoom,
+                                maxZoom: _offlineMaxZoom,
+                                urlTemplates: templatesFor(wantSatellite, wantNormal),
+                                isCancelled: () => cancelled,
+                                onProgress: (p) {
+                                  progress = p;
+                                  setSheetState(() {});
+                                },
+                              );
+                              if (!sheetContext.mounted) return;
+                              Navigator.of(sheetContext).pop();
+                              if (context.mounted) {
+                                showSuccessSnackBar(
+                                  context,
+                                  result.failed > 0
+                                      ? 'Downloaded for offline use (${result.failed} tiles failed, will retry live)'
+                                      : 'Downloaded for offline use',
+                                );
+                              }
+                            },
+                      child: downloading
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(progress == null
+                                    ? 'Starting…'
+                                    : '${progress!.done} / ${progress!.total}'),
+                              ],
+                            )
+                          : const Text('Download'),
+                    ),
+                  ),
+                  if (downloading) ...[
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton(
+                        onPressed: () {
+                          cancelled = true;
+                        },
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        });
+      },
     );
   }
 

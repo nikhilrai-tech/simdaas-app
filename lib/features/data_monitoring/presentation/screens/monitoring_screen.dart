@@ -8,6 +8,7 @@ import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
@@ -1365,7 +1366,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     urlTemplate: _isSatelliteView
                         ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
                         : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-                    subdomains: const ['a', 'b', 'c']),
+                    subdomains: const ['a', 'b', 'c'],
+                    // Cache-first -- any tiles already downloaded for this
+                    // plot (Fix: plot creation/edit screen's "Download for
+                    // offline") or simply seen before load instantly, no
+                    // network round-trip. See offline_tile_cache_service.dart.
+                    tileProvider: CachedTileProvider()),
                 if (plot.polygon.isNotEmpty)
                   PolygonLayer(polygons: [
                     Polygon(
