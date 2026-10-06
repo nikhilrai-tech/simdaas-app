@@ -11,8 +11,9 @@ class FirmwareRepositoryImpl {
   Future<void> requestCheckVersion(String controlUnitId) =>
       remote.requestCheckVersion(controlUnitId);
 
-  Future<void> startUpdate(String controlUnitId, {required String targetVersion}) =>
-      remote.startUpdate(controlUnitId, targetVersion: targetVersion);
+  Future<void> startUpdate(String controlUnitId,
+          {required String targetVersion, String transport = 'wifi'}) =>
+      remote.startUpdate(controlUnitId, targetVersion: targetVersion, transport: transport);
 
   Future<void> sendWifiCredentials(String controlUnitId,
           {required String ssid, required String password}) =>
