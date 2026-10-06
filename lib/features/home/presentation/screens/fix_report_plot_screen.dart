@@ -17,7 +17,9 @@ import 'package:simdaas/features/plot_mapping/presentation/providers/plot_provid
 import 'package:simdaas/features/reports/domain/report.dart';
 import 'package:simdaas/features/reports/presentation/providers/report_providers.dart';
 
-const _pageSize = 20;
+const _pageSize = 10;
+
+enum _DatePreset { today, thisWeek, thisMonth, custom }
 
 class FixReportPlotScreen extends ConsumerStatefulWidget {
   const FixReportPlotScreen({super.key});
@@ -27,13 +29,127 @@ class FixReportPlotScreen extends ConsumerStatefulWidget {
 }
 
 class _FixReportPlotScreenState extends ConsumerState<FixReportPlotScreen> {
-  int _loadedPages = 1;
+  int _currentPage = 0;
   Report? _selectedReport;
   String? _selectedPlotId;
   bool _saving = false;
   String? _error;
 
-  ReportsPageParams _params(int page) => ReportsPageParams(page: page, pageSize: _pageSize);
+  _DatePreset _datePreset = _DatePreset.today;
+  DateTimeRange? _customRange;
+
+  // Truncated to a whole day, NOT DateTime.now() as-is -- see
+  // reports_list_screen.dart's identical getter for why: a millisecond-
+  // precise "now" would make a fresh ReportsPageParams (and so a fresh
+  // backend request) on every rebuild and the list would never settle.
+  DateTime? get _dateFrom {
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    switch (_datePreset) {
+      case _DatePreset.today:
+        return startOfToday;
+      case _DatePreset.thisWeek:
+        return startOfToday.subtract(Duration(days: today.weekday - DateTime.monday));
+      case _DatePreset.thisMonth:
+        return DateTime(today.year, today.month, 1);
+      case _DatePreset.custom:
+        return _customRange?.start;
+    }
+  }
+
+  DateTime? get _dateTo {
+    if (_datePreset == _DatePreset.custom && _customRange != null) {
+      final end = _customRange!.end;
+      return DateTime(end.year, end.month, end.day, 23, 59, 59);
+    }
+    return null;
+  }
+
+  String get _dateFilterLabel {
+    switch (_datePreset) {
+      case _DatePreset.today:
+        return 'Today';
+      case _DatePreset.thisWeek:
+        return 'This week';
+      case _DatePreset.thisMonth:
+        return 'This month';
+      case _DatePreset.custom:
+        if (_customRange == null) return 'Custom range';
+        final f = DateFormat.yMMMd();
+        return '${f.format(_customRange!.start)} - ${f.format(_customRange!.end)}';
+    }
+  }
+
+  Future<void> _pickDateFilter() async {
+    final choice = await showModalBottomSheet<_DatePreset>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('Today'),
+              trailing: _datePreset == _DatePreset.today
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.today),
+            ),
+            ListTile(
+              title: const Text('This week'),
+              trailing: _datePreset == _DatePreset.thisWeek
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.thisWeek),
+            ),
+            ListTile(
+              title: const Text('This month'),
+              trailing: _datePreset == _DatePreset.thisMonth
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.thisMonth),
+            ),
+            ListTile(
+              title: const Text('Custom range...'),
+              trailing: _datePreset == _DatePreset.custom
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () => Navigator.pop(context, _DatePreset.custom),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    if (choice == _DatePreset.custom) {
+      final now = DateTime.now();
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(now.year - 5),
+        lastDate: now,
+        initialDateRange: _customRange,
+      );
+      if (picked == null || !mounted) return;
+      setState(() {
+        _datePreset = _DatePreset.custom;
+        _customRange = picked;
+        _currentPage = 0;
+      });
+      return;
+    }
+
+    setState(() {
+      _datePreset = choice;
+      _currentPage = 0;
+    });
+  }
+
+  ReportsPageParams _params(int page) => ReportsPageParams(
+        page: page,
+        pageSize: _pageSize,
+        createdAfter: _dateFrom,
+        createdBefore: _dateTo,
+      );
 
   Future<void> _submit() async {
     final report = _selectedReport;
@@ -78,6 +194,7 @@ class _FixReportPlotScreenState extends ConsumerState<FixReportPlotScreen> {
   Widget build(BuildContext context) {
     final userId = ref.read(authServiceProvider).currentUserId ?? '';
     final plotsAsync = ref.watch(plot_provs.plotsListProvider(userId));
+    final reportsAsync = ref.watch(reportsListProvider(_params(_currentPage + 1)));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Fix Report Plot')),
@@ -95,8 +212,9 @@ class _FixReportPlotScreenState extends ConsumerState<FixReportPlotScreen> {
               style: TextStyle(fontSize: 13),
             ),
           ),
+          _buildDateFilterChip(),
           Expanded(
-            child: _buildReportsList(),
+            child: _buildReportsList(reportsAsync),
           ),
           if (_selectedReport != null)
             _buildPlotPickerPanel(plotsAsync),
@@ -105,62 +223,109 @@ class _FixReportPlotScreenState extends ConsumerState<FixReportPlotScreen> {
     );
   }
 
-  Widget _buildReportsList() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: _loadedPages + 1, // +1 for the "load more" footer slot
-      itemBuilder: (context, pageIndex) {
-        if (pageIndex == _loadedPages) {
-          return _buildLoadMoreFooter();
+  Widget _buildDateFilterChip() {
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: InkWell(
+          onTap: _pickDateFilter,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.calendar_today_outlined, size: 14, color: Colors.grey.shade700),
+                const SizedBox(width: 6),
+                Text(_dateFilterLabel, style: TextStyle(fontSize: 13, color: Colors.grey.shade800)),
+                const SizedBox(width: 4),
+                Icon(Icons.arrow_drop_down, size: 18, color: Colors.grey.shade700),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportsList(AsyncValue<({List<Report> reports, int totalCount})> reportsAsync) {
+    return reportsAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) {
+        // A page number past the last one (backend 404s it) means the list
+        // shrank out from under a deep page (e.g. a filter change) -- back
+        // off to page 1 instead of showing a raw error for what isn't
+        // really a failure.
+        if (_currentPage > 0) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _currentPage = 0);
+          });
+          return const Center(child: CircularProgressIndicator());
         }
-        final asyncPage = ref.watch(reportsListProvider(_params(pageIndex + 1)));
-        return asyncPage.when(
-          loading: () => pageIndex == 0
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              : const SizedBox.shrink(),
-          error: (e, _) => pageIndex == 0
-              ? Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text('Could not load reports: $e'),
-                )
-              : const SizedBox.shrink(),
-          data: (page) {
-            if (pageIndex == 0 && page.reports.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 32),
-                child: Center(child: Text('No reports yet.')),
-              );
-            }
-            return Column(
-              children: page.reports.map(_buildReportTile).toList(),
-            );
-          },
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Center(child: Text('Could not load reports: $e')),
+        );
+      },
+      data: (page) {
+        if (page.reports.isEmpty && page.totalCount == 0) {
+          return const Center(child: Text('No reports in this range.'));
+        }
+        final pageCount = (page.totalCount / _pageSize).ceil();
+        // The count shrank (a filter change, or a report was deleted)
+        // enough that this page no longer exists -- back off to the last
+        // real one instead of showing an empty/broken page.
+        if (_currentPage >= pageCount) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _currentPage = pageCount - 1);
+          });
+          return const Center(child: CircularProgressIndicator());
+        }
+        return Column(
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(12),
+                children: page.reports.map(_buildReportTile).toList(),
+              ),
+            ),
+            if (pageCount > 1) _buildPaginationBar(_currentPage, pageCount),
+          ],
         );
       },
     );
   }
 
-  Widget _buildLoadMoreFooter() {
-    final lastPage = ref.watch(reportsListProvider(_params(_loadedPages)));
-    return lastPage.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (page) {
-        final loadedSoFar = _loadedPages * _pageSize;
-        if (loadedSoFar >= page.totalCount) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Center(
-            child: OutlinedButton(
-              onPressed: () => setState(() => _loadedPages += 1),
-              child: const Text('Load more'),
-            ),
+  Widget _buildPaginationBar(int page, int pageCount) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          TextButton.icon(
+            onPressed: page > 0 ? () => setState(() => _currentPage = page - 1) : null,
+            icon: const Icon(Icons.chevron_left),
+            label: const Text('Previous'),
           ),
-        );
-      },
+          Text('Page ${page + 1} of $pageCount', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+          TextButton.icon(
+            onPressed: page < pageCount - 1 ? () => setState(() => _currentPage = page + 1) : null,
+            icon: const Icon(Icons.chevron_right),
+            label: const Text('Next'),
+          ),
+        ],
+      ),
     );
   }
 
