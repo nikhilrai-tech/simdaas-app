@@ -74,6 +74,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   // that case, see report_pdf_builder.dart's doc comment).
   final GlobalKey _mapRepaintKey = GlobalKey();
   bool _isSharing = false;
+  bool _isEmailing = false;
 
   // Best-effort upload of whichever heatmap mode is actually on screen, so
   // the verified-report email PDF (built server-side, no heatmap renderer
@@ -211,6 +212,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     )
                   : const Icon(Icons.share_outlined, color: Colors.black),
               onPressed: _isSharing ? null : () => _shareReport(context, report)),
+          IconButton(
+              tooltip: 'Email me this report',
+              icon: _isEmailing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.email_outlined, color: Colors.black),
+              onPressed: _isEmailing ? null : () => _emailReport(context, report)),
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red),
             tooltip: 'Delete report',
@@ -1060,6 +1071,40 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
       }
     } finally {
       if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  // Emails this exact PDF to the signed-in user's own registered email --
+  // same build as Share (real captured heatmaps), just sent through the
+  // backend instead of the OS share sheet. The backend no longer emails a
+  // report automatically on verification (jobs/log_verification.py) --
+  // that could only ever attach a backend-rendered approximation, since
+  // there's no live screen to screenshot server-side. Routing every email
+  // through here instead guarantees it looks exactly like what the app
+  // itself just showed.
+  Future<void> _emailReport(BuildContext context, Report report) async {
+    setState(() => _isEmailing = true);
+    try {
+      final mapImages = await _captureHeatmapImages(report);
+
+      final Uint8List pdfBytes;
+      try {
+        pdfBytes = await buildReportPdf(report: report, mapImages: mapImages);
+      } catch (e, st) {
+        debugPrint('Email report: PDF build failed: $e\n$st');
+        throw 'building the PDF: $e';
+      }
+
+      await ref.read(reportRepoProvider).emailReport(report.id, pdfBytes);
+      if (context.mounted) {
+        showSuccessSnackBar(context, 'Report emailed to your account');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        showGenericErrorSnackBar(context, 'Failed to email report — $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isEmailing = false);
     }
   }
 

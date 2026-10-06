@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../report.dart';
 
 abstract class ReportRepository {
@@ -25,4 +27,7 @@ abstract class ReportRepository {
   /// Best-effort: see ReportRemoteDataSource.uploadHeatmapSnapshot.
   Future<void> uploadHeatmapSnapshot(String reportId,
       {String? gps, String? spray, String? speed, String? leftRight});
+
+  /// Emails this exact PDF to the signed-in user's own registered email.
+  Future<void> emailReport(String reportId, Uint8List pdfBytes);
 }

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../domain/report.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../datasources/report_remote_data_source.dart';
@@ -60,5 +62,10 @@ class ReportRepositoryImpl implements ReportRepository {
       {String? gps, String? spray, String? speed, String? leftRight}) async {
     await remoteDataSource.uploadHeatmapSnapshot(reportId,
         gps: gps, spray: spray, speed: speed, leftRight: leftRight);
+  }
+
+  @override
+  Future<void> emailReport(String reportId, Uint8List pdfBytes) async {
+    await remoteDataSource.emailReport(reportId, pdfBytes);
   }
 }
