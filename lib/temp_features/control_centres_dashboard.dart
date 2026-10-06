@@ -27,6 +27,7 @@ class TempDashboard extends ConsumerWidget {
     final userId = ref.read(authServiceProvider).currentUserId ?? '';
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
     final activeDevices = ref.watch(activeDevicesProvider).asData?.value ?? [];
+    final avgChemicalSaved = ref.watch(reportStatsProvider).asData?.value;
     // Admin Dashboard (Plots/Jobs/Operators/Equipments/Reports/Alerts) was
     // previously only reachable via /role_select, which nothing in the real
     // login flow ever navigates to — Super Admins had no way to actually
@@ -148,6 +149,52 @@ class TempDashboard extends ConsumerWidget {
                                 ),
                               ],
                             ),
+                            if (avgChemicalSaved != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 14),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF015685).withAlpha(20),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: const Color(0xFF015685).withAlpha(45)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF015685),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: const Icon(Icons.eco_outlined, color: Colors.white, size: 17),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '${avgChemicalSaved.toStringAsFixed(1)}% avg. chemical saved',
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF015685),
+                                            ),
+                                          ),
+                                          const Text(
+                                            'Across all your reports',
+                                            style: TextStyle(fontSize: 11, color: Colors.black54),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -204,23 +251,6 @@ class TempDashboard extends ConsumerWidget {
                           title: 'Reports',
                           subtitle: 'View recent application reports',
                           color: const Color(0xFF00897B),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => const ReportsListScreen()),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _DashboardCard(
-                          icon: Icons.eco_outlined,
-                          title: 'Avg. Chemical Saved',
-                          subtitle: () {
-                            final statsAsync = ref.watch(reportStatsProvider);
-                            final avg = statsAsync.asData?.value;
-                            if (statsAsync.isLoading) return 'Loading…';
-                            if (avg == null) return 'No reports yet';
-                            return '${avg.toStringAsFixed(1)}% avg. across all your reports';
-                          }(),
-                          color: const Color(0xFF015685),
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                                 builder: (_) => const ReportsListScreen()),

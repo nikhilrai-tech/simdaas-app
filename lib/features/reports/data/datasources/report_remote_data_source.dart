@@ -28,7 +28,7 @@ abstract class ReportRemoteDataSource {
   /// email keeps using its existing fallback, nothing the caller needs to
   /// react to.
   Future<void> uploadHeatmapSnapshot(String reportId,
-      {String? gps, String? spray, String? speed});
+      {String? gps, String? spray, String? speed, String? leftRight});
 }
 
 class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
@@ -137,12 +137,13 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
 
   @override
   Future<void> uploadHeatmapSnapshot(String reportId,
-      {String? gps, String? spray, String? speed}) async {
+      {String? gps, String? spray, String? speed, String? leftRight}) async {
     try {
       await api.postJson('/jobs/api/reports/$reportId/heatmap-snapshot/', jsonBody: {
         if (gps != null) 'gps': gps,
         if (spray != null) 'spray': spray,
         if (speed != null) 'speed': speed,
+        if (leftRight != null) 'leftright': leftRight,
       });
     } catch (e) {
       debugPrint('Best-effort heatmap snapshot upload failed (ignored): $e');
