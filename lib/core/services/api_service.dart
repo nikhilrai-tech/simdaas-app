@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import 'api_exception.dart';
 import 'package:flutter/foundation.dart';
 
@@ -166,6 +168,39 @@ class ApiService {
     } catch (e) {
       debugPrint('ApiService.postJson decode error for $path: $e');
       return resp.body;
+    }
+  }
+
+  /// POST a single file as multipart/form-data (e.g. a built PDF). Simpler
+  /// than [post]/[get] -- no pre-emptive token-refresh check, matching
+  /// [put]/[delete] -- this is a one-off, user-triggered action, not a
+  /// core navigation flow; an expired token just surfaces as an error the
+  /// user can retry.
+  Future<http.Response> postMultipart(
+    String path, {
+    required String fieldName,
+    required Uint8List bytes,
+    required String filename,
+    String contentType = 'application/octet-stream',
+  }) async {
+    try {
+      final c = client ?? http.Client();
+      final request = http.MultipartRequest('POST', url(path));
+      request.headers.addAll(_withAuth(null));
+      request.files.add(http.MultipartFile.fromBytes(
+        fieldName,
+        bytes,
+        filename: filename,
+        contentType: MediaType.parse(contentType),
+      ));
+      final streamed = await c.send(request);
+      final resp = await http.Response.fromStream(streamed);
+      _ensureSuccess(resp, path);
+      return resp;
+    } catch (e) {
+      debugPrint('ApiService.postMultipart $path error: $e');
+      if (e is ApiException) rethrow;
+      throw ApiException(null, 'Network error: $e', path: path);
     }
   }
 

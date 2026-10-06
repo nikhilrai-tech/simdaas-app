@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:simdaas/core/services/api_service.dart';
 import '../models/report_model.dart';
@@ -29,6 +31,11 @@ abstract class ReportRemoteDataSource {
   /// react to.
   Future<void> uploadHeatmapSnapshot(String reportId,
       {String? gps, String? spray, String? speed, String? leftRight});
+
+  /// Emails this exact PDF (same bytes Share/Download produces, real
+  /// captured heatmaps included) to the signed-in user's own registered
+  /// email address.
+  Future<void> emailReport(String reportId, Uint8List pdfBytes);
 }
 
 class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
@@ -148,5 +155,16 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
     } catch (e) {
       debugPrint('Best-effort heatmap snapshot upload failed (ignored): $e');
     }
+  }
+
+  @override
+  Future<void> emailReport(String reportId, Uint8List pdfBytes) async {
+    await api.postMultipart(
+      '/jobs/api/reports/$reportId/email/',
+      fieldName: 'pdf',
+      bytes: pdfBytes,
+      filename: 'agrios_report_$reportId.pdf',
+      contentType: 'application/pdf',
+    );
   }
 }
