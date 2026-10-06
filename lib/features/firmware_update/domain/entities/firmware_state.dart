@@ -1,20 +1,22 @@
 /// UI-level stages for the Firmware Update Workspace screen (RFC-004 §6).
 ///
 /// These map onto the backend's `OtaStatusEvent.state` values (WIFI_CONNECTING,
-/// IN_PROGRESS, DOWNLOAD_OK, SUCCESS, FAILED, ROLLBACK) plus a few UI-only
-/// stages (idle / waitingToConnect / wifiRequired / locked) that don't exist
-/// on the wire but are needed to drive the screen.
+/// CELLULAR_DOWNLOADING, IN_PROGRESS, DOWNLOAD_OK, SUCCESS, FAILED, ROLLBACK)
+/// plus a few UI-only stages (idle / waitingToConnect / wifiRequired / locked)
+/// that don't exist on the wire but are needed to drive the screen.
 enum FirmwareUpdateStage {
   idle,
-  waitingToConnect,
-  wifiRequired, // FAILED 401 — show SSID/password inputs
-  wifiTimeout, // FAILED 408 — inline error, re-enable inputs
-  downloading, // IN_PROGRESS
+  waitingToConnect, // WIFI_CONNECTING -- WiFi transport only
+  wifiRequired, // FAILED 401 — show SSID/password inputs (WiFi only)
+  wifiTimeout, // FAILED 408 — inline error, re-enable inputs (WiFi only)
+  downloading, // IN_PROGRESS -- WiFi transport, has a progress percentage
+  cellularDownloading, // CELLULAR_DOWNLOADING -- no connecting phase, no percentage
+  cellularUnavailable, // FAILED 503 — modem busy / no data connection, re-show Update button
   verifying, // DOWNLOAD_OK — 90s countdown
   success,
   rollback,
-  connectionLost, // FAILED 504 — modal, re-show Update button
-  criticalFailure, // 507/413/422/404/403/503/400/other-HTTP
+  connectionLost, // FAILED 504 — modal, re-show Update button (WiFi only)
+  criticalFailure, // 507/413/422/404/403/400/other-HTTP
   locked, // server-side 504 lockout (RFC-004 §2.2.1) still active
 }
 

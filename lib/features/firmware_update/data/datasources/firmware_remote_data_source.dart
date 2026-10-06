@@ -4,7 +4,9 @@ import '../../domain/entities/firmware_state.dart';
 abstract class FirmwareRemoteDataSource {
   Future<FirmwareVersionSnapshot> getStatus(String controlUnitId);
   Future<void> requestCheckVersion(String controlUnitId);
-  Future<void> startUpdate(String controlUnitId, {required String targetVersion});
+  /// [transport] is `'wifi'` (default) or `'cellular'`.
+  Future<void> startUpdate(String controlUnitId,
+      {required String targetVersion, String transport = 'wifi'});
   Future<void> sendWifiCredentials(String controlUnitId,
       {required String ssid, required String password});
   Future<List<FirmwareAlertEntity>> getAdminAlerts();
@@ -35,13 +37,14 @@ class FirmwareRemoteDataSourceImpl implements FirmwareRemoteDataSource {
   }
 
   @override
-  Future<void> startUpdate(String controlUnitId, {required String targetVersion}) async {
+  Future<void> startUpdate(String controlUnitId,
+      {required String targetVersion, String transport = 'wifi'}) async {
     // 423 (locked) surfaces as an ApiException — the caller (provider) reads
     // e.body for retry_after_seconds. Never log the request/response bodies
     // for this endpoint's sibling (/wifi/) — see RFC-004 §3.5.
     await api.postJson(
       '/api/control-units/$controlUnitId/firmware/update/',
-      jsonBody: {'target_version': targetVersion},
+      jsonBody: {'target_version': targetVersion, 'transport': transport},
     );
   }
 

@@ -39,6 +39,7 @@ const Duration kResyncPollInterval = Duration(seconds: 8);
 const _kActiveStages = {
   FirmwareUpdateStage.waitingToConnect,
   FirmwareUpdateStage.downloading,
+  FirmwareUpdateStage.cellularDownloading,
   FirmwareUpdateStage.verifying,
 };
 
@@ -59,6 +60,8 @@ FirmwareUpdateStage? _terminalStageForBackendStatus(String? status, int? code) {
           return FirmwareUpdateStage.wifiTimeout;
         case 504:
           return FirmwareUpdateStage.connectionLost;
+        case 503:
+          return FirmwareUpdateStage.cellularUnavailable;
         default:
           return FirmwareUpdateStage.criticalFailure;
       }
@@ -234,37 +237,48 @@ class FirmwareUpdateController extends StateNotifier<FirmwareUpdateState> {
     );
   }
 
-  Future<void> startUpdate() async {
+  /// [transport] is `'wifi'` (default) or `'cellular'` — the WiFi/Cellular
+  /// choice on the Update button.
+  Future<void> startUpdate({String transport = 'wifi'}) async {
     final targetVersion = state.snapshot?.availableVersion;
     if (targetVersion == null) return;
-    await _triggerOtaStart(targetVersion);
+    await _triggerOtaStart(targetVersion, transport: transport);
   }
 
   /// Publishes the actual /ota start command. Shared by [startUpdate] and
-  /// [submitWifiCredentials] — the device only ever acts on a fresh /ota
-  /// message; it does not retry on its own just from receiving new WiFi
-  /// creds on /ota/wifi (confirmed: it responds promptly to /ota and
-  /// /ota/version, but sits silent after /ota/wifi alone), so credentials
-  /// alone would otherwise leave the screen waiting for a reply that never
-  /// comes. [initialStage] lets the wifi-submit path jump straight to the
-  /// same "downloading" step a fresh Update tap shows, instead of sitting
-  /// on "Waiting to Connect" again.
+  /// [submitWifiCredentials] (WiFi only — cellular never needs credentials,
+  /// so never reaches this path via that method) — the device only ever
+  /// acts on a fresh /ota message; it does not retry on its own just from
+  /// receiving new WiFi creds on /ota/wifi (confirmed: it responds promptly
+  /// to /ota and /ota/version, but sits silent after /ota/wifi alone), so
+  /// credentials alone would otherwise leave the screen waiting for a reply
+  /// that never comes. [initialStage] lets the wifi-submit path jump
+  /// straight to the same "downloading" step a fresh Update tap shows,
+  /// instead of sitting on "Waiting to Connect" again.
   Future<void> _triggerOtaStart(
     String targetVersion, {
-    FirmwareUpdateStage initialStage = FirmwareUpdateStage.waitingToConnect,
+    required String transport,
+    FirmwareUpdateStage? initialStage,
   }) async {
     if (state.isLocalLocked) return;
+    // Cellular has no connecting phase (the link is already up) -- go
+    // straight to its own downloading stage instead of WiFi's "Waiting to
+    // Connect".
+    final stage = initialStage ??
+        (transport == 'cellular'
+            ? FirmwareUpdateStage.cellularDownloading
+            : FirmwareUpdateStage.waitingToConnect);
 
     state = state.copyWith(
-      stage: initialStage,
+      stage: stage,
       errorReason: null,
-      progressPercent: initialStage == FirmwareUpdateStage.downloading ? 0 : null,
+      progressPercent: stage == FirmwareUpdateStage.downloading ? 0 : null,
     );
     _ensureResyncPoller();
 
     try {
       final repo = ref.read(firmwareRepoProvider);
-      await repo.startUpdate(controlUnitId, targetVersion: targetVersion);
+      await repo.startUpdate(controlUnitId, targetVersion: targetVersion, transport: transport);
     } on ApiException catch (e) {
       _stopResyncPoller();
       if (e.statusCode == 423) {
@@ -287,15 +301,22 @@ class FirmwareUpdateController extends StateNotifier<FirmwareUpdateState> {
 
       final targetVersion = state.snapshot?.availableVersion;
       if (targetVersion != null) {
-        await _triggerOtaStart(targetVersion, initialStage: FirmwareUpdateStage.downloading);
+        await _triggerOtaStart(
+          targetVersion,
+          transport: 'wifi',
+          initialStage: FirmwareUpdateStage.downloading,
+        );
       }
     } catch (_) {
       state = state.copyWith(isSubmittingWifi: false);
     }
   }
 
-  /// Path B retry — re-show the Update button after a 504, unless the
-  /// consecutive-failure streak has crossed the local UX threshold.
+  /// Path B retry — re-show the Update button after a 504 (WiFi) or a 503
+  /// (cellular modem busy / no data connection), unless the WiFi-specific
+  /// consecutive-504 streak has crossed the local UX threshold (503 never
+  /// contributes to that streak, so this is always a clean reset for
+  /// cellular).
   void retryAfterConnectionLost() {
     if (state.isLocalLocked) {
       state = state.copyWith(stage: FirmwareUpdateStage.locked);
@@ -308,6 +329,14 @@ class FirmwareUpdateController extends StateNotifier<FirmwareUpdateState> {
     switch (event.state) {
       case 'WIFI_CONNECTING':
         state = state.copyWith(stage: FirmwareUpdateStage.waitingToConnect);
+        _ensureResyncPoller();
+        break;
+
+      case 'CELLULAR_DOWNLOADING':
+        // No connecting phase and no progress percentage on cellular (the
+        // AT channel is busy with the download itself) -- just the
+        // indeterminate downloading stage until DOWNLOAD_OK/FAILED.
+        state = state.copyWith(stage: FirmwareUpdateStage.cellularDownloading);
         _ensureResyncPoller();
         break;
 
@@ -379,6 +408,18 @@ class FirmwareUpdateController extends StateNotifier<FirmwareUpdateState> {
           localLockUntil: lockUntil,
           errorReason: 'Connection lost. Please make sure the device and Wi-Fi '
               'hotspot are turned on and placed close to each other.',
+        );
+        break;
+      case 503:
+        // Cellular only -- "no cellular data connection" or "modem busy -
+        // retry shortly" (also fires if a log upload is using the modem's
+        // AT channel at the same time). Backend already treats this as
+        // part of the normal retry flow (tools/ota_service.py's
+        // _NON_CRITICAL_FAILED_CODES), never counts toward the WiFi-only
+        // 504 lockout streak, so this is always a clean "try again".
+        state = state.copyWith(
+          stage: FirmwareUpdateStage.cellularUnavailable,
+          errorReason: event.reason ?? 'Cellular connection unavailable. Please try again.',
         );
         break;
       default:
