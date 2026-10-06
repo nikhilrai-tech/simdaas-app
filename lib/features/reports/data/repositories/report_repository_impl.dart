@@ -57,7 +57,8 @@ class ReportRepositoryImpl implements ReportRepository {
 
   @override
   Future<void> uploadHeatmapSnapshot(String reportId,
-      {String? gps, String? spray, String? speed}) async {
-    await remoteDataSource.uploadHeatmapSnapshot(reportId, gps: gps, spray: spray, speed: speed);
+      {String? gps, String? spray, String? speed, String? leftRight}) async {
+    await remoteDataSource.uploadHeatmapSnapshot(reportId,
+        gps: gps, spray: spray, speed: speed, leftRight: leftRight);
   }
 }

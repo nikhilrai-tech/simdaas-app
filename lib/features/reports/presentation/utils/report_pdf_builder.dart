@@ -1,10 +1,11 @@
-// Branded, industry-grade 4-page PDF summary of a Report, shared via the
+// Branded, industry-grade 5-page PDF summary of a Report, shared via the
 // AppBar share button on ReportDetailsScreen (WhatsApp/Email/etc. through
 // share_plus) -- built to be handed to someone outside the farm (an
 // investor, a client, an agronomist), not just viewed by the device owner.
 //
-// Page 1 is an all-up summary; pages 2-4 are a deep dive into Spray/GPS/
-// Speed, mirroring the app's own heatmap mode toggle on this same screen.
+// Page 1 is an all-up summary; pages 2-5 are a deep dive into Spray/GPS/
+// Speed/Left-Right, mirroring the app's own heatmap mode toggle on this
+// same screen.
 // Deliberately mirrors the backend's own report-verified-notification PDF
 // (jobs/report_pdf.py on smart-spray-backend) -- same page structure,
 // section grouping, branding -- so a report looks the same whether it
@@ -49,6 +50,11 @@ const PdfColor _speedFast = PdfColor.fromInt(0xFFF44336);
 const PdfColor _sprayNone = PdfColors.white;
 const PdfColor _sprayLow = PdfColor.fromInt(0xFF1976D2);
 const PdfColor _sprayHigh = PdfColor.fromInt(0xFFB71C1C);
+// Must match HeatmapColorUtils.getColorForLeftRight exactly.
+const PdfColor _lrLeft = PdfColor.fromInt(0xFFF57C00);   // Colors.orange.shade700
+const PdfColor _lrRight = PdfColor.fromInt(0xFF7B1FA2);  // Colors.purple.shade700
+const PdfColor _lrBoth = PdfColor.fromInt(0xFF00796B);   // Colors.teal.shade700
+const PdfColor _lrNeither = PdfColors.white;
 
 const double _acreSqm = 4046.8564224;
 const _logoAssetPath = 'assets/splash/agrios_splash_logo.png';
@@ -160,38 +166,6 @@ pw.Widget _chemicalSavedBanner(Report report) {
           ),
         ),
       ],
-    ),
-  );
-}
-
-/// A small plot/heatmap snapshot for page 1, so the summary page alone
-/// (even if nobody flips to the Spray/GPS/Speed deep-dive pages) already
-/// shows what was actually sprayed. Uses the GPS mode capture as the most
-/// representative single view of plot coverage.
-pw.Widget _page1MapPreview(Uint8List? mapImageBytes) {
-  if (mapImageBytes == null) {
-    return pw.Container(
-      width: double.infinity,
-      height: 150,
-      alignment: pw.Alignment.center,
-      decoration: pw.BoxDecoration(
-        color: _cardBg,
-        border: pw.Border.all(color: _ruleGrey, width: 0.75),
-        borderRadius: pw.BorderRadius.circular(8),
-      ),
-      child: pw.Text('Plot map unavailable', style: const pw.TextStyle(fontSize: 9, color: _textGrey)),
-    );
-  }
-  return pw.Container(
-    height: 150,
-    decoration: pw.BoxDecoration(
-      borderRadius: pw.BorderRadius.circular(8),
-      border: pw.Border.all(color: _ruleGrey, width: 0.75),
-    ),
-    child: pw.ClipRRect(
-      horizontalRadius: 8,
-      verticalRadius: 8,
-      child: pw.Image(pw.MemoryImage(mapImageBytes), fit: pw.BoxFit.cover),
     ),
   );
 }
@@ -438,6 +412,16 @@ Future<Uint8List> buildReportPdf({
         ('Avg Speed', _fmtNum(report.avgSpeedKmph, digits: 1, suffix: ' km/h')),
         ('Max Speed', _fmtNum(report.maxSpeedKmph, digits: 1, suffix: ' km/h')),
       ]);
+  pw.Widget buildLeftRightCard() => _statCard('Left/Right Spray', _indigo, [
+        ('Left Spray Distance', _fmtNum(report.distanceWithLeftSprayKm, suffix: ' km')),
+        ('Right Spray Distance', _fmtNum(report.distanceWithRightSprayKm, suffix: ' km')),
+        ('Left Sol. Off', _fmtNum(
+            (report.distanceWithPtoKm - report.distanceWithLeftSprayKm).clamp(0.0, double.infinity),
+            suffix: ' km')),
+        ('Right Sol. Off', _fmtNum(
+            (report.distanceWithPtoKm - report.distanceWithRightSprayKm).clamp(0.0, double.infinity),
+            suffix: ' km')),
+      ]);
   pw.Widget buildSessionCard() => _statCard('Session Details', _indigo, [
         ('Started', _fmtDate(startTime)),
         ('Ended', _fmtDate(endTime)),
@@ -532,7 +516,6 @@ Future<Uint8List> buildReportPdf({
             _heroCard('Duration', _fmtDuration(startTime, endTime), _indigo),
           ]),
           pw.SizedBox(height: 10),
-          _page1MapPreview(mapImages[HeatmapType.gps]),
 
           buildCoverageCard(),
           buildSprayCard(),
@@ -593,6 +576,25 @@ Future<Uint8List> buildReportPdf({
               (_speedFast, speedLabels[2]),
             ],
             statCard: buildDistanceSpeedCard(),
+          ),
+
+          // ==================================================================
+          // Page 5 -- Left/Right Spray
+          // ==================================================================
+          pw.NewPage(),
+          ..._detailPage(
+            logo: logo,
+            report: report,
+            heading: 'Left/Right Spray',
+            plotName: plotName,
+            mapImageBytes: mapImages[HeatmapType.leftRight],
+            legendSwatches: [
+              (_lrLeft, 'Left only'),
+              (_lrRight, 'Right only'),
+              (_lrBoth, 'Both sides'),
+              (_lrNeither, 'Neither (PTO on, not spraying)'),
+            ],
+            statCard: buildLeftRightCard(),
           ),
         ];
       },

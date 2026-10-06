@@ -102,6 +102,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             gps: _heatmapType == HeatmapType.gps ? b64 : null,
             spray: _heatmapType == HeatmapType.spraying ? b64 : null,
             speed: _heatmapType == HeatmapType.speed ? b64 : null,
+            leftRight: _heatmapType == HeatmapType.leftRight ? b64 : null,
           );
     });
   }
@@ -1087,13 +1088,19 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         HeatmapType.gps: snapshot,
         HeatmapType.spraying: snapshot,
         HeatmapType.speed: snapshot,
+        HeatmapType.leftRight: snapshot,
       };
     }
 
     final originalType = _heatmapType;
     final images = <HeatmapType, Uint8List?>{};
     try {
-      for (final type in [HeatmapType.gps, HeatmapType.spraying, HeatmapType.speed]) {
+      for (final type in [
+        HeatmapType.gps,
+        HeatmapType.spraying,
+        HeatmapType.speed,
+        HeatmapType.leftRight,
+      ]) {
         if (!mounted) break;
         setState(() => _heatmapType = type);
         // Lets the map (PolygonLayer rebuilt for the new heatmap mode)

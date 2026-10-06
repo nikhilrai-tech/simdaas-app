@@ -24,5 +24,5 @@ abstract class ReportRepository {
 
   /// Best-effort: see ReportRemoteDataSource.uploadHeatmapSnapshot.
   Future<void> uploadHeatmapSnapshot(String reportId,
-      {String? gps, String? spray, String? speed});
+      {String? gps, String? spray, String? speed, String? leftRight});
 }
