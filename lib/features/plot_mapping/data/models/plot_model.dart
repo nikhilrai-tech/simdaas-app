@@ -15,6 +15,7 @@ class PlotModel extends PlotEntity {
     super.bedHeight,
     super.createdAt,
     super.rowLines,
+    super.geometryIsFrozen,
   });
 
   factory PlotModel.fromJson(String id, Map<String, dynamic> json) {
@@ -117,6 +118,7 @@ class PlotModel extends PlotEntity {
           ? DateTime.parse(json['created_at'].toString())
           : null,
       rowLines: rowLines,
+      geometryIsFrozen: json['geometry_is_frozen'] as bool? ?? true,
     );
   }
 
