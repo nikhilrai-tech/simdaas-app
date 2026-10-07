@@ -761,6 +761,34 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
               const SizedBox(height: 16),
             ],
 
+            if (report.plot != null && !report.plot!.geometryIsFrozen) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.amber.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Plot boundary/rows were edited after this report was generated, so the row-by-row heatmap can\'t be shown here. The plot outline and GPS path above are still accurate.',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.amber.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             // ── Performance Overview ──────────────────────────────────────
             _sectionHeader('Performance Overview'),
             Row(
@@ -1232,6 +1260,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     ],
                   ),
                 if (report.plot != null &&
+                    report.plot!.geometryIsFrozen &&
                     report.plot!.rowLines != null &&
                     report.plot!.rowLines!.isNotEmpty) ...[
                   PolygonLayer(
@@ -2027,6 +2056,7 @@ class _FullScreenMapPageState extends ConsumerState<_FullScreenMapPage> {
                   ],
                 ),
               if (report.plot != null &&
+                  report.plot!.geometryIsFrozen &&
                   report.plot!.rowLines != null &&
                   report.plot!.rowLines!.isNotEmpty) ...[
                 PolygonLayer(
@@ -2132,6 +2162,44 @@ class _FullScreenMapPageState extends ConsumerState<_FullScreenMapPage> {
             right: 12,
             child: _buildLegend(),
           ),
+
+          // Geometry-changed notice (top-center) -- shown instead of the
+          // row-corridor heatmap when the plot was re-edited after this
+          // report was generated (see geometryIsFrozen).
+          if (report.plot != null && !report.plot!.geometryIsFrozen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 60,
+              left: 56,
+              right: 56,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50.withOpacity(0.95),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.amber.shade200),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.15), blurRadius: 6),
+                  ],
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.amber.shade800, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Plot was edited after this report — row heatmap unavailable.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: Colors.amber.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           // Heatmap toggles (bottom-center)
           Positioned(
