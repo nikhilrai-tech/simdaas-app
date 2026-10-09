@@ -226,6 +226,9 @@ class TelemetryData {
   // Device-managed (Manual) mode only: the firmware's own session counter
   // (heartbeat idx 19), null for Automatic and null while idle.
   final int? deviceSessionId;
+  // Main sprayer battery, volts (backend already converts the firmware's
+  // raw millivolt reading). Null on older firmware that doesn't send it yet.
+  final double? batteryVoltage;
 
   TelemetryData({
     required this.deviceId,
@@ -252,6 +255,7 @@ class TelemetryData {
     this.flowInLitres,
     this.uptimeSec,
     this.deviceSessionId,
+    this.batteryVoltage,
   });
 
   /// Parse telemetry JSON. Returns null when required fields (device_id
@@ -386,6 +390,9 @@ class TelemetryData {
           : (json['device_session_id'] != null
               ? int.tryParse(json['device_session_id'].toString())
               : null),
+      batteryVoltage: json['battery_voltage'] is num
+          ? (json['battery_voltage'] as num).toDouble()
+          : null,
     );
   }
 }
@@ -875,6 +882,7 @@ class TelemetryService {
             flowInLitres: t.flowInLitres,
             uptimeSec: t.uptimeSec,
             deviceSessionId: t.deviceSessionId,
+            batteryVoltage: t.batteryVoltage,
           );
 
           _latest[normId] = stored;
