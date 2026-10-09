@@ -63,6 +63,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   bool _outOfPlotSnackVisible = false;
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
+  // ── SD card missing alert ────────────────────────────────────────────────
+  // Dismissing only silences the CURRENT episode -- reset back to false
+  // the moment the card is reported present again, so a later removal (the
+  // user pulling it back out) is treated as a fresh episode and alerts
+  // again instead of staying silently muted forever.
+  bool _sdCardAlertDismissed = false;
+
   // ── Cooldown state ───────────────────────────────────────────────────────
   CooldownState? _cooldownState;
   StreamSubscription<CooldownState>? _cooldownSub;
@@ -249,6 +256,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               _lastPtoOn = null;
             }
             if (t.uptimeSec != null) _lastUptimeSec = t.uptimeSec;
+
+            // Card reported present again -- the alert is resolved, so the
+            // NEXT time it goes missing is a new episode, not a continuation
+            // of one the user already dismissed.
+            if (t.sdCardPresent == true) _sdCardAlertDismissed = false;
 
             latestTelemetry = t;
             // Cache last known values so they survive waiting/cooldown gaps
@@ -918,6 +930,36 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   // ── Cooldown banner widget ───────────────────────────────────────────────
+  Widget _buildSdCardMissingBanner() {
+    return Container(
+      color: Colors.red.shade800.withOpacity(0.95),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.sd_card_alert, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'No SD card detected — this report may fail verification',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: () => setState(() => _sdCardAlertDismissed = true),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.close, color: Colors.white, size: 18),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCooldownBanner(CooldownState state) {
     final isManual = state.cooldownType == 'manual_end';
     final label = isManual
@@ -1639,6 +1681,27 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
             // Manual idle state (Start Session) is a menu item in the
             // overlay menu instead of a full-width banner here.
+
+            // ── SD card missing banner ──────────────────────────────────────
+            // Deliberately its own standalone widget, not a SnackBar -- the
+            // out-of-plot alert below already owns the single shared
+            // ScaffoldMessenger queue, and two alerts fighting over
+            // hideCurrentSnackBar() could silently hide the wrong one.
+            // Stacks below the cooldown banner (if one is showing) instead
+            // of overlapping it.
+            if (latestTelemetry?.sdCardPresent == false && !_sdCardAlertDismissed)
+              Positioned(
+                // Cooldown banner's own SafeArea already clears the status
+                // bar, so stacking directly below it (via its measured
+                // height) needs no extra top inset; standing alone, this
+                // banner clears the status bar itself instead.
+                top: cooldownBannerShown
+                    ? (_topBannerHeight ?? 52)
+                    : MediaQuery.of(context).padding.top,
+                left: 0,
+                right: 96,
+                child: _buildSdCardMissingBanner(),
+              ),
 
             // ── Cooldown / offline-pending banner ──────────────────────────
             // Shown briefly at the top when a cooldown begins, then auto

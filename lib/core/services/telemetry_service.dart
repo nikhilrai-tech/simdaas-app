@@ -229,6 +229,12 @@ class TelemetryData {
   // Main sprayer battery, volts (backend already converts the firmware's
   // raw millivolt reading). Null on older firmware that doesn't send it yet.
   final double? batteryVoltage;
+  // Whether the device currently detects an SD card (heartbeat's
+  // "config_ok" field repurposed for this). Null on older firmware. False
+  // means any SD-card log verification for the current session is doomed
+  // (see monitoring_screen.dart's dismissible alert and the backend's
+  // JobSession.sd_card_missing_during_session short-circuit).
+  final bool? sdCardPresent;
 
   TelemetryData({
     required this.deviceId,
@@ -256,6 +262,7 @@ class TelemetryData {
     this.uptimeSec,
     this.deviceSessionId,
     this.batteryVoltage,
+    this.sdCardPresent,
   });
 
   /// Parse telemetry JSON. Returns null when required fields (device_id
@@ -393,6 +400,9 @@ class TelemetryData {
       batteryVoltage: json['battery_voltage'] is num
           ? (json['battery_voltage'] as num).toDouble()
           : null,
+      sdCardPresent: json['sd_card_present'] is num
+          ? (json['sd_card_present'] as num) != 0
+          : (json['sd_card_present'] is bool ? json['sd_card_present'] as bool : null),
     );
   }
 }
@@ -883,6 +893,7 @@ class TelemetryService {
             uptimeSec: t.uptimeSec,
             deviceSessionId: t.deviceSessionId,
             batteryVoltage: t.batteryVoltage,
+            sdCardPresent: t.sdCardPresent,
           );
 
           _latest[normId] = stored;
