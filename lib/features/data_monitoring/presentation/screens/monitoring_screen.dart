@@ -1318,6 +1318,31 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                         inactiveColor: Colors.white.withAlpha(80),
                       );
                     }),
+                    // Battery — only on firmware that sends it yet (older
+                    // devices leave this null, so the chip just omits it
+                    // rather than showing a misleading 0.0V).
+                    if (latestTelemetry!.batteryVoltage != null) ...[
+                      const SizedBox(width: 16),
+                      Builder(builder: (ctx) {
+                        final v = latestTelemetry!.batteryVoltage!;
+                        final Color battColor = v >= 12.0
+                            ? Colors.green
+                            : (v >= 11.0 ? Colors.orange : Colors.red);
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.battery_std, color: battColor, size: 18),
+                            const SizedBox(width: 2),
+                            Text('${v.toStringAsFixed(1)}V',
+                                style: TextStyle(
+                                  color: battColor,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                )),
+                          ],
+                        );
+                      }),
+                    ],
                   ],
                 ),
                   ),
