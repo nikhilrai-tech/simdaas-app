@@ -24,6 +24,7 @@ import 'package:simdaas/core/utils/mac_utils.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'dart:async';
 import 'package:simdaas/core/services/connectivity_service.dart';
+import 'package:simdaas/core/theme/app_theme.dart';
 import '../../../reports/presentation/providers/session_providers.dart';
 
 class MonitoringScreen extends ConsumerStatefulWidget {
@@ -1465,9 +1466,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                             latestTelemetry!.lon ?? 0.0),
                         width: 40,
                         height: 40,
-                        child: Icon(Icons.location_on,
-                            color: _markerColorForTelemetry(latestTelemetry!,
-                              ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull))),
+                        // Fixed icon + colour regardless of PTO/auto-manual/
+                        // heatmap-type state -- this marks WHERE the sprayer
+                        // currently is, not what it's doing there (that's
+                        // what the PTO/Auto-Manual overlay chips above the
+                        // map are for). It used to recolour itself to match
+                        // whichever heatmap dot colour was selected, which
+                        // made it look like it was constantly changing state.
+                        child: const Icon(Icons.agriculture,
+                            color: AppTheme.primaryGreen, size: 32)),
                   ]),
               ],
             ),
@@ -2338,52 +2345,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       debugPrint('Error toggling sensor overlay: $e');
       debugPrint('stack: $st');
     }
-  }
-
-  // Returns the live marker color based on the currently selected heatmap type.
-  // Outside plot → red for all heatmaps.
-  // Inside plot  → color rules per heatmap spec.
-  Color _markerColorForTelemetry(TelemetryData t, PlotEntity? plot) {
-    try {
-      bool inPlot = t.deviceInPlot == true ||
-          (t.deviceInPlot?.toString().toLowerCase() == 'true') ||
-          (t.deviceInPlot?.toString() == '1');
-
-      if (plot?.polygon != null &&
-          plot!.polygon.length >= 3 &&
-          t.lat != null &&
-          t.lon != null) {
-        inPlot = _isPointInPolygon(LatLng(t.lat!, t.lon!), plot.polygon);
-      }
-
-      if (!inPlot) return Colors.red; // always red when outside
-
-      final ptoOn = t.ptoState == 1;
-      final isAuto = t.sprayMode == 1;
-
-      switch (_selectedHeatmap) {
-        case HeatmapType.gps:
-          // PTO off → orange, auto → blue, manual → grey
-          if (!ptoOn) return Colors.orange;
-          return isAuto ? Colors.blue : Colors.grey;
-
-        case HeatmapType.speed:
-          return HeatmapColorUtils.getColorForSpeed(t.speed);
-
-        case HeatmapType.spraying:
-          return HeatmapColorUtils.getColorForSpray(t.flowRate);
-
-        case HeatmapType.leftRight:
-          return HeatmapColorUtils.getColorForLeftRight(
-            leftOn: t.leftSolenoidState == 1,
-            rightOn: t.rightSolenoidState == 1,
-          );
-      }
-    } catch (e, st) {
-      debugPrint('MonitoringScreen._markerColorForTelemetry error: $e');
-      debugPrint('stack: $st');
-    }
-    return Colors.red;
   }
 
   void _goToCurrentPosition() {
