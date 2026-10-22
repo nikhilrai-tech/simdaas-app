@@ -351,4 +351,63 @@ class RowLineGeometry {
       plane.toLatLng(p.x + d.x * bestB, p.y + d.y * bestB),
     ];
   }
+
+  /// [row] rotated by [degrees] (positive = counter-clockwise) around its own
+  /// midpoint, and re-clipped to [polygon] the same way [shiftRow] is. Lets a
+  /// manually-placed row line be nudged to match the true physical row's
+  /// angle (e.g. after a guide-line-generated row was shifted sideways to
+  /// line up with one end, but drifts off at the other end because the real
+  /// row isn't quite parallel to the guide line) -- a plain sideways shift
+  /// can't fix an angular mismatch, only a parallel one. Null if the rotated
+  /// line no longer crosses the plot.
+  static List<LatLng>? rotateRow({
+    required List<LatLng> row,
+    required double degrees,
+    required List<LatLng> polygon,
+  }) {
+    if (row.length < 2 || polygon.length < 3) return null;
+    final plane = MetricPlane.around(polygon);
+    final a = plane.toXY(row[0]), b = plane.toXY(row[1]);
+    final d = CorridorStrip._unit(b - a);
+    if (d.x == 0 && d.y == 0) return null;
+    final mid = math.Point((a.x + b.x) / 2, (a.y + b.y) / 2);
+
+    final rad = degrees * math.pi / 180.0;
+    final cosT = math.cos(rad), sinT = math.sin(rad);
+    final rd = _P(d.x * cosT - d.y * sinT, d.x * sinT + d.y * cosT);
+
+    final xy = polygon.map(plane.toXY).toList();
+    final ts = <double>[];
+    for (var i = 0; i < xy.length; i++) {
+      final e0 = xy[i], e1 = xy[(i + 1) % xy.length];
+      final ex = e1.x - e0.x, ey = e1.y - e0.y;
+      final cross = rd.x * ey - rd.y * ex;
+      if (cross.abs() < 1e-9) continue;
+      final vx = e0.x - mid.x, vy = e0.y - mid.y;
+      final t = (vx * ey - vy * ex) / cross;
+      final u = (vx * rd.y - vy * rd.x) / cross;
+      if (u >= -1e-9 && u <= 1 + 1e-9) ts.add(t);
+    }
+    ts.sort();
+    double? bestA, bestB;
+    var bestDist = double.infinity;
+    for (var k = 0; k + 1 < ts.length; k += 2) {
+      if (ts[k + 1] - ts[k] < 0.5) continue;
+      // Closest-to-midpoint pair, same tie-break as shiftRow -- the pivot
+      // (mid) is t=0 on the rotated line's own parametrization, so the pair
+      // straddling or nearest to 0 is the one actually containing it.
+      final m = (ts[k] + ts[k + 1]) / 2;
+      final dist = m.abs();
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestA = ts[k];
+        bestB = ts[k + 1];
+      }
+    }
+    if (bestA == null || bestB == null) return null;
+    return [
+      plane.toLatLng(mid.x + rd.x * bestA, mid.y + rd.y * bestA),
+      plane.toLatLng(mid.x + rd.x * bestB, mid.y + rd.y * bestB),
+    ];
+  }
 }

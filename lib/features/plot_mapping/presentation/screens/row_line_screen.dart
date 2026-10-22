@@ -48,6 +48,17 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   List<LatLng>? _dragOrigRow;
   double _dragShiftMeters = 0.0;
 
+  // Manual rotate state -- separate from drag-shift above. Selecting a row
+  // (tapping its rotate handle) snapshots its current line as the pivot
+  // baseline; every +/-0.1° step re-rotates from that same baseline, capped
+  // at +-10° total, so the range is always relative to wherever the row was
+  // when selected, not to its original guide-line-generated angle.
+  int? _selectedRow;
+  List<LatLng>? _rotateOrigRow;
+  double _rotateDegrees = 0.0;
+  static const double _maxRotateDegrees = 10.0;
+  static const double _rotateStepDegrees = 0.1;
+
   bool _isSaving = false;
 
   @override
@@ -107,6 +118,9 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     );
     setState(() {
       _rowLines = rows;
+      _selectedRow = null;
+      _rotateOrigRow = null;
+      _rotateDegrees = 0.0;
       if (rows.isNotEmpty) _mode = _Mode.manual;
     });
     if (rows.isEmpty) {
@@ -203,16 +217,113 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     return (lower: lower, upper: upper);
   }
 
+  /// Whether [rotated] (a candidate rotated line for row [rowIdx]) still
+  /// keeps a clear, consistent-side gap from both nearest real neighbours --
+  /// unlike a shift's single lateral bound, rotation moves the two ends in
+  /// opposite directions, so each neighbour has to be checked against the
+  /// candidate line itself rather than a single scalar limit.
+  bool _rotationClearsNeighbors(int rowIdx, List<LatLng> rotated) {
+    const gap = 0.3;
+    for (final dir in const [-1, 1]) {
+      final nb = _nearestRealRow(rowIdx, dir);
+      if (nb == null) continue;
+      final d0 = RowLineGeometry.signedDistance(rotated, nb[0]);
+      final d1 = RowLineGeometry.signedDistance(rotated, nb[1]);
+      final clearPositive = d0 > gap && d1 > gap;
+      final clearNegative = d0 < -gap && d1 < -gap;
+      if (!clearPositive && !clearNegative) return false;
+    }
+    return true;
+  }
+
+  void _selectRowForRotation(int rowIdx) {
+    setState(() {
+      _draggingRow = null;
+      _draggingEnd = null;
+      _selectedRow = rowIdx;
+      _rotateOrigRow = List<LatLng>.from(_rowLines[rowIdx]);
+      _rotateDegrees = 0.0;
+    });
+  }
+
+  void _applyRotation(double delta) {
+    final rowIdx = _selectedRow;
+    final orig = _rotateOrigRow;
+    if (rowIdx == null || orig == null) return;
+    final newDegrees = (_rotateDegrees + delta).clamp(-_maxRotateDegrees, _maxRotateDegrees);
+    if (newDegrees == _rotateDegrees) return;
+    final rotated = RowLineGeometry.rotateRow(
+      row: orig,
+      degrees: newDegrees,
+      polygon: widget.plot.polygon,
+    );
+    if (rotated == null) return;
+    if (!_rotationClearsNeighbors(rowIdx, rotated)) return;
+    setState(() {
+      _rotateDegrees = newDegrees;
+      _rowLines = List<List<LatLng>>.from(_rowLines)..[rowIdx] = rotated;
+    });
+  }
+
+  void _finishRotating() {
+    setState(() {
+      _selectedRow = null;
+      _rotateOrigRow = null;
+      _rotateDegrees = 0.0;
+    });
+  }
+
   // ── Map overlay builders ─────────────────────────────────────────────────
 
   List<Polyline> _buildRowPolylines() {
-    return _rowLines.where((seg) => seg.length >= 2).map((seg) {
-      return Polyline(
-        points: seg,
-        color: Colors.yellow.withAlpha(200),
-        strokeWidth: 2.5,
+    return [
+      for (int r = 0; r < _rowLines.length; r++)
+        if (_rowLines[r].length >= 2)
+          Polyline(
+            points: _rowLines[r],
+            color: r == _selectedRow
+                ? Colors.cyanAccent.withAlpha(230)
+                : Colors.yellow.withAlpha(200),
+            strokeWidth: r == _selectedRow ? 3.5 : 2.5,
+          ),
+    ];
+  }
+
+  /// Point a fraction [t] of the way from [a] to [b] -- used to place the
+  /// rotate handle a bit off the row's midpoint (where the delete button
+  /// already sits) without needing a separate metres-based offset.
+  LatLng _lerpLatLng(LatLng a, LatLng b, double t) => LatLng(
+        a.latitude + (b.latitude - a.latitude) * t,
+        a.longitude + (b.longitude - a.longitude) * t,
       );
-    }).toList();
+
+  List<Marker> _buildRowRotateMarkers() {
+    if (_mode != _Mode.manual) return [];
+    final markers = <Marker>[];
+    for (int r = 0; r < _rowLines.length; r++) {
+      final seg = _rowLines[r];
+      if (seg.length < 2) continue;
+      final rowIdx = r;
+      final selected = rowIdx == _selectedRow;
+      markers.add(Marker(
+        point: _lerpLatLng(seg[0], seg[1], 0.35),
+        width: 26,
+        height: 26,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _selectRowForRotation(rowIdx),
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: (selected ? Colors.cyanAccent : Colors.blue).withAlpha(230),
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: const Icon(Icons.rotate_right, size: 15, color: Colors.white),
+          ),
+        ),
+      ));
+    }
+    return markers;
   }
 
   List<Marker> _buildRowEndpointMarkers() {
@@ -237,6 +348,12 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 _lastPointerPos = ev.position;
                 _dragOrigRow = List<LatLng>.from(_rowLines[rowIdx]);
                 _dragShiftMeters = 0.0;
+                // A shift-drag and a pending rotation both edit the same row
+                // line from their own snapshot; starting one abandons the
+                // other instead of leaving a stale baseline.
+                _selectedRow = null;
+                _rotateOrigRow = null;
+                _rotateDegrees = 0.0;
               });
             },
             onPointerMove: (ev) {
@@ -330,6 +447,11 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           onTap: () => setState(() {
             _draggingRow = null;
             _draggingEnd = null;
+            if (_selectedRow == rowIdx) {
+              _selectedRow = null;
+              _rotateOrigRow = null;
+              _rotateDegrees = 0.0;
+            }
             // Replace with an empty placeholder rather than removing the
             // slot outright — this preserves every other row's index and,
             // crucially, leaves a marker at this exact position so the
@@ -429,6 +551,9 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               // Row delete buttons (midpoint of each row)
               if (_rowLines.isNotEmpty)
                 MarkerLayer(markers: _buildRowDeleteMarkers()),
+              // Row rotate-select buttons (just off midpoint of each row)
+              if (_rowLines.isNotEmpty)
+                MarkerLayer(markers: _buildRowRotateMarkers()),
               // Row endpoint drag handles
               if (_rowLines.isNotEmpty)
                 MarkerLayer(markers: _buildRowEndpointMarkers()),
@@ -492,6 +617,8 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                     // Mode-specific instructions + Fill All button
                     if (_mode == _Mode.guide)
                       _guideInstructions(guideComplete)
+                    else if (_selectedRow != null)
+                      _rotateControls()
                     else
                       _manualInstructions(),
                   ],
@@ -534,7 +661,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           child: Text(
             _rowLines.isEmpty
                 ? 'Switch to Guide Line mode to generate rows first.'
-                : 'Drag an orange handle to slide the whole row sideways. Tap the red ✕ to delete a row.',
+                : 'Drag an orange handle to slide the whole row sideways. Tap the blue ↻ to adjust its angle. Tap the red ✕ to delete a row.',
             style: const TextStyle(fontSize: 13),
           ),
         ),
@@ -545,10 +672,53 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               _guideStart = null;
               _guideEnd = null;
               _rowLines = [];
+              _selectedRow = null;
+              _rotateOrigRow = null;
+              _rotateDegrees = 0.0;
             }),
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text('Reset'),
           ),
+      ],
+    );
+  }
+
+  /// Shown instead of [_manualInstructions] while a row is selected for
+  /// rotation -- a small +-0.1° stepper, capped at +-10° from wherever the
+  /// row was when selected (see [_selectRowForRotation]).
+  Widget _rotateControls() {
+    final atMin = _rotateDegrees <= -_maxRotateDegrees;
+    final atMax = _rotateDegrees >= _maxRotateDegrees;
+    return Row(
+      children: [
+        Text(
+          'Row ${_selectedRow! + 1} angle',
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'Rotate -0.1°',
+          icon: const Icon(Icons.remove_circle_outline),
+          onPressed: atMin ? null : () => _applyRotation(-_rotateStepDegrees),
+        ),
+        SizedBox(
+          width: 56,
+          child: Text(
+            '${_rotateDegrees >= 0 ? '+' : ''}${_rotateDegrees.toStringAsFixed(1)}°',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Rotate +0.1°',
+          icon: const Icon(Icons.add_circle_outline),
+          onPressed: atMax ? null : () => _applyRotation(_rotateStepDegrees),
+        ),
+        const Spacer(),
+        TextButton(
+          onPressed: _finishRotating,
+          child: const Text('Done'),
+        ),
       ],
     );
   }
