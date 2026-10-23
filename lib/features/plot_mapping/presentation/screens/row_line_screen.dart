@@ -48,13 +48,19 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   List<LatLng>? _dragOrigRow;
   double _dragShiftMeters = 0.0;
 
-  // Manual rotate state -- separate from drag-shift above. Selecting a row
-  // (tapping its rotate handle) snapshots its current line as the pivot
-  // baseline; every +/-0.1° step re-rotates from that same baseline, capped
-  // at +-10° total, so the range is always relative to wherever the row was
-  // when selected, not to its original guide-line-generated angle.
+  // Manual rotate state -- separate from drag-shift above. Only Row 1 (index
+  // 0, the first row the guide-line fill produced) carries a rotate handle;
+  // rotating it rotates EVERY row by the same angle, each pivoting around
+  // its own midpoint and independently re-clipped to the plot. Rotating rows
+  // independently let their angles drift apart, which broke the row-corridor
+  // area calculation (each corridor's width/tolerance is derived from its
+  // own current gap to its neighbours -- see row_line_coverage.dart) every
+  // time one row's shape changed relative to the rest. Tapping the handle
+  // snapshots every row's current line as the pivot baseline; every +/-0.1°
+  // step re-rotates all of them from that same baseline, capped at +-10°
+  // total.
   int? _selectedRow;
-  List<LatLng>? _rotateOrigRow;
+  List<List<LatLng>>? _rotateOrigRows;
   double _rotateDegrees = 0.0;
   static const double _maxRotateDegrees = 10.0;
   static const double _rotateStepDegrees = 0.1;
@@ -119,7 +125,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     setState(() {
       _rowLines = rows;
       _selectedRow = null;
-      _rotateOrigRow = null;
+      _rotateOrigRows = null;
       _rotateDegrees = 0.0;
       if (rows.isNotEmpty) _mode = _Mode.manual;
     });
@@ -217,18 +223,25 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     return (lower: lower, upper: upper);
   }
 
-  /// Whether [rotated] (a candidate rotated line for row [rowIdx]) still
-  /// keeps a clear, consistent-side gap from both nearest real neighbours --
-  /// unlike a shift's single lateral bound, rotation moves the two ends in
-  /// opposite directions, so each neighbour has to be checked against the
-  /// candidate line itself rather than a single scalar limit.
-  bool _rotationClearsNeighbors(int rowIdx, List<LatLng> rotated) {
+  /// Whether every adjacent pair of REAL rows in [candidate] still keeps a
+  /// clear, consistent-side gap from each other. Used when rotating ALL rows
+  /// together (see [_applyRotation]) -- two rows that were each individually
+  /// fine against their *original* neighbours can still end up crossing once
+  /// both have moved, so the whole candidate set is checked pairwise rather
+  /// than each row against a static baseline.
+  bool _allRowsClearEachOther(List<List<LatLng>> candidate) {
     const gap = 0.3;
-    for (final dir in const [-1, 1]) {
-      final nb = _nearestRealRow(rowIdx, dir);
-      if (nb == null) continue;
-      final d0 = RowLineGeometry.signedDistance(rotated, nb[0]);
-      final d1 = RowLineGeometry.signedDistance(rotated, nb[1]);
+    for (int i = 0; i < candidate.length; i++) {
+      if (candidate[i].length < 2) continue;
+      int j = i + 1;
+      while (j < candidate.length && candidate[j].length < 2) {
+        j++;
+      }
+      if (j >= candidate.length) continue;
+      final a = candidate[i];
+      final b = candidate[j];
+      final d0 = RowLineGeometry.signedDistance(a, b[0]);
+      final d1 = RowLineGeometry.signedDistance(a, b[1]);
       final clearPositive = d0 > gap && d1 > gap;
       final clearNegative = d0 < -gap && d1 < -gap;
       if (!clearPositive && !clearNegative) return false;
@@ -241,34 +254,44 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
       _draggingRow = null;
       _draggingEnd = null;
       _selectedRow = rowIdx;
-      _rotateOrigRow = List<LatLng>.from(_rowLines[rowIdx]);
+      _rotateOrigRows = _rowLines.map((r) => List<LatLng>.from(r)).toList();
       _rotateDegrees = 0.0;
     });
   }
 
   void _applyRotation(double delta) {
-    final rowIdx = _selectedRow;
-    final orig = _rotateOrigRow;
-    if (rowIdx == null || orig == null) return;
+    final origRows = _rotateOrigRows;
+    if (origRows == null) return;
     final newDegrees = (_rotateDegrees + delta).clamp(-_maxRotateDegrees, _maxRotateDegrees);
     if (newDegrees == _rotateDegrees) return;
-    final rotated = RowLineGeometry.rotateRow(
-      row: orig,
-      degrees: newDegrees,
-      polygon: widget.plot.polygon,
-    );
-    if (rotated == null) return;
-    if (!_rotationClearsNeighbors(rowIdx, rotated)) return;
+    final candidate = <List<LatLng>>[];
+    for (final row in origRows) {
+      if (row.length < 2) {
+        candidate.add(row);
+        continue;
+      }
+      final rotated = RowLineGeometry.rotateRow(
+        row: row,
+        degrees: newDegrees,
+        polygon: widget.plot.polygon,
+      );
+      // Any single row failing to fit at this angle aborts the whole batch --
+      // better to hold at the last angle every row agreed on than to apply a
+      // partial rotation that leaves the set inconsistent.
+      if (rotated == null) return;
+      candidate.add(rotated);
+    }
+    if (!_allRowsClearEachOther(candidate)) return;
     setState(() {
       _rotateDegrees = newDegrees;
-      _rowLines = List<List<LatLng>>.from(_rowLines)..[rowIdx] = rotated;
+      _rowLines = candidate;
     });
   }
 
   void _finishRotating() {
     setState(() {
       _selectedRow = null;
-      _rotateOrigRow = null;
+      _rotateOrigRows = null;
       _rotateDegrees = 0.0;
     });
   }
@@ -276,15 +299,16 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   // ── Map overlay builders ─────────────────────────────────────────────────
 
   List<Polyline> _buildRowPolylines() {
+    // Rotation always moves every row together (see [_applyRotation]), so
+    // while it's active every row is highlighted, not just Row 1.
+    final rotating = _selectedRow != null;
     return [
       for (int r = 0; r < _rowLines.length; r++)
         if (_rowLines[r].length >= 2)
           Polyline(
             points: _rowLines[r],
-            color: r == _selectedRow
-                ? Colors.cyanAccent.withAlpha(230)
-                : Colors.yellow.withAlpha(200),
-            strokeWidth: r == _selectedRow ? 3.5 : 2.5,
+            color: rotating ? Colors.cyanAccent.withAlpha(230) : Colors.yellow.withAlpha(200),
+            strokeWidth: rotating ? 3.5 : 2.5,
           ),
     ];
   }
@@ -297,21 +321,22 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
         a.longitude + (b.longitude - a.longitude) * t,
       );
 
+  /// Only Row 1 (index 0) gets a rotate handle -- rotating it rotates every
+  /// row together (see [_applyRotation] and the field comment on
+  /// [_rotateOrigRows] for why independent per-row rotation was removed).
   List<Marker> _buildRowRotateMarkers() {
     if (_mode != _Mode.manual) return [];
-    final markers = <Marker>[];
-    for (int r = 0; r < _rowLines.length; r++) {
-      final seg = _rowLines[r];
-      if (seg.length < 2) continue;
-      final rowIdx = r;
-      final selected = rowIdx == _selectedRow;
-      markers.add(Marker(
+    if (_rowLines.isEmpty || _rowLines[0].length < 2) return [];
+    final seg = _rowLines[0];
+    final selected = _selectedRow == 0;
+    return [
+      Marker(
         point: _lerpLatLng(seg[0], seg[1], 0.35),
         width: 26,
         height: 26,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => _selectRowForRotation(rowIdx),
+          onTap: () => _selectRowForRotation(0),
           child: Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -321,9 +346,8 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
             child: const Icon(Icons.rotate_right, size: 15, color: Colors.white),
           ),
         ),
-      ));
-    }
-    return markers;
+      ),
+    ];
   }
 
   List<Marker> _buildRowEndpointMarkers() {
@@ -348,11 +372,11 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 _lastPointerPos = ev.position;
                 _dragOrigRow = List<LatLng>.from(_rowLines[rowIdx]);
                 _dragShiftMeters = 0.0;
-                // A shift-drag and a pending rotation both edit the same row
-                // line from their own snapshot; starting one abandons the
-                // other instead of leaving a stale baseline.
+                // A shift-drag and a pending rotation both edit row lines
+                // from their own snapshot; starting one abandons the other
+                // instead of leaving a stale baseline.
                 _selectedRow = null;
-                _rotateOrigRow = null;
+                _rotateOrigRows = null;
                 _rotateDegrees = 0.0;
               });
             },
@@ -447,9 +471,12 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           onTap: () => setState(() {
             _draggingRow = null;
             _draggingEnd = null;
-            if (_selectedRow == rowIdx) {
+            // A rotation in progress snapshots EVERY row (see
+            // _rotateOrigRows) -- deleting any one of them, not just the
+            // selected row, invalidates that snapshot.
+            if (_selectedRow != null) {
               _selectedRow = null;
-              _rotateOrigRow = null;
+              _rotateOrigRows = null;
               _rotateDegrees = 0.0;
             }
             // Replace with an empty placeholder rather than removing the
@@ -661,7 +688,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           child: Text(
             _rowLines.isEmpty
                 ? 'Switch to Guide Line mode to generate rows first.'
-                : 'Drag an orange handle to slide the whole row sideways. Tap the blue ↻ to adjust its angle. Tap the red ✕ to delete a row.',
+                : 'Drag an orange handle to slide that row sideways. Tap the blue ↻ on Row 1 to angle all rows together. Tap the red ✕ to delete a row.',
             style: const TextStyle(fontSize: 13),
           ),
         ),
@@ -673,7 +700,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               _guideEnd = null;
               _rowLines = [];
               _selectedRow = null;
-              _rotateOrigRow = null;
+              _rotateOrigRows = null;
               _rotateDegrees = 0.0;
             }),
             icon: const Icon(Icons.refresh, size: 18),
@@ -683,17 +710,18 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     );
   }
 
-  /// Shown instead of [_manualInstructions] while a row is selected for
-  /// rotation -- a small +-0.1° stepper, capped at +-10° from wherever the
-  /// row was when selected (see [_selectRowForRotation]).
+  /// Shown instead of [_manualInstructions] while rotation is active -- a
+  /// small +-0.1° stepper, capped at +-10° from wherever the rows were when
+  /// Row 1's handle was tapped (see [_selectRowForRotation]). Every row
+  /// rotates together, not just Row 1.
   Widget _rotateControls() {
     final atMin = _rotateDegrees <= -_maxRotateDegrees;
     final atMax = _rotateDegrees >= _maxRotateDegrees;
     return Row(
       children: [
-        Text(
-          'Row ${_selectedRow! + 1} angle',
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        const Text(
+          'All rows angle',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
         const SizedBox(width: 8),
         IconButton(
