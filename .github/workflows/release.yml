@@ -9,6 +9,17 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # Manual re-send path: re-post the Teams notification for a tag that was
+  # already released, without rebuilding the APK or touching the existing
+  # GitHub Release (e.g. the notify step silently failed, as happened on
+  # v1.1.5 -- RequestEntityTooLarge from a changelog section too big for
+  # Power Automate's card size limit). Run from the Actions tab with the
+  # tag to resend.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to resend the Teams notification for (e.g. v1.1.5)'
+        required: true
 
 permissions:
   contents: write
@@ -22,28 +33,35 @@ jobs:
       - name: Resolve version from tag
         id: ver
         run: |
-          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
+        if: github.event_name != 'workflow_dispatch'
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: subosito/flutter-action@v2
+        if: github.event_name != 'workflow_dispatch'
         with:
           channel: stable
 
       - run: flutter pub get
+        if: github.event_name != 'workflow_dispatch'
       - run: flutter build apk --release
+        if: github.event_name != 'workflow_dispatch'
 
       - name: Rename APK
+        if: github.event_name != 'workflow_dispatch'
         run: cp build/app/outputs/flutter-apk/app-release.apk "krishi-spray-${{ steps.ver.outputs.tag }}.apk"
 
       - name: Extract this version's CHANGELOG.md section
         run: python3 .github/scripts/extract_changelog.py "${{ steps.ver.outputs.version }}" > release_notes.md
 
       - name: Create GitHub Release
+        if: github.event_name != 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
