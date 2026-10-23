@@ -149,10 +149,15 @@ already written — see "Release process" at the bottom.
   status reference (normal operation, power on, session button, OTA,
   log upload/retrieval, commands), with each pattern shown animated
   instead of as a static description.
-- Row Editing: a per-row rotation control (±10°, 0.1° steps) so a
-  manually shifted row line's angle can be corrected without
-  re-drawing it — targets small heatmap gaps caused by an angle
-  mismatch against the true row.
+- Row Editing: a rotation control (±10°, 0.1° steps) on Row 1 so a
+  manually shifted field's angle can be corrected without re-drawing
+  it — targets small heatmap gaps caused by an angle mismatch against
+  the true rows. Rotating Row 1 rotates every row together, each still
+  pivoting around its own midpoint and re-clipped to the plot boundary
+  — letting rows rotate independently let their angles drift apart,
+  which broke the row-corridor area calculation (each corridor's
+  tolerance is derived from its own current gap to its neighbors) once
+  a field had a manually rotated row.
 
 ### Changed
 - Manual Start/End session controls consolidated into the Monitoring
