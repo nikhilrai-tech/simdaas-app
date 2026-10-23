@@ -55,35 +55,78 @@ def changelog_to_card_body(notes: str) -> list:
     return elements
 
 
-def build_payload(tag: str, notes: str, release_url: str) -> dict:
-    card = {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.4",
-        "body": [
-            {
-                "type": "TextBlock",
-                "text": f"Krishi Spray {tag} released",
-                "weight": "Bolder",
-                "size": "Medium",
-                "wrap": True,
-            },
-            *changelog_to_card_body(notes),
-        ],
-        "actions": [
-            {
-                "type": "Action.OpenUrl",
-                "title": "View release & download APK",
-                "url": release_url,
-            }
-        ],
+# Power Automate's "Post card in a chat or channel" action rejects a
+# request over roughly 28 KB with RequestEntityTooLarge (confirmed live on
+# the 1.1.5 release: its CHANGELOG section alone -- ~43 bullets across 39
+# PRs -- produced a card past that limit; every earlier release's much
+# shorter section had stayed under it by luck, not by design). Budget is
+# deliberately conservative (the actions block, wrapper JSON, and HTTP
+# headers all eat into the same request).
+MAX_PAYLOAD_BYTES = 24000
+
+
+def _title_block(tag: str) -> dict:
+    return {
+        "type": "TextBlock",
+        "text": f"Krishi Spray {tag} released",
+        "weight": "Bolder",
+        "size": "Medium",
+        "wrap": True,
     }
+
+
+def _actions(release_url: str) -> list:
+    return [
+        {
+            "type": "Action.OpenUrl",
+            "title": "View release & download APK",
+            "url": release_url,
+        }
+    ]
+
+
+def _wrap(card: dict) -> dict:
     return {
         "type": "message",
         "attachments": [
             {"contentType": "application/vnd.microsoft.card.adaptive", "content": card}
         ],
     }
+
+
+def build_payload(tag: str, notes: str, release_url: str) -> dict:
+    elements = changelog_to_card_body(notes)
+    title = _title_block(tag)
+    actions = _actions(release_url)
+
+    def card_with(n):
+        body = [title, *elements[:n]]
+        if n < len(elements):
+            body.append({
+                "type": "TextBlock",
+                "text": "…see the full release notes for everything else in this release.",
+                "wrap": True,
+                "isSubtle": True,
+                "spacing": "Medium",
+            })
+        return {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": body,
+            "actions": actions,
+        }
+
+    # Start with everything; if that doesn't fit, drop trailing bullets
+    # until it does. The release notes stay complete on GitHub either way
+    # (this card is a notification, not the source of truth), and the
+    # "View release" button is always there to read the rest.
+    n = len(elements)
+    while n >= 0:
+        payload = _wrap(card_with(n))
+        if len(json.dumps(payload).encode("utf-8")) <= MAX_PAYLOAD_BYTES or n == 0:
+            return payload
+        n -= 1
 
 
 def main():
