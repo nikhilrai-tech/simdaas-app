@@ -774,23 +774,77 @@ class _DemoModeToggle extends ConsumerStatefulWidget {
 
 class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
   bool _loading = false;
+  // Shown under the row while the delivery watcher (jobs.tasks.
+  // retry_demo_config_push on the backend) is still polling -- null means
+  // nothing to show (idle, or the last poll finished).
+  String? _statusMessage;
+
+  // Same ~20s window the backend's own retry watcher gives up at, polled
+  // every 3s -- there's no WebSocket listener for the backend's live
+  // broadcast of this today (see demo_config_status's docstring), so this
+  // screen asks instead of being told.
+  static const _pollInterval = Duration(seconds: 3);
+  static const _pollWindow = Duration(seconds: 20);
 
   Future<void> _toggle(bool value) async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _statusMessage = null;
+    });
     try {
       await ref
           .read(equipmentControllerProvider)
           .pushDemoConfig(widget.equipmentId, demo: value);
       widget.onChanged(value);
+      if (mounted) setState(() => _loading = false);
+      await _pollDeliveryStatus();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Demo config error: $e')),
         );
+        setState(() => _loading = false);
       }
-    } finally {
-      if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _pollDeliveryStatus() async {
+    final deadline = DateTime.now().add(_pollWindow);
+    var attempt = 0;
+    while (mounted && DateTime.now().isBefore(deadline)) {
+      attempt++;
+      if (mounted) {
+        setState(() => _statusMessage = 'Sending to device… (attempt $attempt)');
+      }
+      String status;
+      try {
+        status = await ref
+            .read(equipmentControllerProvider)
+            .getDemoConfigStatus(widget.equipmentId);
+      } catch (_) {
+        // A failed poll isn't fatal -- the backend watcher is still
+        // retrying regardless; just try again next tick.
+        status = 'pending';
+      }
+      if (status == 'delivered') {
+        if (mounted) {
+          setState(() => _statusMessage = null);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Demo config sent to the device.')),
+          );
+        }
+        return;
+      }
+      if (status == 'timeout') break;
+      await Future.delayed(_pollInterval);
+    }
+    if (!mounted) return;
+    setState(() {
+      // Honest status, not an error -- the config is still queued and will
+      // apply the next time the device reconnects and sends a heartbeat.
+      _statusMessage = 'Device not responding -- it may be offline. '
+          'The demo config will apply once it reconnects.';
+    });
   }
 
   @override
@@ -803,27 +857,42 @@ class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Text(
-                'Demo Mode',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w500),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Demo Mode',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w500),
+                  ),
+                ),
+                if (_loading)
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Switch(
+                    value: widget.value,
+                    onChanged: _toggle,
+                  ),
+              ],
             ),
-            if (_loading)
-              const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else
-              Switch(
-                value: widget.value,
-                onChanged: _toggle,
+            if (_statusMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _statusMessage!,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
               ),
           ],
         ),

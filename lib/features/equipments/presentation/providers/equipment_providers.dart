@@ -132,4 +132,9 @@ class EquipmentController {
     final repo = ref.read(equipmentRepoProvider);
     await repo.pushDemoConfig(id, demo: demo);
   }
+
+  Future<String> getDemoConfigStatus(String id) async {
+    final repo = ref.read(equipmentRepoProvider);
+    return repo.getDemoConfigStatus(id);
+  }
 }

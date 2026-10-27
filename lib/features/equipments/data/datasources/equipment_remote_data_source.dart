@@ -13,6 +13,13 @@ abstract class EquipmentRemoteDataSource {
   Future<List<EquipmentEntity>> getControlUnits(String userId);
   Future<void> endSession(int sessionId);
   Future<void> pushDemoConfig(String id, {required bool demo});
+
+  /// Polls delivery status for the most recent pushDemoConfig call --
+  /// "pending" | "delivered" | "timeout". See tools/views.py::
+  /// demo_config_status's docstring: "delivered" means the config was
+  /// handed to the device, not confirmation it was actually applied
+  /// (no such signal exists without a firmware change).
+  Future<String> getDemoConfigStatus(String id);
 }
 
 class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
@@ -404,5 +411,11 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
   @override
   Future<void> pushDemoConfig(String id, {required bool demo}) async {
     await api.postJson('/api/control-units/$id/demo-mode/', jsonBody: {'demo': demo});
+  }
+
+  @override
+  Future<String> getDemoConfigStatus(String id) async {
+    final resp = await api.getJson('/api/control-units/$id/demo-mode/status/');
+    return (resp is Map ? resp['status']?.toString() : null) ?? 'pending';
   }
 }

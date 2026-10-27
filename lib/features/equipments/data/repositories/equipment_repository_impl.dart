@@ -23,4 +23,6 @@ class EquipmentRepositoryImpl {
   Future<void> endSession(int sessionId) => remote.endSession(sessionId);
   Future<void> pushDemoConfig(String id, {required bool demo}) =>
       remote.pushDemoConfig(id, demo: demo);
+  Future<String> getDemoConfigStatus(String id) =>
+      remote.getDemoConfigStatus(id);
 }
