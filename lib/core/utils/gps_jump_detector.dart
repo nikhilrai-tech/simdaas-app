@@ -1,0 +1,129 @@
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+
+/// Flags implausible GPS jumps in a device's position track -- a step
+/// between two consecutive points whose implied speed no sprayer can
+/// actually reach (observed on a real staging session: 711 m in 17 s,
+/// ~150 km/h, against a normal top speed of ~8 km/h). A live GPS fix can
+/// glitch and briefly report a wildly wrong position; without flagging
+/// this, the heatmap's gap-fill (which bridges ordinary sampling gaps so
+/// sparse points don't leave blank stripes) paints the jump itself as if
+/// it were sprayed, and the trajectory line draws it as a straight "drive".
+class GpsJumpDetector {
+  /// Any step implying a speed above this (km/h) is treated as a jump, not
+  /// real driving. Chosen well above a sprayer's real top speed (~8 km/h
+  /// observed) with a wide safety margin, so ordinary driving is never
+  /// mistaken for a jump.
+  static const double maxPlausibleSpeedKmph = 25.0;
+
+  // A connectivity gap (device silent for a while, then reconnects) covers
+  // real ground during the silence -- distance/time still looks like
+  // plausible driving speed, so isJump alone doesn't catch it. Normal live
+  // telemetry arrives roughly once a second; 5s is well above any ordinary
+  // single missed/delayed heartbeat, so it won't flag routine jitter, but
+  // still catches even a brief real connectivity blip, not just a
+  // multi-minute dropout. Live monitoring has no data for what happened
+  // during the gap (unlike a completed report, which gets the real recovered
+  // path via /backfill) -- so unlike a jump, which still gets bridged once
+  // its trusted anchor row is established, a long gap must never be bridged
+  // at all: there's nothing trustworthy to bridge FROM.
+  static const int maxPlausibleGapSeconds = 5;
+
+  static const double _mPerDeg = 111320.0;
+
+  static double _distanceMeters(LatLng a, LatLng b) {
+    final cosLat = math.cos(a.latitude * math.pi / 180.0);
+    final dx = (b.longitude - a.longitude) * cosLat * _mPerDeg;
+    final dy = (b.latitude - a.latitude) * _mPerDeg;
+    return math.sqrt(dx * dx + dy * dy);
+  }
+
+  /// True if the single step from (`a` at `ta`) to (`b` at `tb`) is a jump.
+  static bool isJump(LatLng a, DateTime ta, LatLng b, DateTime tb) {
+    final dtSec = tb.difference(ta).inMilliseconds / 1000.0;
+    if (dtSec <= 0) return false;
+    final speedKmph = (_distanceMeters(a, b) / dtSec) * 3.6;
+    return speedKmph > maxPlausibleSpeedKmph;
+  }
+
+  /// True if more than [maxPlausibleGapSeconds] of real time passed between
+  /// `ta` and `tb`, regardless of how far apart the positions are (even
+  /// "no movement at all" is still a gap worth flagging -- the point is
+  /// "we have no data for this stretch of time", not "the sprayer moved
+  /// implausibly fast").
+  static bool isLongGap(DateTime ta, DateTime tb) {
+    final dtSec = tb.difference(ta).inMilliseconds / 1000.0;
+    return dtSec > maxPlausibleGapSeconds;
+  }
+
+  /// Indices `i` such that the step from `points[i]` to `points[i + 1]` is a
+  /// jump. `timestamps[i]` is the time of `points[i]`.
+  static Set<int> jumpIndices(List<LatLng> points, List<DateTime> timestamps) {
+    final jumps = <int>{};
+    for (var i = 0; i + 1 < points.length && i + 1 < timestamps.length; i++) {
+      if (isJump(points[i], timestamps[i], points[i + 1], timestamps[i + 1])) {
+        jumps.add(i);
+      }
+    }
+    return jumps;
+  }
+
+  /// Pink dashed segments, one per jump in `jumpIndices(points, timestamps)`.
+  /// Meant to be shown on the GPS heatmap only, regardless of whether either
+  /// end is inside or outside the plot.
+  ///
+  /// A jump that only covers a few metres (a brief GPS glitch snapping back
+  /// almost immediately) draws as a near-invisible sliver at normal zoom --
+  /// on a real session with several jumps of very different sizes, only the
+  /// largest one ends up actually noticeable. Pair this with
+  /// [buildJumpMarkers], which gives every jump a constant-size endpoint
+  /// regardless of how physically short it is.
+  static List<Polyline> buildJumpLines(
+      List<LatLng> points, List<DateTime> timestamps) {
+    final jumps = jumpIndices(points, timestamps);
+    if (jumps.isEmpty) return const [];
+    return [
+      for (final i in jumps)
+        Polyline(
+          points: [points[i], points[i + 1]],
+          strokeWidth: 4.0,
+          color: Colors.pinkAccent,
+          pattern: StrokePattern.dashed(segments: const [10.0, 6.0]),
+        ),
+    ];
+  }
+
+  /// Small fixed-pixel-size markers at both ends of every jump in
+  /// `jumpIndices(points, timestamps)`. [buildJumpLines]'s line is drawn in
+  /// map (ground) coordinates, so a short jump (a glitch that snaps back a
+  /// few metres away) shrinks to nothing as you zoom out -- these markers
+  /// stay the same size on screen regardless of zoom or how short the jump
+  /// physically was, so a farmer scanning the map can spot every jump, not
+  /// just the largest one.
+  static List<Marker> buildJumpMarkers(
+      List<LatLng> points, List<DateTime> timestamps) {
+    final jumps = jumpIndices(points, timestamps);
+    if (jumps.isEmpty) return const [];
+    const size = 10.0;
+    Marker dot(LatLng p) => Marker(
+          point: p,
+          width: size,
+          height: size,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.pinkAccent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+          ),
+        );
+    final markers = <Marker>[];
+    for (final i in jumps) {
+      markers.add(dot(points[i]));
+      markers.add(dot(points[i + 1]));
+    }
+    return markers;
+  }
+}

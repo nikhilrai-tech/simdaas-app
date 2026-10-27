@@ -12,6 +12,7 @@ import '../core/services/telemetry_service.dart';
 import '../core/utils/mac_utils.dart';
 import '../features/data_monitoring/presentation/screens/monitoring_screen.dart';
 import '../features/reports/presentation/screens/reports_list_screen.dart';
+import '../features/reports/presentation/providers/report_providers.dart';
 import 'user_guide_pdf_screen.dart';
 import '../features/equipments/presentation/screens/create_control_unit_screen.dart';
 import '../features/equipments/presentation/screens/scan_control_unit_screen.dart';
@@ -26,6 +27,7 @@ class TempDashboard extends ConsumerWidget {
     final userId = ref.read(authServiceProvider).currentUserId ?? '';
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
     final activeDevices = ref.watch(activeDevicesProvider).asData?.value ?? [];
+    final avgChemicalSaved = ref.watch(reportStatsProvider).asData?.value;
     // Admin Dashboard (Plots/Jobs/Operators/Equipments/Reports/Alerts) was
     // previously only reachable via /role_select, which nothing in the real
     // login flow ever navigates to — Super Admins had no way to actually
@@ -147,6 +149,52 @@ class TempDashboard extends ConsumerWidget {
                                 ),
                               ],
                             ),
+                            if (avgChemicalSaved != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 14),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF015685).withAlpha(20),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: const Color(0xFF015685).withAlpha(45)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF015685),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: const Icon(Icons.eco_outlined, color: Colors.white, size: 17),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '${avgChemicalSaved.toStringAsFixed(1)}% avg. chemical saved',
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF015685),
+                                            ),
+                                          ),
+                                          const Text(
+                                            'Across all your reports',
+                                            style: TextStyle(fontSize: 11, color: Colors.black54),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -315,6 +363,10 @@ class _ControlUnitsListScreenState
   // here and unsubscribe in dispose(), navigating away from this screen
   // closes the WebSocket channels and breaks the dashboard's
   // `activeDevicesProvider` (it goes empty → "All Offline").
+  //
+  // Listening (not subscribing) to the already-open session-event stream is
+  // fine to start/stop here though — it doesn't touch those channels.
+  final List<StreamSubscription> _sessionEventSubs = [];
 
   @override
   void initState() {
@@ -337,6 +389,34 @@ class _ControlUnitsListScreenState
         }
       }
     });
+
+    // Manual devices: `cu.activeSessionId` (drives the "SESSION OPEN ·
+    // OFFLINE" badge via computeDeviceStatus) only comes from
+    // controlUnitsProvider, which nothing here refetches on its own. Without
+    // this, starting/ending a Manual session while this screen isn't the one
+    // that did it (or was open at the time) leaves the badge stale until a
+    // manual pull-to-refresh. Refetch on every session_event, same as the
+    // Monitoring screen already does for its own device.
+    final userId = ref.read(authServiceProvider).currentUserId ?? '';
+    final svc = ref.read(telemetryServiceProvider);
+    for (final cu in widget.items) {
+      final deviceId = extractDeviceId(cu);
+      if (deviceId.isEmpty) continue;
+      _sessionEventSubs.add(
+        svc.deviceSessionEventStream(deviceId).listen((_) {
+          if (!mounted) return;
+          ref.invalidate(eq_provs.controlUnitsProvider(userId));
+        }),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final sub in _sessionEventSubs) {
+      sub.cancel();
+    }
+    super.dispose();
   }
 
   @override
@@ -419,6 +499,16 @@ class _ControlUnitsListScreenState
                           setState(() => _deviceFilter = 'waiting'),
                     ),
                     FilterChip(
+                      label: const Text('Session Open'),
+                      avatar: _deviceFilter == 'session_open'
+                          ? const Icon(Icons.check_circle, size: 16)
+                          : null,
+                      selected: _deviceFilter == 'session_open',
+                      selectedColor: Colors.deepOrange.withAlpha(50),
+                      onSelected: (s) =>
+                          setState(() => _deviceFilter = 'session_open'),
+                    ),
+                    FilterChip(
                       label: const Text('Cooldown'),
                       avatar: _deviceFilter == 'cooldown'
                           ? const Icon(Icons.check_circle, size: 16)
@@ -444,6 +534,8 @@ class _ControlUnitsListScreenState
                       return kind == DeviceStatusKind.online;
                     case 'waiting':
                       return kind == DeviceStatusKind.waiting;
+                    case 'session_open':
+                      return kind == DeviceStatusKind.sessionOpen;
                     case 'cooldown':
                       return kind == DeviceStatusKind.cooldown;
                   }
@@ -708,7 +800,11 @@ class _ControlUnitsListScreenState
 
 /// Coarse device status used by both the filter chips and each list row,
 /// so the two never disagree about what "Waiting" / "Cooldown" mean.
-enum DeviceStatusKind { online, waiting, cooldown, offline }
+/// `sessionOpen` is Manual (device-managed) mode's own state -- a device
+/// that's unreachable mid-session, not "waiting" against Automatic's 60-min
+/// timeout assumption (an outage never ends a Manual session), so it's kept
+/// out of the `waiting` bucket entirely to avoid exactly that confusion.
+enum DeviceStatusKind { online, waiting, sessionOpen, cooldown, offline }
 
 class DeviceStatusInfo {
   final DeviceStatusKind kind;
@@ -718,6 +814,12 @@ class DeviceStatusInfo {
   final DateTime? lastSeenAt;
   final CooldownState? cooldownState;
 
+  /// Manual (device-managed) mode only: no data is arriving but the session on
+  /// the sprayer is still open — it keeps recording locally and is merged when
+  /// the network returns. Unlike Automatic's Waiting there is no countdown,
+  /// because an outage never ends a Manual session.
+  final bool manualSessionOpen;
+
   const DeviceStatusInfo({
     required this.kind,
     required this.label,
@@ -725,6 +827,7 @@ class DeviceStatusInfo {
     required this.isInCooldown,
     this.lastSeenAt,
     this.cooldownState,
+    this.manualSessionOpen = false,
   });
 }
 
@@ -751,8 +854,18 @@ DeviceStatusInfo computeDeviceStatus(WidgetRef ref, dynamic cu) {
   }
   lastSeenAt ??= (cu.lastSeenAt as DateTime?);
 
+  // Manual mode: the 60-minute Waiting assumption doesn't apply (the session
+  // outlives any outage), so it is replaced by SESSION OPEN below.
+  final isManual = (cu.isManualSessionMode as bool?) ?? false;
+  final manualSessionOpen = isManual &&
+      !isEffectivelyActive &&
+      !isInCooldown &&
+      cooldownState?.status != DeviceLifecycleStatus.offline &&
+      cu.activeSessionId != null;
+
   bool isWaiting = false;
-  if (!isEffectivelyActive &&
+  if (!isManual &&
+      !isEffectivelyActive &&
       !isInCooldown &&
       cooldownState?.status != DeviceLifecycleStatus.offline &&
       lastSeenAt != null) {
@@ -771,11 +884,21 @@ DeviceStatusInfo computeDeviceStatus(WidgetRef ref, dynamic cu) {
   } else if (isEffectivelyActive) {
     return DeviceStatusInfo(
         kind: DeviceStatusKind.online,
-        label: 'ONLINE',
+        // Manual mode: heartbeats arrive even with no session running.
+        label: isManual && cu.activeSessionId == null ? 'ONLINE · IDLE' : 'ONLINE',
         color: Colors.green,
         isInCooldown: false,
         lastSeenAt: lastSeenAt,
         cooldownState: cooldownState);
+  } else if (manualSessionOpen) {
+    return DeviceStatusInfo(
+        kind: DeviceStatusKind.sessionOpen,
+        label: 'SESSION OPEN · OFFLINE',
+        color: Colors.amber,
+        isInCooldown: false,
+        lastSeenAt: lastSeenAt,
+        cooldownState: cooldownState,
+        manualSessionOpen: true);
   } else if (isWaiting) {
     return DeviceStatusInfo(
         kind: DeviceStatusKind.waiting,
@@ -831,7 +954,7 @@ class _DeviceListItem extends ConsumerWidget {
     Widget? trailingWidget;
     if (isInCooldown) {
       trailingWidget = _CooldownCountdownPill(cooldownEnd: cooldownState?.cooldownEnd);
-    } else if (isWaiting && lastSeenAt != null) {
+    } else if (isWaiting && !status.manualSessionOpen && lastSeenAt != null) {
       trailingWidget = _WaitingCountdownPill(lastSeenAt: lastSeenAt);
     }
 
@@ -849,7 +972,7 @@ class _DeviceListItem extends ConsumerWidget {
                 blurRadius: 4,
                 spreadRadius: 1,
               ),
-            if (isWaiting)
+            if (isWaiting || status.kind == DeviceStatusKind.sessionOpen)
               BoxShadow(
                 color: Colors.amber.withAlpha(120),
                 blurRadius: 4,
@@ -870,6 +993,13 @@ class _DeviceListItem extends ConsumerWidget {
             Text('Default plot: ${linkedPlotName ?? linkedPlotId}'),
           if (linkedSprayerName != null)
             Text('Default sprayer: $linkedSprayerName'),
+          if (status.manualSessionOpen)
+            Text(
+              lastSeenAt != null
+                  ? 'No data since ${_formatTimeOfDay(lastSeenAt)} — the sprayer keeps recording and will sync when the network returns'
+                  : 'The sprayer keeps recording and will sync when the network returns',
+              style: TextStyle(fontSize: 11, color: Colors.amber.shade900),
+            ),
           if (statusText == 'OFFLINE')
             Text(
               lastSeenAt != null

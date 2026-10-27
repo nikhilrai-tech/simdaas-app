@@ -47,6 +47,51 @@ class Report {
   // sent lat=lon=0.0 throughout) — distanceTravelledKm/areaCoveredSqm are
   // 0 because there was no usable position data, not because nothing happened.
   final String? gpsUnavailableNote;
+  // True when the report was recomputed after recovered (offline-buffered)
+  // data was merged into an already-finished session; `amendedNote` says why.
+  final bool amended;
+  final String? amendedNote;
+  // 'server' (Automatic) | 'device' (Manual) | null if the session is gone.
+  final String? sessionMode;
+  // True while this report may still be missing data from a connectivity
+  // gap: its session was force-closed by a watchdog timeout rather than a
+  // clean end, and no backfill has corrected it yet. Flips back to false on
+  // its own once `amended` becomes true.
+  final bool pendingNetworkData;
+  // Manual (device-managed) mode only: the firmware's own session counter,
+  // null for Automatic. Combine with controlUnitMac via
+  // core/utils/mac_utils.dart's formatDeviceSessionLabel().
+  final int? deviceSessionId;
+  final String? controlUnitMac;
+  // 'live' | 'prefilled' | 'verifying' | 'verified' | 'needs_review'.
+  // 'prefilled' means the report includes recovered (backfilled) data that
+  // hasn't yet been cross-checked against the device's own log file.
+  final String? verificationStatus;
+  // Only set when verificationStatus == 'needs_review' -- explains which
+  // numbers didn't match the device's own log, or why verification
+  // couldn't complete (e.g. the log file was never found).
+  final String? verificationNote;
+  // True if any of this session's GPS points were ever recovered via
+  // /backfill -- independent of verificationStatus, which gets overwritten
+  // to verifying/verified/needs_review once the log-check pipeline picks
+  // the report up and no longer says whether it started out backfilled.
+  final bool hadBackfillData;
+  // True if a device owner ever manually corrected which plot this report
+  // is scored against (Settings > "Fix report plot", PIN-gated) --
+  // SEPARATE from `amended`, which also flips true for an unrelated
+  // backfill correction and doesn't say which kind happened. Drives its
+  // own "Plot Updated" badge, additional to (never replacing) the
+  // existing amended/hadBackfillData "Log Updated"/"Backfill" badge.
+  // Persists for the rest of the report's life, not just the one
+  // regeneration the correction itself triggered.
+  final bool plotCorrected;
+  // TEMP DEBUG (2026-09-30): {field: {label, report, log}} for whichever
+  // totals a log-verification correction changed -- lets the report screen
+  // show old-vs-new for manual spot-checking. Remove this field, its
+  // fromJson wiring, and the debug UI block in report_details_screen.dart
+  // once the investigation is done -- see matching TEMP DEBUG markers in
+  // jobs/serializers.py on the backend.
+  final Map<String, dynamic>? verificationMismatchesDebug;
 
   const Report({
     this.plotId,
@@ -81,6 +126,17 @@ class Report {
     this.endedAt,
     this.trajectory = const [],
     this.gpsUnavailableNote,
+    this.amended = false,
+    this.amendedNote,
+    this.sessionMode,
+    this.pendingNetworkData = false,
+    this.deviceSessionId,
+    this.controlUnitMac,
+    this.verificationStatus,
+    this.verificationNote,
+    this.hadBackfillData = false,
+    this.plotCorrected = false,
+    this.verificationMismatchesDebug,
     this.driverName,
     this.fertilizersUsed,
     this.agrochemicalUsed,
@@ -97,6 +153,9 @@ class GPSPointData {
   final int leftSolenoidState;
   final int rightSolenoidState;
   final DateTime timestamp;
+  // True when this point was recovered from the device's offline buffer
+  // (/backfill) after a connectivity gap, instead of arriving live.
+  final bool isBuffered;
 
   const GPSPointData({
     required this.lat,
@@ -108,5 +167,6 @@ class GPSPointData {
     this.leftSolenoidState = 0,
     this.rightSolenoidState = 0,
     required this.timestamp,
+    this.isBuffered = false,
   });
 }

@@ -178,7 +178,7 @@ class ThreeButtonDashboardScreen extends StatelessWidget {
                               icon: Icons.tune, // More modern icon
                               color: const Color(0xFF5E35B1), // Deep purple
                               onTap: () => Navigator.of(context)
-                                  .pushNamed('/app_settings'),
+                                  .pushNamed('/settings'),
                             ),
                           ],
                         ),

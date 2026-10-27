@@ -35,6 +35,17 @@ class ReportModel extends Report {
     super.endedAt,
     super.trajectory = const [],
     super.gpsUnavailableNote,
+    super.amended,
+    super.amendedNote,
+    super.sessionMode,
+    super.pendingNetworkData,
+    super.deviceSessionId,
+    super.controlUnitMac,
+    super.verificationStatus,
+    super.verificationNote,
+    super.hadBackfillData,
+    super.plotCorrected,
+    super.verificationMismatchesDebug,
     super.driverName,
     super.fertilizersUsed,
     super.agrochemicalUsed,
@@ -113,10 +124,28 @@ class ReportModel extends Report {
                         (e['right_solenoid_state'] as num?)?.toInt() ?? 0,
                     timestamp: DateTime.tryParse(e['timestamp'] ?? '')?.toLocal() ??
                         DateTime.now(),
+                    isBuffered: e['is_buffered'] == true,
                   ))
               .toList() ??
           [],
       gpsUnavailableNote: json['gps_unavailable_note']?.toString(),
+      amended: json['amended'] == true,
+      amendedNote: json['amended_note']?.toString(),
+      sessionMode: json['session_mode']?.toString(),
+      pendingNetworkData: json['pending_network_data'] == true,
+      deviceSessionId: json['device_session_id'] is int
+          ? json['device_session_id'] as int
+          : int.tryParse(json['device_session_id']?.toString() ?? ''),
+      controlUnitMac: json['control_unit_mac']?.toString(),
+      verificationStatus: json['verification_status']?.toString(),
+      verificationNote: json['verification_note']?.toString(),
+      hadBackfillData: json['had_backfill_data'] == true,
+      plotCorrected: json['plot_corrected'] == true,
+      verificationMismatchesDebug:
+          json['verification_mismatches_debug'] is Map
+              ? Map<String, dynamic>.from(
+                  json['verification_mismatches_debug'] as Map)
+              : null,
       driverName: json['driver_name']?.toString(),
       fertilizersUsed: json['fertilizers_used']?.toString(),
       agrochemicalUsed: json['agrochemical_used']?.toString(),

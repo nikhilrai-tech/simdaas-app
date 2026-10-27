@@ -1,14 +1,28 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
+import 'package:simdaas/core/services/heatmap_preferences_service.dart';
+import 'package:simdaas/core/utils/mac_utils.dart';
+import 'package:simdaas/core/utils/gps_jump_detector.dart';
 import '../../domain/report.dart';
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
 import '../providers/report_providers.dart';
+import '../utils/report_pdf_builder.dart';
 import '../widgets/plot_snapshot.dart';
 import '../widgets/saved_donut_chart.dart';
 
@@ -51,11 +65,104 @@ class ReportDetailsScreen extends ConsumerStatefulWidget {
 class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   HeatmapType _heatmapType = HeatmapType.gps;
   bool _isSatelliteView = true;
+  // Recovered-via-backfill overlay: GPS heatmap only (a toggle there, not a
+  // whole separate mode like L/R) -- Speed/Spray/L-R never show it.
+  bool _showBackfillOverlay = true;
+
+  // Wraps the map Card below so _shareReport can screenshot the live
+  // FlutterMap (trajectory present -- no pre-rendered bitmap exists for
+  // that case, see report_pdf_builder.dart's doc comment).
+  final GlobalKey _mapRepaintKey = GlobalKey();
+  bool _isSharing = false;
+  bool _isEmailing = false;
+
+  // Best-effort upload of whichever heatmap mode is actually on screen, so
+  // the verified-report email PDF (built server-side, no heatmap renderer
+  // of its own) has a real screenshot to embed instead of a bare plot
+  // outline -- see jobs.views.ReportHeatmapSnapshotView. Keyed by report id
+  // + mode so each one only uploads once per app session, not on every
+  // rebuild (this screen re-renders often: 30s auto-refresh, provider
+  // watches, etc). Deliberately only captures whatever's ALREADY rendered
+  // (no mode-cycling like _captureHeatmapImages does for Share) -- cycling
+  // here would visibly flash the map through 3 colors just from opening
+  // the screen, which nobody asked for.
+  final Set<String> _uploadedSnapshotKeys = {};
+
+  void _maybeUploadHeatmapSnapshot(Report report) {
+    if (report.trajectory.isEmpty) return;
+    final key = '${report.id}:${_heatmapType.name}';
+    if (_uploadedSnapshotKeys.contains(key)) return;
+    _uploadedSnapshotKeys.add(key);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final bytes = await _captureMapRepaintBoundary();
+      if (bytes == null || !mounted) return;
+      final b64 = base64Encode(bytes);
+      await ref.read(reportRepoProvider).uploadHeatmapSnapshot(
+            report.id,
+            gps: _heatmapType == HeatmapType.gps ? b64 : null,
+            spray: _heatmapType == HeatmapType.spraying ? b64 : null,
+            speed: _heatmapType == HeatmapType.speed ? b64 : null,
+            leftRight: _heatmapType == HeatmapType.leftRight ? b64 : null,
+          );
+    });
+  }
+
+  // reportDetailProvider is a plain FutureProvider.family (no autoDispose)
+  // -- once fetched it stays cached for the rest of the app session, unlike
+  // the reports LIST screen (which already re-fetches every 30s and on
+  // pull-to-refresh). Without this, a report opened while still Pending/
+  // Verifying kept showing that stale snapshot here even after the backend
+  // finished verifying it minutes later -- the list screen behind it showed
+  // the right status, but coming back into this same report showed the old
+  // one, until the whole app was killed and reopened (the only thing that
+  // actually clears the provider cache).
+  late final StreamSubscription<void> _autoRefreshSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // `late final _autoRefreshSub = _setupAutoRefresh();` at the
+    // declaration looks equivalent but is a real bug: a `late` field only
+    // runs its initializer on first READ, and the only other place this
+    // field was read was dispose() -- so the timer never actually started
+    // until the screen was already being torn down. Assigning it here in
+    // initState() is what makes it actually run.
+    _autoRefreshSub = _setupAutoRefresh();
+    // Also refresh immediately on open, not just on the next 30s tick --
+    // reopening a report already cached from an earlier visit THIS app
+    // session (e.g. back to the list, then back into the same report)
+    // would otherwise keep showing whatever was cached from that earlier
+    // visit for up to 30s, even though the list screen behind it may have
+    // already moved on to a newer status.
+    _refreshReport();
+  }
+
+  StreamSubscription<void> _setupAutoRefresh() {
+    return Stream.periodic(const Duration(seconds: 30)).listen((_) {
+      if (mounted) _refreshReport();
+    });
+  }
+
+  Future<void> _refreshReport() async {
+    ref.invalidate(reportDetailProvider(widget.report.id));
+  }
+
+  @override
+  void dispose() {
+    _autoRefreshSub.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final detailAsync = ref.watch(reportDetailProvider(widget.report.id));
     final report = detailAsync.asData?.value ?? widget.report;
+    _maybeUploadHeatmapSnapshot(report);
+    // Not read directly -- watching is what makes the heatmaps below
+    // repaint immediately after Profile > Settings > Heatmap colors is
+    // saved. See heatmap_preferences_service.dart.
+    ref.watch(heatmapThresholdsProvider);
     final dateFormat = DateFormat('h:mm a, dd MMM yyyy');
 
     final startTime = report.startedAt ??
@@ -97,8 +204,24 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         ),
         actions: [
           IconButton(
-              icon: const Icon(Icons.share_outlined, color: Colors.black),
-              onPressed: () {}),
+              icon: _isSharing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.share_outlined, color: Colors.black),
+              onPressed: _isSharing ? null : () => _shareReport(context, report)),
+          IconButton(
+              tooltip: 'Email me this report',
+              icon: _isEmailing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.email_outlined, color: Colors.black),
+              onPressed: _isEmailing ? null : () => _emailReport(context, report)),
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red),
             tooltip: 'Delete report',
@@ -106,22 +229,17 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: RefreshIndicator(
+        onRefresh: _refreshReport,
+        child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              clipBehavior: Clip.antiAlias,
-              child: _buildMapHeader(report),
-            ),
-            const SizedBox(height: 12),
-            _buildHeatmapToggles(),
-            const SizedBox(height: 20),
-
             // ── Saved ─────────────────────────────────────────────────────
+            // Kept first -- the headline number for this report, ahead of
+            // the Verified banner and the map.
             _sectionHeader('Saved'),
             Container(
               decoration: BoxDecoration(
@@ -172,8 +290,448 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                 ],
               ),
             ),
-
             const SizedBox(height: 24),
+
+            if (report.verificationStatus == 'verified') ...[
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.green.shade600, Colors.green.shade400],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.verified_rounded,
+                          color: Colors.white, size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Verified',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Text(
+                            "Matches your sprayer's own record",
+                            style: TextStyle(fontSize: 12, color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            RepaintBoundary(
+              key: _mapRepaintKey,
+              child: Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                clipBehavior: Clip.antiAlias,
+                child: _buildMapHeader(report),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildHeatmapToggles(),
+            const SizedBox(height: 20),
+
+            if (report.sessionMode != null) ...[
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: report.sessionMode == 'device'
+                          ? Colors.teal.shade50
+                          : Colors.indigo.shade50,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: report.sessionMode == 'device'
+                            ? Colors.teal.shade200
+                            : Colors.indigo.shade200,
+                      ),
+                    ),
+                    child: Text(
+                      report.sessionMode == 'device' ? 'Manual' : 'Automatic',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: report.sessionMode == 'device'
+                            ? Colors.teal.shade800
+                            : Colors.indigo.shade800,
+                      ),
+                    ),
+                  ),
+                  // Data composition -- independent of verificationStatus
+                  // below, which gets overwritten to verifying/verified/
+                  // needs_review once the log-check pipeline picks the
+                  // report up and no longer says whether it started out
+                  // backfilled. Shown for both modes.
+                  if (report.amended)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Text(
+                        'Log Updated',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue.shade800,
+                        ),
+                      ),
+                    )
+                  else if (report.hadBackfillData)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Text(
+                        'Backfill',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.amber.shade900,
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        'Normal',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  // Separate from the amended/hadBackfillData badge above
+                  // -- a report can be amended for an unrelated backfill
+                  // reason, or for this one, or both, independently. Never
+                  // replaces the badge above; always additional to it.
+                  if (report.plotCorrected)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.purple.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.edit_location_alt_outlined,
+                              size: 13, color: Colors.purple.shade800),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Plot Updated',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.purple.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  // Verification pipeline status -- Manual only, since
+                  // Automatic reports are never checked against a device
+                  // log.
+                  if (report.sessionMode == 'device' &&
+                      (report.verificationStatus == 'live' ||
+                          report.verificationStatus == 'prefilled'))
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        'Pending',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  if (report.sessionMode == 'device' &&
+                      report.verificationStatus == 'verifying')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.blueGrey.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: Colors.blueGrey.shade700,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Verifying',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blueGrey.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (report.sessionMode == 'device' &&
+                      report.verificationStatus == 'verified')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.verified_rounded,
+                              size: 14, color: Colors.green.shade800),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Verified',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (report.sessionMode == 'device' &&
+                      report.verificationStatus == 'needs_review')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Text(
+                        'Needs Review',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.red.shade800,
+                        ),
+                      ),
+                    ),
+                  // MAC+session-ID label goes last, after every badge.
+                  if (report.sessionMode == 'device' &&
+                      formatDeviceSessionLabel(
+                              report.controlUnitMac, report.deviceSessionId) !=
+                          null)
+                    Text(
+                      formatDeviceSessionLabel(
+                          report.controlUnitMac, report.deviceSessionId)!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            if (report.verificationStatus == 'needs_review') ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.error_outline_rounded,
+                        color: Colors.red.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        report.verificationNote ??
+                            'Some totals in this report don\'t match your sprayer\'s '
+                                'own record.',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.red.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            if (report.pendingNetworkData) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.wifi_off_rounded,
+                        color: Colors.orange.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'This report may be incomplete — the session ended '
+                        'after a long connectivity gap. It will update '
+                        'automatically if the device sends recovered data.',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.orange.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            if (report.amended) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.cloud_sync_outlined,
+                        color: Colors.blue.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        report.amendedNote ??
+                            'Updated after network data was recovered from a connectivity gap.',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.blue.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // TEMP DEBUG (2026-09-30): old-vs-new values for whichever
+            // totals a log-verification correction changed, for manual
+            // spot-checking. Remove this block once the investigation is
+            // done -- see matching TEMP DEBUG markers in
+            // jobs/serializers.py and lib/features/reports/domain/report.dart.
+            if (report.verificationMismatchesDebug != null &&
+                report.verificationMismatchesDebug!.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.purple.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.bug_report_outlined,
+                            color: Colors.purple.shade800, size: 18),
+                        const SizedBox(width: 8),
+                        Text('DEBUG: old vs new values (Log Updated)',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Colors.purple.shade900)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    for (final entry
+                        in report.verificationMismatchesDebug!.entries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '${(entry.value as Map)['label'] ?? entry.key}: '
+                          '${(entry.value as Map)['report']} -> '
+                          '${(entry.value as Map)['log']}',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.purple.shade900),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             if (report.gpsUnavailableNote != null) ...[
               Container(
@@ -193,6 +751,34 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     Expanded(
                       child: Text(
                         report.gpsUnavailableNote!,
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.amber.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            if (report.plot != null && !report.plot!.geometryIsFrozen) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.amber.shade800, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Plot boundary/rows were edited after this report was generated, so the row-by-row heatmap can\'t be shown here. The plot outline and GPS path above are still accurate.',
                         style: TextStyle(
                             fontSize: 13, color: Colors.amber.shade900),
                       ),
@@ -385,6 +971,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
             const SizedBox(height: 24),
           ],
         ),
+        ),
       ),
     );
   }
@@ -423,6 +1010,206 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
     }
   }
 
+  // Hand-rolled MethodChannel, backed by MainActivity.kt's own code (not a
+  // third-party plugin) -- path_provider_android kept failing to register
+  // on real devices across several pub resolutions/overrides (see git log
+  // on this method), throwing MissingPluginException despite every local
+  // check showing it should work. MainActivity is the app's own entry
+  // point, so there's no separate package version that can ever drift out
+  // of registration the way a pub plugin can. iOS/desktop still have no
+  // reported issue, so they keep using path_provider.
+  static const _androidCacheDirChannel = MethodChannel('com.simdaas.agrios/cache_dir');
+
+  Future<String> _scratchDirPath() async {
+    if (Platform.isAndroid) {
+      final path = await _androidCacheDirChannel.invokeMethod<String>('getCacheDir');
+      if (path != null && path.isNotEmpty) return path;
+      throw 'Android cache_dir channel returned no path';
+    }
+    final dir = await getTemporaryDirectory();
+    return dir.path;
+  }
+
+  // ── Share as a branded PDF (WhatsApp/Email/etc.) ─────────────────────────
+  //
+  // Each step below is wrapped in its own try/catch -- rather than one catch
+  // around the whole method -- purely so a failure can say WHICH step broke
+  // (building the PDF vs. writing the temp file vs. the OS share sheet
+  // itself) instead of a single generic "something went wrong". The
+  // surfaced text is deliberately the raw exception, truncated -- this is
+  // temporary extra detail to diagnose the first real-device failure
+  // reports; a generic message can come back once that's root-caused.
+  Future<void> _shareReport(BuildContext context, Report report) async {
+    setState(() => _isSharing = true);
+    try {
+      final mapImages = await _captureHeatmapImages(report);
+
+      final Uint8List pdfBytes;
+      try {
+        pdfBytes = await buildReportPdf(report: report, mapImages: mapImages);
+      } catch (e, st) {
+        debugPrint('Share report: PDF build failed: $e\n$st');
+        throw 'building the PDF: $e';
+      }
+
+      // kIsWeb branch FIRST, before anything touches dart:io -- Platform,
+      // File, Directory all throw "Unsupported operation" on web (dart:io
+      // compiles there but most of it is a non-functional stub), which is
+      // exactly what broke here: a tester was using the web build
+      // (localhost:xxxx/#/dashboard) the whole time, so every earlier
+      // "fix" aimed at Android native plugins was chasing the wrong
+      // platform. XFile.fromData() keeps the PDF entirely in memory --
+      // share_plus_web's _fromXFile() just calls xFile.readAsBytes() on it
+      // and hands the bytes to the browser's Web Share API, no filesystem
+      // involved at all.
+      final XFile xfile;
+      if (kIsWeb) {
+        xfile = XFile.fromData(
+          pdfBytes,
+          name: 'agrios_report_${report.id}.pdf',
+          mimeType: 'application/pdf',
+        );
+      } else {
+        try {
+          final cacheDirPath = await _scratchDirPath();
+          final file = File('$cacheDirPath/agrios_report_${report.id}.pdf');
+          await file.writeAsBytes(pdfBytes, flush: true);
+          xfile = XFile(file.path, mimeType: 'application/pdf');
+        } catch (e, st) {
+          debugPrint('Share report: writing temp file failed: $e\n$st');
+          throw 'saving the file: $e';
+        }
+      }
+
+      final plotName = report.plot?.name ?? 'report';
+      try {
+        final result = await SharePlus.instance.share(ShareParams(
+          files: [xfile],
+          text: 'Agrios spray report — $plotName (Report #${report.id})',
+          subject: 'Agrios Report #${report.id}',
+        ));
+        debugPrint('Share report: share sheet result = ${result.status}');
+      } catch (e, st) {
+        debugPrint('Share report: share sheet failed: $e\n$st');
+        throw 'opening the share sheet: $e';
+      }
+    } catch (e) {
+      if (context.mounted) {
+        showGenericErrorSnackBar(context, 'Failed to share report — $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  // Emails this exact PDF to the signed-in user's own registered email --
+  // same build as Share (real captured heatmaps), just sent through the
+  // backend instead of the OS share sheet. The backend no longer emails a
+  // report automatically on verification (jobs/log_verification.py) --
+  // that could only ever attach a backend-rendered approximation, since
+  // there's no live screen to screenshot server-side. Routing every email
+  // through here instead guarantees it looks exactly like what the app
+  // itself just showed.
+  Future<void> _emailReport(BuildContext context, Report report) async {
+    setState(() => _isEmailing = true);
+    try {
+      final mapImages = await _captureHeatmapImages(report);
+
+      final Uint8List pdfBytes;
+      try {
+        pdfBytes = await buildReportPdf(report: report, mapImages: mapImages);
+      } catch (e, st) {
+        debugPrint('Email report: PDF build failed: $e\n$st');
+        throw 'building the PDF: $e';
+      }
+
+      await ref.read(reportRepoProvider).emailReport(report.id, pdfBytes);
+      if (context.mounted) {
+        showSuccessSnackBar(context, 'Report emailed to your account');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        showGenericErrorSnackBar(context, 'Failed to email report — $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isEmailing = false);
+    }
+  }
+
+  // No live map was ever rendered for a trajectory-less report (see
+  // _buildMapHeader) -- PlotSnapshot there just shows the backend's own
+  // plot-polygon PNG, already base64, so reuse that directly (same bytes
+  // for every mode -- there's no live map to switch anyway) instead of
+  // screenshotting nothing. Otherwise, capture one screenshot PER heatmap
+  // mode the share PDF needs (GPS/Spray/Speed, see
+  // report_pdf_builder.dart) by switching _heatmapType, letting the map
+  // widget rebuild+repaint, then screenshotting the RepaintBoundary --
+  // there's no pre-rendered bitmap for any of these (no backend heatmap
+  // renderer exists at all), each one only exists on screen for as long as
+  // this mode switch holds.
+  Future<Map<HeatmapType, Uint8List?>> _captureHeatmapImages(Report report) async {
+    if (report.trajectory.isEmpty) {
+      Uint8List? snapshot;
+      if (report.plotSnapshot != null && report.plotSnapshot!.isNotEmpty) {
+        try {
+          snapshot = base64Decode(report.plotSnapshot!);
+        } catch (_) {
+          snapshot = null;
+        }
+      }
+      return {
+        HeatmapType.gps: snapshot,
+        HeatmapType.spraying: snapshot,
+        HeatmapType.speed: snapshot,
+        HeatmapType.leftRight: snapshot,
+      };
+    }
+
+    final originalType = _heatmapType;
+    final images = <HeatmapType, Uint8List?>{};
+    try {
+      for (final type in [
+        HeatmapType.gps,
+        HeatmapType.spraying,
+        HeatmapType.speed,
+        HeatmapType.leftRight,
+      ]) {
+        if (!mounted) break;
+        setState(() => _heatmapType = type);
+        // Lets the map (PolygonLayer rebuilt for the new heatmap mode)
+        // actually repaint before the screenshot -- setState alone only
+        // schedules the frame, it doesn't wait for it to be painted. The
+        // extra delay is a known RepaintBoundary.toImage() gotcha: on some
+        // renderers endOfFrame resolves once paint commands are issued but
+        // before the GPU texture backing the boundary actually finishes
+        // compositing, so a screenshot taken immediately after can still
+        // show the PREVIOUS mode's colors.
+        await WidgetsBinding.instance.endOfFrame;
+        await Future.delayed(const Duration(milliseconds: 100));
+        images[type] = await _captureMapRepaintBoundary();
+      }
+    } finally {
+      if (mounted && _heatmapType != originalType) {
+        setState(() => _heatmapType = originalType);
+        await WidgetsBinding.instance.endOfFrame;
+      }
+    }
+    return images;
+  }
+
+  Future<Uint8List?> _captureMapRepaintBoundary() async {
+    try {
+      final boundary =
+          _mapRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return null;
+      final image = await boundary.toImage(pixelRatio: 2.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      return byteData?.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ── Map header with fullscreen button ──────────────────────────────────
   Widget _buildMapHeader(Report report) {
     if (report.trajectory.isEmpty) {
@@ -435,6 +1222,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
     final points = report.trajectory.map((p) => LatLng(p.lat, p.lon)).toList();
     final centroid = _getCentroid(points);
+    // Populated (as a side effect) by buildHeatmapCoverageBands below with
+    // every point plotted on a best-guess row while a genuine row-to-row
+    // transition was still unconfirmed -- see buildForcedTransitionMarkers.
+    final forcedTransitionPoints = <LatLng>[];
 
     return Stack(
       children: [
@@ -469,6 +1260,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     ],
                   ),
                 if (report.plot != null &&
+                    report.plot!.geometryIsFrozen &&
                     report.plot!.rowLines != null &&
                     report.plot!.rowLines!.isNotEmpty) ...[
                   PolygonLayer(
@@ -478,8 +1270,26 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                           report.trajectory, report.plot),
                       rowSpacing: report.plot!.rowSpacing ?? 3.0,
                       heatmapType: _heatmapType,
+                      polygon: report.plot!.polygon,
+                      forcedTransitionPoints: forcedTransitionPoints,
                     ),
                   ),
+                  MarkerLayer(
+                    markers: RowLineCoverage.buildForcedTransitionMarkers(
+                        forcedTransitionPoints),
+                  ),
+                  if (_heatmapType == HeatmapType.gps && _showBackfillOverlay)
+                    PolygonLayer(
+                      polygons: RowLineCoverage.buildHeatmapCoverageBands(
+                        rowLines: report.plot!.rowLines!,
+                        insidePoints: _buildInsideTrackPoints(
+                            report.trajectory, report.plot),
+                        rowSpacing: report.plot!.rowSpacing ?? 3.0,
+                        heatmapType: _heatmapType,
+                        polygon: report.plot!.polygon,
+                        asBackfillOverlay: true,
+                      ),
+                    ),
                   PolylineLayer(
                     polylines: RowLineCoverage.buildRowLines(
                       rowLines: report.plot!.rowLines!,
@@ -490,6 +1300,14 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   polylines:
                       _buildHeatmapPolylines(report.trajectory, report.plot),
                 ),
+                if (_heatmapType == HeatmapType.gps) ...[
+                  PolylineLayer(
+                    polylines: _buildGpsJumpLines(report.trajectory),
+                  ),
+                  MarkerLayer(
+                    markers: _buildGpsJumpMarkers(report.trajectory),
+                  ),
+                ],
                 MarkerLayer(
                   markers: [
                     Marker(
@@ -836,18 +1654,20 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         ];
         break;
       case HeatmapType.speed:
+        final labels = HeatmapColorUtils.speedLegendLabels();
         items = [
-          _legendItem('0-3 km/h', Colors.yellow),
-          _legendItem('3-7 km/h', Colors.green),
-          _legendItem('7+ km/h', Colors.red),
+          _legendItem(labels[0], Colors.yellow),
+          _legendItem(labels[1], Colors.green),
+          _legendItem(labels[2], Colors.red),
         ];
         break;
       case HeatmapType.spraying:
+        final labels = HeatmapColorUtils.sprayLegendLabels();
         items = [
-          _legendItem('0 L/m (No Spray)', Colors.white),
-          _legendItem('1-70 L/m', Colors.blue.shade800),
-          _legendItem('70-200 L/m', Colors.red.shade400),
-          _legendItem('>200 L/m', Colors.black),
+          _legendItem(labels[0], Colors.white),
+          _legendItem(labels[1], Colors.blue.shade800),
+          _legendItem(labels[2], Colors.red.shade400),
+          _legendItem(labels[3], Colors.black),
         ];
         break;
       case HeatmapType.leftRight:
@@ -858,6 +1678,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           _legendItem('Neither', Colors.white),
         ];
         break;
+    }
+    if (_heatmapType == HeatmapType.gps &&
+        _showBackfillOverlay &&
+        widget.report.trajectory.any((p) => p.isBuffered)) {
+      items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
     }
 
     return Container(
@@ -902,17 +1727,57 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   Widget _buildHeatmapToggles() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    final hasBackfill = widget.report.trajectory.any((p) => p.isBuffered);
+    return Column(
       children: [
-        _heatmapButton(HeatmapType.gps, 'GPS'),
-        const SizedBox(width: 8),
-        _heatmapButton(HeatmapType.speed, 'Speed'),
-        const SizedBox(width: 8),
-        _heatmapButton(HeatmapType.spraying, 'Spray'),
-        const SizedBox(width: 8),
-        _heatmapButton(HeatmapType.leftRight, 'L/R'),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _heatmapButton(HeatmapType.gps, 'GPS'),
+            const SizedBox(width: 8),
+            _heatmapButton(HeatmapType.speed, 'Speed'),
+            const SizedBox(width: 8),
+            _heatmapButton(HeatmapType.spraying, 'Spray'),
+            const SizedBox(width: 8),
+            _heatmapButton(HeatmapType.leftRight, 'L/R'),
+          ],
+        ),
+        if (_heatmapType == HeatmapType.gps && hasBackfill) ...[
+          const SizedBox(height: 8),
+          _backfillToggleChip(),
+        ],
       ],
+    );
+  }
+
+  Widget _backfillToggleChip() {
+    final on = _showBackfillOverlay;
+    return InkWell(
+      onTap: () => setState(() => _showBackfillOverlay = !_showBackfillOverlay),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: on ? const Color(0xFF262626) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF262626)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(on ? Icons.visibility : Icons.visibility_off,
+                size: 14, color: on ? Colors.white : Colors.black87),
+            const SizedBox(width: 6),
+            Text(
+              'Backfill',
+              style: TextStyle(
+                color: on ? Colors.white : Colors.black87,
+                fontWeight: on ? FontWeight.bold : FontWeight.normal,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -942,6 +1807,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
@@ -949,6 +1815,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
       if (!isInPlot) continue;
+
+      // Whether this point is an implausible GPS jump from the PREVIOUS
+      // in-plot point in this list (see GpsJumpDetector) -- own list, own
+      // consecutive pairs, so a stretch driven outside the plot in between
+      // (a real gap, not a glitch) doesn't get mistaken for one.
+      final isJump = prev != null &&
+          GpsJumpDetector.isJump(
+              LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp);
+      prev = p;
+
       // The backend now records a GPS point on every telemetry packet while
       // spraying (see session_service.py's should_record), so trajectory is
       // as dense as what the live Monitoring screen draws from — no need to
@@ -962,9 +1838,28 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         flowRate: p.flowRateLpm,
         leftSolenoidOn: p.leftSolenoidState == 1,
         rightSolenoidOn: p.rightSolenoidState == 1,
+        isBuffered: p.isBuffered,
+        isJumpFromPrevious: isJump,
       ));
     }
     return result;
+  }
+
+  // Pink dashed segments marking implausible GPS jumps in the raw
+  // trajectory -- shown on the GPS heatmap only, regardless of plot
+  // membership. See GpsJumpDetector.
+  List<Polyline> _buildGpsJumpLines(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpLines(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
+  }
+
+  List<Marker> _buildGpsJumpMarkers(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpMarkers(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
   }
 
   List<Polyline> _buildHeatmapPolylines(
@@ -1019,6 +1914,11 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         final prev = trajectory[i - 1];
         if (p.timestamp.difference(prev.timestamp).inSeconds > 30) {
           flush(strokeWidth: 6.0);
+        } else if (GpsJumpDetector.isJump(
+            LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp)) {
+          // An implausible GPS jump is drawn separately (see
+          // _buildGpsJumpLines), never bridged into this continuous track.
+          flush();
         }
       }
 
@@ -1087,7 +1987,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
 // ── Full-screen map page ────────────────────────────────────────────────────
 
-class _FullScreenMapPage extends StatefulWidget {
+class _FullScreenMapPage extends ConsumerStatefulWidget {
   final Report report;
   final HeatmapType initialHeatmapType;
   final bool initialIsSatelliteView;
@@ -1099,12 +1999,13 @@ class _FullScreenMapPage extends StatefulWidget {
   });
 
   @override
-  State<_FullScreenMapPage> createState() => _FullScreenMapPageState();
+  ConsumerState<_FullScreenMapPage> createState() => _FullScreenMapPageState();
 }
 
-class _FullScreenMapPageState extends State<_FullScreenMapPage> {
+class _FullScreenMapPageState extends ConsumerState<_FullScreenMapPage> {
   late HeatmapType _heatmapType;
   late bool _isSatelliteView;
+  bool _showBackfillOverlay = true;
 
   @override
   void initState() {
@@ -1115,9 +2016,17 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Not read directly -- watching is what makes this repaint immediately
+    // after Profile > Settings > Heatmap colors is saved while this
+    // full-screen view is open. See heatmap_preferences_service.dart.
+    ref.watch(heatmapThresholdsProvider);
     final report = widget.report;
     final points = report.trajectory.map((p) => LatLng(p.lat, p.lon)).toList();
     final centroid = _getCentroid(points);
+    // Populated (as a side effect) by buildHeatmapCoverageBands below with
+    // every point plotted on a best-guess row while a genuine row-to-row
+    // transition was still unconfirmed -- see buildForcedTransitionMarkers.
+    final forcedTransitionPoints = <LatLng>[];
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1147,6 +2056,7 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                   ],
                 ),
               if (report.plot != null &&
+                  report.plot!.geometryIsFrozen &&
                   report.plot!.rowLines != null &&
                   report.plot!.rowLines!.isNotEmpty) ...[
                 PolygonLayer(
@@ -1155,8 +2065,25 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
                     insidePoints: _buildInsideTrackPoints(report.trajectory, report.plot),
                     rowSpacing: report.plot!.rowSpacing ?? 3.0,
                     heatmapType: _heatmapType,
+                    polygon: report.plot!.polygon,
+                    forcedTransitionPoints: forcedTransitionPoints,
                   ),
                 ),
+                MarkerLayer(
+                  markers: RowLineCoverage.buildForcedTransitionMarkers(
+                      forcedTransitionPoints),
+                ),
+                if (_heatmapType == HeatmapType.gps && _showBackfillOverlay)
+                  PolygonLayer(
+                    polygons: RowLineCoverage.buildHeatmapCoverageBands(
+                      rowLines: report.plot!.rowLines!,
+                      insidePoints: _buildInsideTrackPoints(report.trajectory, report.plot),
+                      rowSpacing: report.plot!.rowSpacing ?? 3.0,
+                      heatmapType: _heatmapType,
+                      polygon: report.plot!.polygon,
+                      asBackfillOverlay: true,
+                    ),
+                  ),
                 PolylineLayer(
                   polylines: RowLineCoverage.buildRowLines(
                     rowLines: report.plot!.rowLines!,
@@ -1166,6 +2093,14 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
               PolylineLayer(
                 polylines: _buildHeatmapPolylines(report.trajectory, report.plot),
               ),
+              if (_heatmapType == HeatmapType.gps) ...[
+                PolylineLayer(
+                  polylines: _buildGpsJumpLines(report.trajectory),
+                ),
+                MarkerLayer(
+                  markers: _buildGpsJumpMarkers(report.trajectory),
+                ),
+              ],
               if (points.isNotEmpty)
                 MarkerLayer(
                   markers: [
@@ -1228,21 +2163,69 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
             child: _buildLegend(),
           ),
 
+          // Geometry-changed notice (top-center) -- shown instead of the
+          // row-corridor heatmap when the plot was re-edited after this
+          // report was generated (see geometryIsFrozen).
+          if (report.plot != null && !report.plot!.geometryIsFrozen)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 60,
+              left: 56,
+              right: 56,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50.withOpacity(0.95),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.amber.shade200),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.15), blurRadius: 6),
+                  ],
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Colors.amber.shade800, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Plot was edited after this report — row heatmap unavailable.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: Colors.amber.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           // Heatmap toggles (bottom-center)
           Positioned(
             bottom: MediaQuery.of(context).padding.bottom + 16,
             left: 0,
             right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _heatmapButton(HeatmapType.gps, 'GPS'),
-                const SizedBox(width: 8),
-                _heatmapButton(HeatmapType.speed, 'Speed'),
-                const SizedBox(width: 8),
-                _heatmapButton(HeatmapType.spraying, 'Spray'),
-                const SizedBox(width: 8),
-                _heatmapButton(HeatmapType.leftRight, 'L/R'),
+                if (_heatmapType == HeatmapType.gps &&
+                    widget.report.trajectory.any((p) => p.isBuffered)) ...[
+                  _backfillToggleChip(),
+                  const SizedBox(height: 8),
+                ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _heatmapButton(HeatmapType.gps, 'GPS'),
+                    const SizedBox(width: 8),
+                    _heatmapButton(HeatmapType.speed, 'Speed'),
+                    const SizedBox(width: 8),
+                    _heatmapButton(HeatmapType.spraying, 'Spray'),
+                    const SizedBox(width: 8),
+                    _heatmapButton(HeatmapType.leftRight, 'L/R'),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1263,18 +2246,20 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         ];
         break;
       case HeatmapType.speed:
+        final labels = HeatmapColorUtils.speedLegendLabels();
         items = [
-          _legendItem('0-3 km/h', Colors.yellow),
-          _legendItem('3-7 km/h', Colors.green),
-          _legendItem('7+ km/h', Colors.red),
+          _legendItem(labels[0], Colors.yellow),
+          _legendItem(labels[1], Colors.green),
+          _legendItem(labels[2], Colors.red),
         ];
         break;
       case HeatmapType.spraying:
+        final labels = HeatmapColorUtils.sprayLegendLabels();
         items = [
-          _legendItem('0 L/m (No Spray)', Colors.white),
-          _legendItem('1-70 L/m', Colors.blue.shade800),
-          _legendItem('70-200 L/m', Colors.red.shade400),
-          _legendItem('>200 L/m', Colors.black),
+          _legendItem(labels[0], Colors.white),
+          _legendItem(labels[1], Colors.blue.shade800),
+          _legendItem(labels[2], Colors.red.shade400),
+          _legendItem(labels[3], Colors.black),
         ];
         break;
       case HeatmapType.leftRight:
@@ -1285,6 +2270,11 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
           _legendItem('Neither', Colors.white),
         ];
         break;
+    }
+    if (_heatmapType == HeatmapType.gps &&
+        _showBackfillOverlay &&
+        widget.report.trajectory.any((p) => p.isBuffered)) {
+      items.add(_legendItem('Recovered (backfill)', Colors.deepPurpleAccent));
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1354,9 +2344,44 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
     );
   }
 
+  Widget _backfillToggleChip() {
+    final on = _showBackfillOverlay;
+    return GestureDetector(
+      onTap: () => setState(() => _showBackfillOverlay = !_showBackfillOverlay),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: on ? Colors.white : Colors.white.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: on ? Colors.black : Colors.white70),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(on ? Icons.visibility : Icons.visibility_off,
+                size: 14, color: Colors.black87),
+            const SizedBox(width: 6),
+            Text(
+              'Backfill',
+              style: TextStyle(
+                color: Colors.black87,
+                fontWeight: on ? FontWeight.bold : FontWeight.normal,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<GPSPointData> trajectory, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    GPSPointData? prev;
     for (final p in trajectory) {
       final point = LatLng(p.lat, p.lon);
       bool isInPlot = true;
@@ -1364,6 +2389,16 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         isInPlot = _isPointInPolygon(point, plot.polygon);
       }
       if (!isInPlot) continue;
+
+      // Whether this point is an implausible GPS jump from the PREVIOUS
+      // in-plot point in this list (see GpsJumpDetector) -- own list, own
+      // consecutive pairs, so a stretch driven outside the plot in between
+      // (a real gap, not a glitch) doesn't get mistaken for one.
+      final isJump = prev != null &&
+          GpsJumpDetector.isJump(
+              LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp);
+      prev = p;
+
       // The backend now records a GPS point on every telemetry packet while
       // spraying (see session_service.py's should_record), so trajectory is
       // as dense as what the live Monitoring screen draws from — no need to
@@ -1377,9 +2412,28 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         flowRate: p.flowRateLpm,
         leftSolenoidOn: p.leftSolenoidState == 1,
         rightSolenoidOn: p.rightSolenoidState == 1,
+        isBuffered: p.isBuffered,
+        isJumpFromPrevious: isJump,
       ));
     }
     return result;
+  }
+
+  // Pink dashed segments marking implausible GPS jumps in the raw
+  // trajectory -- shown on the GPS heatmap only, regardless of plot
+  // membership. See GpsJumpDetector.
+  List<Polyline> _buildGpsJumpLines(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpLines(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
+  }
+
+  List<Marker> _buildGpsJumpMarkers(List<GPSPointData> trajectory) {
+    return GpsJumpDetector.buildJumpMarkers(
+      trajectory.map((p) => LatLng(p.lat, p.lon)).toList(),
+      trajectory.map((p) => p.timestamp).toList(),
+    );
   }
 
   List<Polyline> _buildHeatmapPolylines(
@@ -1434,6 +2488,11 @@ class _FullScreenMapPageState extends State<_FullScreenMapPage> {
         final prev = trajectory[i - 1];
         if (p.timestamp.difference(prev.timestamp).inSeconds > 30) {
           flush(strokeWidth: 6.0);
+        } else if (GpsJumpDetector.isJump(
+            LatLng(prev.lat, prev.lon), prev.timestamp, point, p.timestamp)) {
+          // An implausible GPS jump is drawn separately (see
+          // _buildGpsJumpLines), never bridged into this continuous track.
+          flush();
         }
       }
 

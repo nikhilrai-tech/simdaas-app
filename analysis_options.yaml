@@ -18,6 +18,14 @@ analyzer:
     # Suppress this warning for optional parameters that are intentionally
     # provided as nullable and not passed by callers in many dashboard cards.
     unused_element_parameter: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 
 linter:
   # The lint rules applied to this project can be customized in the

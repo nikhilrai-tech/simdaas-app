@@ -254,6 +254,11 @@ class ProfileScreen extends ConsumerWidget {
             //   },
             // ),
             ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Settings'),
+              onTap: () => Navigator.of(context).pushNamed('/settings'),
+            ),
+            ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Sign out'),
               onTap: () async {

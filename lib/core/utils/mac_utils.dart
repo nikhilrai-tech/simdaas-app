@@ -78,6 +78,17 @@ String extractDeviceId(dynamic cu) {
   return '';
 }
 
+/// Manual (device-managed) mode only: a compact identifier tying a session
+/// back to its physical device, e.g. "88A35AC5E658-29" — MAC (no colons,
+/// uppercase) + the firmware's own session counter. Null unless both are
+/// available (Automatic sessions never have a deviceSessionId).
+String? formatDeviceSessionLabel(String? mac, int? deviceSessionId) {
+  if (mac == null || mac.trim().isEmpty || deviceSessionId == null) return null;
+  final compact = canonicalizeMac(mac).replaceAll(':', '').toUpperCase();
+  if (compact.isEmpty) return null;
+  return '$compact-$deviceSessionId';
+}
+
 /// Safely stringify an object for logging/UI. Attempts `toJson()` -> JSON,
 /// falls back to `toString()` and catches any JS interop types that may throw.
 String safeStringify(dynamic v) {

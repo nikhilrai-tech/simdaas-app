@@ -15,6 +15,7 @@ class PlotModel extends PlotEntity {
     super.bedHeight,
     super.createdAt,
     super.rowLines,
+    super.geometryIsFrozen,
   });
 
   factory PlotModel.fromJson(String id, Map<String, dynamic> json) {
@@ -61,32 +62,44 @@ class PlotModel extends PlotEntity {
       centroid = LatLng(avgLat, avgLng);
     }
 
-    // Parse row_lines: list of 2-point segments, each point is [lat, lng]
+    // Parse row_lines: list of 2-point segments, each point is [lat, lng].
+    // A segment that parses to fewer than 2 points is kept as an EMPTY list
+    // rather than dropped — this is the on-disk marker for "a row line used
+    // to be here and was deleted" (see RowLineScreen's delete button). Its
+    // position in the list must be preserved so the coverage algorithm can
+    // tell "row N and row N+2 were never adjacent" (a real gap where a row
+    // is missing) apart from "row N and row N+1 are just naturally far
+    // apart" (a tapering field) — collapsing the list here would erase that
+    // distinction.
     List<List<LatLng>>? rowLines;
     final rawRowLines = json['row_lines'];
     if (rawRowLines is List && rawRowLines.isNotEmpty) {
       rowLines = [];
       for (final seg in rawRowLines) {
-        if (seg is! List) continue;
         final points = <LatLng>[];
-        for (final pt in seg) {
-          try {
-            if (pt is List && pt.length >= 2) {
-              points.add(LatLng((pt[0] as num).toDouble(), (pt[1] as num).toDouble()));
-            } else if (pt is Map) {
-              final lat = (pt['lat'] ?? pt['latitude']) as num?;
-              final lng = (pt['lng'] ?? pt['longitude']) as num?;
-              if (lat != null && lng != null) {
-                points.add(LatLng(lat.toDouble(), lng.toDouble()));
+        if (seg is List) {
+          for (final pt in seg) {
+            try {
+              if (pt is List && pt.length >= 2) {
+                points.add(LatLng((pt[0] as num).toDouble(), (pt[1] as num).toDouble()));
+              } else if (pt is Map) {
+                final lat = (pt['lat'] ?? pt['latitude']) as num?;
+                final lng = (pt['lng'] ?? pt['longitude']) as num?;
+                if (lat != null && lng != null) {
+                  points.add(LatLng(lat.toDouble(), lng.toDouble()));
+                }
               }
+            } catch (e) {
+              debugPrint('plot_model.fromJson: skipping invalid row_lines entry: $e');
             }
-          } catch (e) {
-            debugPrint('plot_model.fromJson: skipping invalid row_lines entry: $e');
           }
         }
-        if (points.length >= 2) rowLines.add(points);
+        // Keep the slot even if it didn't parse to a full 2-point row —
+        // either a genuine placeholder ([]) or corrupt data ends up the
+        // same way (empty), and both should be treated as "no row here".
+        rowLines.add(points.length >= 2 ? points : <LatLng>[]);
       }
-      if (rowLines.isEmpty) rowLines = null;
+      if (rowLines.every((seg) => seg.isEmpty)) rowLines = null;
     }
 
     return PlotModel(
@@ -105,6 +118,7 @@ class PlotModel extends PlotEntity {
           ? DateTime.parse(json['created_at'].toString())
           : null,
       rowLines: rowLines,
+      geometryIsFrozen: json['geometry_is_frozen'] as bool? ?? true,
     );
   }
 

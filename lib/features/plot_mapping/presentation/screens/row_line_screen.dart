@@ -12,6 +12,7 @@ import 'package:simdaas/core/services/location_service.dart';
 import 'package:simdaas/core/widgets/my_location_layer.dart';
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
+import '../utils/corridor_strip.dart';
 import '../utils/row_line_generator.dart';
 
 enum _Mode { guide, manual }
@@ -40,14 +41,29 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   Offset? _lastPointerPos;
   int? _draggingRow;
   int? _draggingEnd; // 0 = start, 1 = end
-  // Captured once when a drag starts: the OTHER endpoint of the row being
-  // dragged (pivot) and the row's length at that moment. Both are held
-  // fixed for the whole gesture so the dragged endpoint can only slide
-  // sideways around the pivot — never lengthen or shorten the row. Taper
-  // (a row closer to one neighbor at one end than the other) still works
-  // fine, since each endpoint is locked independently around its own pivot.
-  LatLng? _dragPivot;
-  double? _dragLockedLength;
+  // Captured when a drag starts: the row as it was, and how far (metres,
+  // positive = to the row's left) the finger has slid it since. A drag moves
+  // the WHOLE row sideways across its corridor (a parallel shift, re-clipped
+  // to the plot boundary) -- it never pivots around the far end.
+  List<LatLng>? _dragOrigRow;
+  double _dragShiftMeters = 0.0;
+
+  // Manual rotate state -- separate from drag-shift above. Only Row 1 (index
+  // 0, the first row the guide-line fill produced) carries a rotate handle;
+  // rotating it rotates EVERY row by the same angle, each pivoting around
+  // its own midpoint and independently re-clipped to the plot. Rotating rows
+  // independently let their angles drift apart, which broke the row-corridor
+  // area calculation (each corridor's width/tolerance is derived from its
+  // own current gap to its neighbours -- see row_line_coverage.dart) every
+  // time one row's shape changed relative to the rest. Tapping the handle
+  // snapshots every row's current line as the pivot baseline; every +/-0.1°
+  // step re-rotates all of them from that same baseline, capped at +-10°
+  // total.
+  int? _selectedRow;
+  List<List<LatLng>>? _rotateOrigRows;
+  double _rotateDegrees = 0.0;
+  static const double _maxRotateDegrees = 10.0;
+  static const double _rotateStepDegrees = 0.1;
 
   bool _isSaving = false;
 
@@ -108,6 +124,9 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     );
     setState(() {
       _rowLines = rows;
+      _selectedRow = null;
+      _rotateOrigRows = null;
+      _rotateDegrees = 0.0;
       if (rows.isNotEmpty) _mode = _Mode.manual;
     });
     if (rows.isEmpty) {
@@ -169,138 +188,166 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     }
   }
 
-  // ── Manual-edit constraints (length lock + no crossing) ──────────────────
+  // ── Manual-edit constraints (parallel shift + no crossing) ───────────────
 
-  double _distanceDeg(LatLng a, LatLng b) {
-    final dlat = a.latitude - b.latitude;
-    final dlon = a.longitude - b.longitude;
-    return math.sqrt(dlat * dlat + dlon * dlon);
+  /// Walks past deleted rows (empty placeholders left by the row-delete
+  /// button — see [_buildRowDeleteMarkers]) to find the nearest REAL
+  /// neighboring row in [direction] (-1 = toward index 0, +1 = toward the
+  /// end), so a row next to a deleted one is still limited by the next real
+  /// row beyond the gap.
+  List<LatLng>? _nearestRealRow(int fromIdx, int direction) {
+    int i = fromIdx + direction;
+    while (i >= 0 && i < _rowLines.length) {
+      if (_rowLines[i].length > 1) return _rowLines[i];
+      i += direction;
+    }
+    return null;
   }
 
-  /// Pulls [candidate] back onto a circle of [lockedLength] centred on
-  /// [pivot] — the dragged endpoint can slide all the way around (so the row
-  /// can still taper, closer to a neighbor at one end than the other) but
-  /// can never move the row's total length longer or shorter.
-  LatLng _applyLengthLock(LatLng candidate, LatLng pivot, double lockedLength) {
-    final dlat = candidate.latitude - pivot.latitude;
-    final dlon = candidate.longitude - pivot.longitude;
-    final dist = math.sqrt(dlat * dlat + dlon * dlon);
-    if (dist < 1e-12) return candidate;
-    final scale = lockedLength / dist;
-    return LatLng(
-      pivot.latitude + dlat * scale,
-      pivot.longitude + dlon * scale,
-    );
-  }
-
-  /// Keeps this row's [endIdx] endpoint from crossing past the matching
-  /// endpoint of its immediate neighboring row(s) — so Row 3 can never end
-  /// up sitting where Row 5 used to be, which would otherwise silently
-  /// corrupt the heatmap tolerance for two unrelated corridors at once.
-  ///
-  /// The candidate's sideways deviation (which is what lets a row taper —
-  /// closer to one neighbor at this end than at the other) is preserved
-  /// exactly; only its position *along* the neighbor-to-neighbor axis gets
-  /// pulled back if it would cross.
-  LatLng _preventCrossing(int rowIdx, int endIdx, LatLng candidate) {
-    final hasBelow = rowIdx > 0 && _rowLines[rowIdx - 1].length > endIdx;
-    final hasAbove =
-        rowIdx < _rowLines.length - 1 && _rowLines[rowIdx + 1].length > endIdx;
-    if (!hasBelow && !hasAbove) return candidate;
-
-    // At a field edge (only one real neighbor), this row's own pivot stands
-    // in for the missing side — there's nothing to cross into there anyway,
-    // the polygon boundary clamp already covers that direction.
-    final below = hasBelow ? _rowLines[rowIdx - 1][endIdx] : _dragPivot;
-    final above = hasAbove ? _rowLines[rowIdx + 1][endIdx] : _dragPivot;
-    if (below == null || above == null) return candidate;
-
-    final axisLat = above.latitude - below.latitude;
-    final axisLon = above.longitude - below.longitude;
-    final axisLenSq = axisLat * axisLat + axisLon * axisLon;
-    if (axisLenSq < 1e-18) return candidate;
-
-    final vLat = candidate.latitude - below.latitude;
-    final vLon = candidate.longitude - below.longitude;
-    final t = (vLat * axisLat + vLon * axisLon) / axisLenSq;
-
-    const margin = 0.05; // keep rows from ever fully touching/crossing
-    final tMin = hasBelow ? margin : -double.infinity;
-    final tMax = hasAbove ? 1 - margin : double.infinity;
-    final tClamped = t.clamp(tMin, tMax);
-    if (tClamped == t) return candidate;
-
-    final perpLat = vLat - t * axisLat;
-    final perpLon = vLon - t * axisLon;
-    return LatLng(
-      below.latitude + tClamped * axisLat + perpLat,
-      below.longitude + tClamped * axisLon + perpLon,
-    );
-  }
-
-  // ── Boundary snapping helpers ────────────────────────────────────────────
-
-  LatLng _clampToBoundary(LatLng point, List<LatLng> polygon) {
-    if (polygon.length < 3) return point;
-    if (_isInsidePolygon(point, polygon)) return point;
-    LatLng nearest = polygon.first;
-    double minDistSq = double.infinity;
-    for (int i = 0; i < polygon.length; i++) {
-      final a = polygon[i];
-      final b = polygon[(i + 1) % polygon.length];
-      final c = _nearestPointOnSegment(point, a, b);
-      final d = _distanceSq(point, c);
-      if (d < minDistSq) {
-        minDistSq = d;
-        nearest = c;
+  /// Allowed sideways range (metres, positive = row's left) for shifting
+  /// [orig], so it can't cross or touch its nearest real neighbours.
+  ({double lower, double upper}) _shiftLimits(int rowIdx, List<LatLng> orig) {
+    const gap = 0.3;
+    var lower = -double.infinity, upper = double.infinity;
+    for (final dir in const [-1, 1]) {
+      final nb = _nearestRealRow(rowIdx, dir);
+      if (nb == null) continue;
+      final d0 = RowLineGeometry.signedDistance(orig, nb[0]);
+      final d1 = RowLineGeometry.signedDistance(orig, nb[1]);
+      if (d0 > 0 && d1 > 0) {
+        upper = math.min(upper, math.min(d0, d1) - gap);
+      } else if (d0 < 0 && d1 < 0) {
+        lower = math.max(lower, math.max(d0, d1) + gap);
       }
     }
-    return nearest;
+    return (lower: lower, upper: upper);
   }
 
-  bool _isInsidePolygon(LatLng p, List<LatLng> poly) {
-    int crossings = 0;
-    for (int i = 0; i < poly.length; i++) {
-      final a = poly[i];
-      final b = poly[(i + 1) % poly.length];
-      if (((a.longitude <= p.longitude) && (p.longitude < b.longitude)) ||
-          ((b.longitude <= p.longitude) && (p.longitude < a.longitude))) {
-        final lat = a.latitude +
-            (p.longitude - a.longitude) *
-                (b.latitude - a.latitude) /
-                (b.longitude - a.longitude);
-        if (p.latitude < lat) crossings++;
+  /// Whether every adjacent pair of REAL rows in [candidate] still keeps a
+  /// clear, consistent-side gap from each other. Used when rotating ALL rows
+  /// together (see [_applyRotation]) -- two rows that were each individually
+  /// fine against their *original* neighbours can still end up crossing once
+  /// both have moved, so the whole candidate set is checked pairwise rather
+  /// than each row against a static baseline.
+  bool _allRowsClearEachOther(List<List<LatLng>> candidate) {
+    const gap = 0.3;
+    for (int i = 0; i < candidate.length; i++) {
+      if (candidate[i].length < 2) continue;
+      int j = i + 1;
+      while (j < candidate.length && candidate[j].length < 2) {
+        j++;
       }
+      if (j >= candidate.length) continue;
+      final a = candidate[i];
+      final b = candidate[j];
+      final d0 = RowLineGeometry.signedDistance(a, b[0]);
+      final d1 = RowLineGeometry.signedDistance(a, b[1]);
+      final clearPositive = d0 > gap && d1 > gap;
+      final clearNegative = d0 < -gap && d1 < -gap;
+      if (!clearPositive && !clearNegative) return false;
     }
-    return crossings.isOdd;
+    return true;
   }
 
-  LatLng _nearestPointOnSegment(LatLng p, LatLng a, LatLng b) {
-    final dx = b.latitude - a.latitude;
-    final dy = b.longitude - a.longitude;
-    if (dx == 0 && dy == 0) return a;
-    final t = ((p.latitude - a.latitude) * dx + (p.longitude - a.longitude) * dy) /
-        (dx * dx + dy * dy);
-    final tc = t.clamp(0.0, 1.0);
-    return LatLng(a.latitude + tc * dx, a.longitude + tc * dy);
+  void _selectRowForRotation(int rowIdx) {
+    setState(() {
+      _draggingRow = null;
+      _draggingEnd = null;
+      _selectedRow = rowIdx;
+      _rotateOrigRows = _rowLines.map((r) => List<LatLng>.from(r)).toList();
+      _rotateDegrees = 0.0;
+    });
   }
 
-  double _distanceSq(LatLng a, LatLng b) {
-    final dlat = a.latitude - b.latitude;
-    final dlon = a.longitude - b.longitude;
-    return dlat * dlat + dlon * dlon;
+  void _applyRotation(double delta) {
+    final origRows = _rotateOrigRows;
+    if (origRows == null) return;
+    final newDegrees = (_rotateDegrees + delta).clamp(-_maxRotateDegrees, _maxRotateDegrees);
+    if (newDegrees == _rotateDegrees) return;
+    final candidate = <List<LatLng>>[];
+    for (final row in origRows) {
+      if (row.length < 2) {
+        candidate.add(row);
+        continue;
+      }
+      final rotated = RowLineGeometry.rotateRow(
+        row: row,
+        degrees: newDegrees,
+        polygon: widget.plot.polygon,
+      );
+      // Any single row failing to fit at this angle aborts the whole batch --
+      // better to hold at the last angle every row agreed on than to apply a
+      // partial rotation that leaves the set inconsistent.
+      if (rotated == null) return;
+      candidate.add(rotated);
+    }
+    if (!_allRowsClearEachOther(candidate)) return;
+    setState(() {
+      _rotateDegrees = newDegrees;
+      _rowLines = candidate;
+    });
+  }
+
+  void _finishRotating() {
+    setState(() {
+      _selectedRow = null;
+      _rotateOrigRows = null;
+      _rotateDegrees = 0.0;
+    });
   }
 
   // ── Map overlay builders ─────────────────────────────────────────────────
 
   List<Polyline> _buildRowPolylines() {
-    return _rowLines.map((seg) {
-      return Polyline(
-        points: seg,
-        color: Colors.yellow.withAlpha(200),
-        strokeWidth: 2.5,
+    // Rotation always moves every row together (see [_applyRotation]), so
+    // while it's active every row is highlighted, not just Row 1.
+    final rotating = _selectedRow != null;
+    return [
+      for (int r = 0; r < _rowLines.length; r++)
+        if (_rowLines[r].length >= 2)
+          Polyline(
+            points: _rowLines[r],
+            color: rotating ? Colors.cyanAccent.withAlpha(230) : Colors.yellow.withAlpha(200),
+            strokeWidth: rotating ? 3.5 : 2.5,
+          ),
+    ];
+  }
+
+  /// Point a fraction [t] of the way from [a] to [b] -- used to place the
+  /// rotate handle a bit off the row's midpoint (where the delete button
+  /// already sits) without needing a separate metres-based offset.
+  LatLng _lerpLatLng(LatLng a, LatLng b, double t) => LatLng(
+        a.latitude + (b.latitude - a.latitude) * t,
+        a.longitude + (b.longitude - a.longitude) * t,
       );
-    }).toList();
+
+  /// Only Row 1 (index 0) gets a rotate handle -- rotating it rotates every
+  /// row together (see [_applyRotation] and the field comment on
+  /// [_rotateOrigRows] for why independent per-row rotation was removed).
+  List<Marker> _buildRowRotateMarkers() {
+    if (_mode != _Mode.manual) return [];
+    if (_rowLines.isEmpty || _rowLines[0].length < 2) return [];
+    final seg = _rowLines[0];
+    final selected = _selectedRow == 0;
+    return [
+      Marker(
+        point: _lerpLatLng(seg[0], seg[1], 0.35),
+        width: 26,
+        height: 26,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _selectRowForRotation(0),
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: (selected ? Colors.cyanAccent : Colors.blue).withAlpha(230),
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: const Icon(Icons.rotate_right, size: 15, color: Colors.white),
+          ),
+        ),
+      ),
+    ];
   }
 
   List<Marker> _buildRowEndpointMarkers() {
@@ -323,15 +370,14 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 _draggingRow = rowIdx;
                 _draggingEnd = endIdx;
                 _lastPointerPos = ev.position;
-                final seg = _rowLines[rowIdx];
-                final fixedIdx = endIdx == 0 ? 1 : 0;
-                if (fixedIdx < seg.length) {
-                  _dragPivot = seg[fixedIdx];
-                  _dragLockedLength = _distanceDeg(seg[endIdx], seg[fixedIdx]);
-                } else {
-                  _dragPivot = null;
-                  _dragLockedLength = null;
-                }
+                _dragOrigRow = List<LatLng>.from(_rowLines[rowIdx]);
+                _dragShiftMeters = 0.0;
+                // A shift-drag and a pending rotation both edit row lines
+                // from their own snapshot; starting one abandons the other
+                // instead of leaving a stale baseline.
+                _selectedRow = null;
+                _rotateOrigRows = null;
+                _rotateDegrees = 0.0;
               });
             },
             onPointerMove: (ev) {
@@ -345,26 +391,31 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 final currLocal = box.globalToLocal(ev.position);
                 final lastLL = camera.offsetToCrs(Offset(lastLocal.dx, lastLocal.dy));
                 final currLL = camera.offsetToCrs(Offset(currLocal.dx, currLocal.dy));
-                final dLat = currLL.latitude - lastLL.latitude;
-                final dLon = currLL.longitude - lastLL.longitude;
+                final orig = _dragOrigRow;
+                if (orig == null || orig.length < 2) return;
+                // Finger movement (metres, east/north) projected onto the
+                // row's own left-normal = how far it moved ACROSS the row.
+                final cosLat = math.cos(orig[0].latitude * math.pi / 180.0);
+                final dx = (currLL.longitude - lastLL.longitude) * cosLat * 111320.0;
+                final dy = (currLL.latitude - lastLL.latitude) * 111320.0;
+                final n = RowLineGeometry.leftNormal(orig);
+                final limits = _shiftLimits(rowIdx, orig);
+                final target = (_dragShiftMeters + dx * n.x + dy * n.y)
+                    .clamp(limits.lower, limits.upper)
+                    .toDouble();
+                final shifted = RowLineGeometry.shiftRow(
+                  row: orig,
+                  lateralMeters: target,
+                  polygon: widget.plot.polygon,
+                );
                 setState(() {
-                  final newSeg = List<LatLng>.from(_rowLines[rowIdx]);
-                  var moved = LatLng(
-                    newSeg[endIdx].latitude + dLat,
-                    newSeg[endIdx].longitude + dLon,
-                  );
-                  // 1. Length lock — pull the point back onto a circle of the
-                  // original row length, centred on the OTHER (fixed) end.
-                  if (_dragPivot != null && _dragLockedLength != null) {
-                    moved = _applyLengthLock(
-                        moved, _dragPivot!, _dragLockedLength!);
-                  }
-                  // 2. No crossing — never let this endpoint pass a
-                  // neighboring row's matching endpoint.
-                  moved = _preventCrossing(rowIdx, endIdx, moved);
-                  newSeg[endIdx] = _clampToBoundary(moved, widget.plot.polygon);
-                  _rowLines = List<List<LatLng>>.from(_rowLines)..[rowIdx] = newSeg;
                   _lastPointerPos = ev.position;
+                  // Shifted out of the plot entirely: hold the last valid
+                  // position instead of letting the row leave the field.
+                  if (shifted == null) return;
+                  _dragShiftMeters = target;
+                  _rowLines = List<List<LatLng>>.from(_rowLines)
+                    ..[rowIdx] = shifted;
                 });
               } catch (_) {
                 _lastPointerPos = ev.position;
@@ -374,15 +425,15 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               _draggingRow = null;
               _draggingEnd = null;
               _lastPointerPos = null;
-              _dragPivot = null;
-              _dragLockedLength = null;
+              _dragOrigRow = null;
+              _dragShiftMeters = 0.0;
             }),
             onPointerCancel: (_) => setState(() {
               _draggingRow = null;
               _draggingEnd = null;
               _lastPointerPos = null;
-              _dragPivot = null;
-              _dragLockedLength = null;
+              _dragOrigRow = null;
+              _dragShiftMeters = 0.0;
             }),
             child: Container(
               width: 28,
@@ -400,13 +451,79 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     return markers;
   }
 
+  List<Marker> _buildRowDeleteMarkers() {
+    if (_mode != _Mode.manual) return [];
+    final markers = <Marker>[];
+    for (int r = 0; r < _rowLines.length; r++) {
+      final seg = _rowLines[r];
+      if (seg.length < 2) continue;
+      final mid = LatLng(
+        (seg[0].latitude + seg[1].latitude) / 2,
+        (seg[0].longitude + seg[1].longitude) / 2,
+      );
+      final rowIdx = r;
+      markers.add(Marker(
+        point: mid,
+        width: 26,
+        height: 26,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() {
+            _draggingRow = null;
+            _draggingEnd = null;
+            // A rotation in progress snapshots EVERY row (see
+            // _rotateOrigRows) -- deleting any one of them, not just the
+            // selected row, invalidates that snapshot.
+            if (_selectedRow != null) {
+              _selectedRow = null;
+              _rotateOrigRows = null;
+              _rotateDegrees = 0.0;
+            }
+            // Replace with an empty placeholder rather than removing the
+            // slot outright — this preserves every other row's index and,
+            // crucially, leaves a marker at this exact position so the
+            // coverage heatmap knows a row used to be here and treats the
+            // (now larger) gap to each remaining neighbor as two separate
+            // narrow bands instead of one oversized merged corridor. See
+            // RowLineCoverage.buildHeatmapCoverageBands.
+            final newLines = List<List<LatLng>>.from(_rowLines);
+            newLines[rowIdx] = <LatLng>[];
+            _rowLines = newLines;
+          }),
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.red.withAlpha(230),
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: const Icon(Icons.close, size: 16, color: Colors.white),
+          ),
+        ),
+      ));
+    }
+    return markers;
+  }
+
   @override
   Widget build(BuildContext context) {
     final guideComplete = _guideStart != null && _guideEnd != null;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Row Lines — ${widget.plot.name}'),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Row Lines — ${widget.plot.name}'),
+            Text(
+              '${_rowLines.length} row${_rowLines.length == 1 ? '' : 's'}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).appBarTheme.foregroundColor?.withValues(alpha: 0.75) ??
+                        Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
         actions: [
           if (_isSaving)
             const Padding(
@@ -471,6 +588,12 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                   if (_guideEnd != null)
                     _dotMarker(_guideEnd!, Colors.redAccent, 'E'),
                 ]),
+              // Row delete buttons (midpoint of each row)
+              if (_rowLines.isNotEmpty)
+                MarkerLayer(markers: _buildRowDeleteMarkers()),
+              // Row rotate-select buttons (just off midpoint of each row)
+              if (_rowLines.isNotEmpty)
+                MarkerLayer(markers: _buildRowRotateMarkers()),
               // Row endpoint drag handles
               if (_rowLines.isNotEmpty)
                 MarkerLayer(markers: _buildRowEndpointMarkers()),
@@ -534,6 +657,8 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                     // Mode-specific instructions + Fill All button
                     if (_mode == _Mode.guide)
                       _guideInstructions(guideComplete)
+                    else if (_selectedRow != null)
+                      _rotateControls()
                     else
                       _manualInstructions(),
                   ],
@@ -576,7 +701,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           child: Text(
             _rowLines.isEmpty
                 ? 'Switch to Guide Line mode to generate rows first.'
-                : 'Drag orange handles to adjust individual row endpoints.',
+                : 'Drag an orange handle to slide that row sideways. Tap the blue ↻ on Row 1 to angle all rows together. Tap the red ✕ to delete a row.',
             style: const TextStyle(fontSize: 13),
           ),
         ),
@@ -587,10 +712,54 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               _guideStart = null;
               _guideEnd = null;
               _rowLines = [];
+              _selectedRow = null;
+              _rotateOrigRows = null;
+              _rotateDegrees = 0.0;
             }),
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text('Reset'),
           ),
+      ],
+    );
+  }
+
+  /// Shown instead of [_manualInstructions] while rotation is active -- a
+  /// small +-0.1° stepper, capped at +-10° from wherever the rows were when
+  /// Row 1's handle was tapped (see [_selectRowForRotation]). Every row
+  /// rotates together, not just Row 1.
+  Widget _rotateControls() {
+    final atMin = _rotateDegrees <= -_maxRotateDegrees;
+    final atMax = _rotateDegrees >= _maxRotateDegrees;
+    return Row(
+      children: [
+        const Text(
+          'All rows angle',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'Rotate -0.1°',
+          icon: const Icon(Icons.remove_circle_outline),
+          onPressed: atMin ? null : () => _applyRotation(-_rotateStepDegrees),
+        ),
+        SizedBox(
+          width: 56,
+          child: Text(
+            '${_rotateDegrees >= 0 ? '+' : ''}${_rotateDegrees.toStringAsFixed(1)}°',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Rotate +0.1°',
+          icon: const Icon(Icons.add_circle_outline),
+          onPressed: atMax ? null : () => _applyRotation(_rotateStepDegrees),
+        ),
+        const Spacer(),
+        TextButton(
+          onPressed: _finishRotating,
+          child: const Text('Done'),
+        ),
       ],
     );
   }

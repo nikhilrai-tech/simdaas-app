@@ -2,16 +2,84 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import '../../data/datasources/report_remote_data_source.dart';
 import '../../data/repositories/report_repository_impl.dart';
+import '../../domain/report.dart';
 
 final reportRepoProvider = Provider((ref) =>
     ReportRepositoryImpl(ReportRemoteDataSourceImpl(ref.read(apiServiceProvider))));
 
-final reportsListProvider = FutureProvider((ref) async {
-  final repo = ref.read(reportRepoProvider);
-  return repo.getReports();
-});
+class ReportsPageParams {
+  final int page;
+  final int pageSize;
+  final String? plotId;
+  final String? controlUnitId;
+  final bool sortAscending;
+  final DateTime? createdAfter;
+  final DateTime? createdBefore;
+
+  const ReportsPageParams({
+    required this.page,
+    required this.pageSize,
+    this.plotId,
+    this.controlUnitId,
+    this.sortAscending = false,
+    this.createdAfter,
+    this.createdBefore,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReportsPageParams &&
+      other.page == page &&
+      other.pageSize == pageSize &&
+      other.plotId == plotId &&
+      other.controlUnitId == controlUnitId &&
+      other.sortAscending == sortAscending &&
+      other.createdAfter == createdAfter &&
+      other.createdBefore == createdBefore;
+
+  @override
+  int get hashCode => Object.hash(page, pageSize, plotId, controlUnitId,
+      sortAscending, createdAfter, createdBefore);
+}
+
+/// One page fetched directly from the backend, filtered/sorted server-side
+/// -- an account's whole report history is never fetched at once. Invalidate
+/// with the bare family (`ref.invalidate(reportsListProvider)`) to refresh
+/// every page currently cached, or `reportsListProvider(params)` for just
+/// the page in view.
+final reportsListProvider = FutureProvider.family<
+    ({List<Report> reports, int totalCount}), ReportsPageParams>(
+  (ref, params) async {
+    final repo = ref.read(reportRepoProvider);
+    return repo.getReportsPage(
+      page: params.page,
+      pageSize: params.pageSize,
+      plotId: params.plotId,
+      controlUnitId: params.controlUnitId,
+      sortAscending: params.sortAscending,
+      createdAfter: params.createdAfter,
+      createdBefore: params.createdBefore,
+    );
+  },
+);
 
 final reportDetailProvider = FutureProvider.family((ref, String id) async {
   final repo = ref.read(reportRepoProvider);
   return repo.getReport(id);
+});
+
+/// The signed-in user's own cumulative average chemical-saved % across all
+/// their reports to date (null if they have none yet) -- backs the
+/// dashboard's headline stat. A dedicated backend aggregate
+/// (GET /jobs/api/reports/stats/), not computed by paging through every
+/// report client-side.
+final reportStatsProvider = FutureProvider<double?>((ref) async {
+  final api = ref.read(apiServiceProvider);
+  final response = await api.getJson('/jobs/api/reports/stats/');
+  if (response is Map) {
+    final v = response['avg_chemical_saved_percentage'];
+    if (v is num) return v.toDouble();
+    if (v != null) return double.tryParse(v.toString());
+  }
+  return null;
 });

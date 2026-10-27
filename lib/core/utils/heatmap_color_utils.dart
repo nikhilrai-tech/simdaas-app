@@ -12,6 +12,24 @@ class HeatmapTrackPoint {
   final double? flowRate;
   final bool leftSolenoidOn;
   final bool rightSolenoidOn;
+  // Recovered via /backfill after a connectivity gap -- used only by
+  // RowLineCoverage.buildHeatmapCoverageBands's asBackfillOverlay pass.
+  final bool isBuffered;
+  // True when the jump from the PREVIOUS point in the track to this one is
+  // an implausible GPS jump (see GpsJumpDetector) -- an implied speed no
+  // sprayer can actually reach. Stops the heatmap gap-fill from bridging
+  // across it and painting the jump itself as sprayed.
+  final bool isJumpFromPrevious;
+  // True when more than GpsJumpDetector.maxPlausibleGapSeconds of real time
+  // passed since the previous point in the track -- a connectivity gap, not
+  // just ordinary ~1s sampling. Only ever set by the LIVE monitoring screen
+  // (see MonitoringScreen._buildInsideTrackPoints): there's genuinely no
+  // data for what happened during the gap yet, unlike a completed report,
+  // which has the real recovered path via /backfill by the time it's
+  // viewed -- report_details_screen.dart never sets this, so it has no
+  // effect there. Stops the heatmap gap-fill from bridging across the gap
+  // and painting a stretch as covered that was never actually observed.
+  final bool isLongGapFromPrevious;
 
   const HeatmapTrackPoint({
     required this.position,
@@ -22,31 +40,68 @@ class HeatmapTrackPoint {
     this.flowRate,
     this.leftSolenoidOn = false,
     this.rightSolenoidOn = false,
+    this.isBuffered = false,
+    this.isJumpFromPrevious = false,
+    this.isLongGapFromPrevious = false,
   });
 }
 
 class HeatmapColorUtils {
-  // Speed: 0-3 → yellow, 3-7 → green, 7+ → red
+  // Color-band boundaries for the Speed/Spray heatmaps below. Mutable so
+  // HeatmapPreferencesNotifier (lib/core/services/heatmap_preferences_service.dart)
+  // can apply the signed-in user's own values (Profile > Settings > Heatmap
+  // colors, GET/PATCH /api/auth/heatmap-preferences/) on top of these
+  // defaults -- the defaults below are exactly what used to be hardcoded
+  // here, so an account that never visits that screen behaves unchanged.
+  // The COLORS themselves (yellow/green/red, white/blue/red/black) are
+  // fixed, only where one band ends and the next begins is configurable.
+  static double speedYellowMax = 3.0;
+  static double speedGreenMax = 7.0;
+  static double sprayBlueMax = 70.0;
+  static double sprayRedMax = 200.0;
+
+  static String _fmtNum(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
+
+  // Legend labels for the Speed/Spray heatmaps, reflecting whatever the
+  // thresholds above currently are -- used by monitoring_screen.dart and
+  // report_details_screen.dart's map legend cards so they never show stale
+  // numbers after Profile > Settings > Heatmap colors changes them.
+  static List<String> speedLegendLabels() => [
+        '0-${_fmtNum(speedYellowMax)} km/h',
+        '${_fmtNum(speedYellowMax)}-${_fmtNum(speedGreenMax)} km/h',
+        '${_fmtNum(speedGreenMax)}+ km/h',
+      ];
+
+  static List<String> sprayLegendLabels() => [
+        '0 L/m (No Spray)',
+        '0-${_fmtNum(sprayBlueMax)} L/m',
+        '${_fmtNum(sprayBlueMax)}-${_fmtNum(sprayRedMax)} L/m',
+        '>${_fmtNum(sprayRedMax)} L/m',
+      ];
+
+  // Speed: 0-speedYellowMax → yellow, ..speedGreenMax → green, above → red
   static Color getColorForSpeed(double? speed) {
     if (speed == null) return Colors.grey;
-    if (speed <= 3.0) return Colors.yellow;
-    if (speed <= 7.0) return Colors.green;
+    if (speed <= speedYellowMax) return Colors.yellow;
+    if (speed <= speedGreenMax) return Colors.green;
     return Colors.red;
   }
 
-  // Spray: 0 → white (no spray), 1-70 → light-to-dark blue scale (wide
-  // range so low vs high flow is easy to tell apart at a glance),
-  // 70.1-200 → red scale, <0 or >200 → black
+  // Spray: 0 → white (no spray), 0-sprayBlueMax → light-to-dark blue scale
+  // (wide range so low vs high flow is easy to tell apart at a glance),
+  // ..sprayRedMax → red scale, <0 or above sprayRedMax → black
   static Color getColorForSpray(double? flow) {
     if (flow == null) return Colors.grey;
     if (flow == 0) return Colors.white;
-    if (flow < 0 || flow > 200) return Colors.black;
-    if (flow <= 70) {
-      final ratio = (flow / 70.0).clamp(0.0, 1.0);
+    if (flow < 0 || flow > sprayRedMax) return Colors.black;
+    if (flow <= sprayBlueMax) {
+      final ratio = (flow / sprayBlueMax).clamp(0.0, 1.0);
       return Color.lerp(Colors.blue.shade200, Colors.blue.shade900, ratio) ??
           Colors.blue;
     }
-    final ratio = ((flow - 70.0) / 130.0).clamp(0.0, 1.0);
+    final ratio =
+        ((flow - sprayBlueMax) / (sprayRedMax - sprayBlueMax)).clamp(0.0, 1.0);
     return Color.lerp(Colors.red.shade200, Colors.red.shade900, ratio) ??
         Colors.red;
   }
@@ -63,17 +118,19 @@ class HeatmapColorUtils {
   }
 
   // Priority order for the GPS heatmap's row-coverage bands: PTO off (0) <
-  // Manual (1) < Auto (2). A sub-band that has ever reached a given
-  // priority must never visually drop back to a lower one on a later
-  // sample/pass — e.g. once shown Auto (blue), a later PTO-off reading at
-  // the same spot (GPS jitter, a momentary pause) must not repaint it
-  // orange, since spraying already happened there. Only used by the GPS
-  // heatmap — Speed/Spray/Left-Right keep their existing "latest sample"
-  // or accumulation behavior.
+  // PTO on, either mode (1). A sub-band that has ever reached PTO-on must
+  // never visually drop back to PTO-off on a later sample/pass — e.g. once
+  // shown as sprayed, a later PTO-off reading at the same spot (GPS jitter,
+  // a momentary pause, or driving back through to refill the tank) must not
+  // repaint it orange, since spraying already happened there. Auto and
+  // Manual share the SAME priority on purpose: between two PTO-on passes,
+  // the latest one wins (a deliberate later re-pass in the other mode is
+  // real, current information, not noise to protect against) -- only
+  // PTO-off is the one state that must never override an established
+  // PTO-on. Only used by the GPS heatmap — Speed/Spray/Left-Right keep
+  // their existing "latest sample" or accumulation behavior.
   static int gpsPriority({required bool ptoOn, required bool isAuto}) {
-    if (!ptoOn) return 0;
-    if (!isAuto) return 1;
-    return 2;
+    return ptoOn ? 1 : 0;
   }
 
   // Left/Right: which solenoid(s) sprayed at this point — orange = left

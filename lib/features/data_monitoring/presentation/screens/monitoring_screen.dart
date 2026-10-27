@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/api_exception.dart';
@@ -7,22 +8,24 @@ import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import '../../../plot_mapping/data/models/plot_model.dart' as fm_models;
 import '../../../plot_mapping/domain/entities/plot.dart';
 import '../../../plot_mapping/presentation/utils/row_line_coverage.dart';
-import '../providers/monitoring_providers.dart';
+import 'package:simdaas/core/utils/gps_jump_detector.dart';
 import '../../../equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/services/telemetry_service.dart';
+import 'package:simdaas/core/services/heatmap_preferences_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'dart:async';
 import 'package:simdaas/core/services/connectivity_service.dart';
+import 'package:simdaas/core/theme/app_theme.dart';
 import '../../../reports/presentation/providers/session_providers.dart';
-import 'package:simdaas/main.dart' show appNavKey;
 
 class MonitoringScreen extends ConsumerStatefulWidget {
   final String? plotId;
@@ -42,6 +45,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
   HeatmapType _selectedHeatmap = HeatmapType.gps;
   bool _isSatelliteView = true;
+  // Actual rendered height of whichever top banner (Manual idle bar /
+  // cooldown banner) is currently showing -- the L/R card and legend below
+  // it need to shift down by exactly this much. A fixed guessed offset
+  // previously overlapped on narrower screens where the idle bar's text
+  // wraps to an extra line (its message + a button in one Row, so wrapping
+  // depends on device text scale and screen width, not just phone vs
+  // tablet).
+  final GlobalKey _topBannerKey = GlobalKey();
+  double? _topBannerHeight;
   List<Map<String, dynamic>> positions = [];
   TelemetryData? latestTelemetry;
   StreamSubscription<TelemetryData>? _deviceSub;
@@ -52,11 +64,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   bool _outOfPlotSnackVisible = false;
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
+  // ── SD card missing alert ────────────────────────────────────────────────
+  // Dismissing only silences the CURRENT episode -- reset back to false
+  // the moment the card is reported present again, so a later removal (the
+  // user pulling it back out) is treated as a fresh episode and alerts
+  // again instead of staying silently muted forever.
+  bool _sdCardAlertDismissed = false;
+
   // ── Cooldown state ───────────────────────────────────────────────────────
   CooldownState? _cooldownState;
   StreamSubscription<CooldownState>? _cooldownSub;
   // Ticks every second to refresh the MM:SS countdown label.
   Timer? _countdownTimer;
+  // Kept in sync from build()'s isManualMode -- _waitingSecondsRemaining()
+  // needs it outside of build() (the timer callback, and this is a
+  // StatefulWidget field so it survives rebuilds between ticks).
+  bool _isManualMode = false;
 
   // Top notification banner is only visible for ~5 s after a cooldown
   // begins. The cooldown itself still runs to completion in the background.
@@ -95,6 +118,41 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   // before the cooldown event lands. Cleared automatically once the cooldown
   // ends (state transitions out of `cooldown`), so the next session can show.
   bool _sessionEndedManually = false;
+
+  // ── Manual (device-managed) session mode ─────────────────────────────────
+  // In Manual mode the sprayer owns the session: these listeners keep the
+  // screen in sync with the device's START/END, its acks of our virtual
+  // start/stop, and reports amended by recovered (offline) data.
+  StreamSubscription<SessionEvent>? _sessionEventSub;
+  StreamSubscription<SessionAckEvent>? _sessionAckSub;
+  StreamSubscription<ReportAmendedEvent>? _reportAmendedSub;
+  // True while a virtual start/stop request is in flight.
+  bool _manualBusy = false;
+  // Completed by EITHER _sessionAckSub (the device's own explicit ack) OR
+  // _sessionEventSub (the heartbeat-driven session_event) -- whichever
+  // confirms first -- with the message to show, for whichever start/stop
+  // request is currently showing a status dialog. See _waitForSessionAck.
+  //
+  // Two sources matter because the explicit ack is just one more MQTT
+  // publish that can itself get lost on a weak connection even when the
+  // original command got through and the device genuinely started/stopped
+  // -- jobs.tasks.retry_session_command only re-sends the ORIGINAL command,
+  // which doesn't help if it's the device's REPLY that went missing, not
+  // the request. The heartbeat is a second, independent, much more
+  // reliable confirmation signal (it's already flowing continuously once a
+  // session is running) that the dialog shouldn't block on waiting for the
+  // ack alone to answer "did it actually work?".
+  //
+  // Only one manual request is ever in flight at a time (guarded by
+  // _manualBusy / the confirm dialog before End Session), so a single field
+  // is enough; not scoped per-request.
+  Completer<String>? _pendingSessionConfirmation;
+  // Live count of backend retry attempts (jobs.tasks.retry_session_command)
+  // for whichever request _pendingSessionConfirmation is currently waiting on -- fed
+  // to _SessionRequestDialog so its "waiting for device" phase can show
+  // retry progress instead of a single static spinner for the whole ~20s
+  // window. Reset to 0 at the start of each _waitForSessionAck call.
+  final ValueNotifier<int> _retryAttempts = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -207,6 +265,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             }
             if (t.uptimeSec != null) _lastUptimeSec = t.uptimeSec;
 
+            // Card reported present again -- the alert is resolved, so the
+            // NEXT time it goes missing is a new episode, not a continuation
+            // of one the user already dismissed.
+            if (t.sdCardPresent == true) _sdCardAlertDismissed = false;
+
             latestTelemetry = t;
             // Cache last known values so they survive waiting/cooldown gaps
             if (t.flowRate != null) _lastFlowRate = t.flowRate;
@@ -255,6 +318,84 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         debugPrint('stack: $st');
       }
 
+      // ── Manual-mode session events (no-ops for Automatic devices, which
+      // never receive them) ──────────────────────────────────────────────
+      _sessionEventSub = svc.deviceSessionEventStream(normId).listen((e) {
+        if (!mounted) return;
+        // Re-resolve which session is running from the backend.
+        final uid = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+        ref.invalidate(eq_provs.controlUnitsProvider(uid));
+        ref.invalidate(activeSessionsListProvider);
+        if (e.event == 'START') {
+          // Wipe whatever GPS trail accumulated while idle before this
+          // session started -- otherwise it would all suddenly appear at
+          // once as soon as manualIdleBarVisible flips off and rendering
+          // resumes (positions was never cleared just for sitting idle,
+          // only on session end).
+          svc.clearCache(normId);
+          positions = svc.getPositions(normId);
+        }
+        setState(() => _manualBusy = false);
+        // See _pendingSessionConfirmation's doc comment: this heartbeat-
+        // driven signal confirms the request worked even if the device's
+        // own explicit ack packet (the other, less reliable path below)
+        // never arrives.
+        final pending = _pendingSessionConfirmation;
+        if (pending != null && !pending.isCompleted) {
+          pending.complete(e.event == 'START'
+              ? 'Session started on the device'
+              : 'Session stopped on the device');
+        }
+      });
+      _sessionAckSub = svc.deviceSessionAckStream(normId).listen((ack) {
+        if (!mounted) return;
+        if (ack.messageType == 'session_retry') {
+          // Live progress only -- not a real device confirmation, so it
+          // never completes _pendingSessionConfirmation or clears _manualBusy.
+          // Only ever bumps the counter UP: _waitForSessionAck's local
+          // timer is the primary, guaranteed driver (see its doc comment),
+          // this just lets a real broadcast pull it forward if it happens
+          // to arrive ahead of the next local tick, never backward.
+          final attempt = ack.attempt;
+          if (attempt != null && attempt > _retryAttempts.value) {
+            _retryAttempts.value = attempt;
+          }
+          return;
+        }
+        if (ack.messageType != 'session') return;
+        setState(() => _manualBusy = false);
+        final message = _sessionAckMessage(ack);
+        final pending = _pendingSessionConfirmation;
+        if (pending != null && !pending.isCompleted) {
+          // A status dialog (_waitForSessionAck) is actively waiting on
+          // this exact ack -- let it show the result instead of also
+          // popping a separate SnackBar with the same message.
+          pending.complete(message ?? 'The device responded.');
+        } else if (message != null) {
+          _messengerKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
+        }
+        // The device's own ack is the fastest signal that a session really
+        // started/ended — it can arrive well before the heartbeat that would
+        // otherwise create/close the JobSession row and fire session_event
+        // (deviceSessionEventStream above). Without this, the "Start
+        // Session" idle bar / "End session" menu item can keep showing the
+        // stale state for a while after the device has already confirmed.
+        const realTransition = {'session_started', 'session_closed', 'previous_session_closed'};
+        if (realTransition.contains(ack.status)) {
+          final uid = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+          ref.invalidate(eq_provs.controlUnitsProvider(uid));
+          ref.invalidate(activeSessionsListProvider);
+        }
+      });
+      _reportAmendedSub = svc.deviceReportAmendedStream(normId).listen((e) {
+        if (!mounted) return;
+        _messengerKey.currentState?.showSnackBar(SnackBar(
+          content: Text(e.note ?? 'A report was updated with recovered data.'),
+          duration: const Duration(seconds: 8),
+          showCloseIcon: true,
+        ));
+      });
+
       // ── Subscribe to cooldown / lifecycle status events ──────────────
       // Seed from existing state (in case cooldown started before screen mounted).
       final existing = svc.getCooldownState(normId);
@@ -294,20 +435,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               setState(() => _clearSessionState());
             } else {
               setState(() { latestTelemetry = null; });
-            }
-            if (state.reportId != null) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                _messengerKey.currentState?.showSnackBar(SnackBar(
-                  content: const Text('Report generated! Tap to view.'),
-                  duration: const Duration(seconds: 8),
-                  action: SnackBarAction(
-                    label: 'View',
-                    onPressed: () {
-                      appNavKey.currentState?.pushNamed('/job_reports');
-                    },
-                  ),
-                ));
-              });
             }
           } else {
             // New session starting — clear previous session's data.
@@ -360,6 +487,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   int _waitingSecondsRemaining() {
+    // Manual (device-managed) mode has no "waiting" concept at all -- the
+    // sprayer decides when it restarts, unlike Automatic's 60-min watchdog
+    // assumption. Automatic mode is completely unaffected: _isManualMode is
+    // only ever true for a device-managed control unit.
+    if (_isManualMode) return 0;
     if (widget.deviceId == null) return 0;
     if (_cooldownState?.isInCooldown ?? false) return 0;
     if (_cooldownState?.status == DeviceLifecycleStatus.offline) return 0;
@@ -507,8 +639,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     WidgetsBinding.instance.removeObserver(this);
     _deviceSub?.cancel();
     _cooldownSub?.cancel();
+    _sessionEventSub?.cancel();
+    _sessionAckSub?.cancel();
+    _reportAmendedSub?.cancel();
     _countdownTimer?.cancel();
     _cooldownBannerDismissTimer?.cancel();
+    _retryAttempts.dispose();
     super.dispose();
   }
 
@@ -557,7 +693,402 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     }
   }
 
+  // ── Manual (device-managed) mode helpers ───────────────────────────────────
+
+  // Shared with _sessionAckSub's listener (background SnackBar) and
+  // _waitForSessionAck (status-dialog confirmation) so both show the exact
+  // same wording for the same ack.
+  static String? _sessionAckMessage(SessionAckEvent ack) => switch (ack.status) {
+        'session_started' => 'Session started on the device',
+        'session_closed' => 'Session stopped on the device',
+        'previous_session_closed' => 'Previous session closed, new session started',
+        'already_inactive' => 'The device had no running session',
+        'invalid_payload' => 'The device rejected the command',
+        _ => null,
+      };
+
+  /// Waits for the device to confirm the start/stop request just sent --
+  /// via EITHER its explicit ack (_sessionAckSub) OR the heartbeat-driven
+  /// session_event (_sessionEventSub), whichever arrives first -- racing a
+  /// [timeout]. The single mechanism behind the status dialog's persistent
+  /// "waiting for device" phase for BOTH start and stop, so a request is
+  /// never silently assumed to have succeeded just because the SERVER
+  /// accepted it. Returns the confirmation message on success, or null if
+  /// neither signal arrives in time (the caller shows this as a dismissible
+  /// "no response" state, not a silent success).
+  Future<String?> _waitForSessionAck({
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    _retryAttempts.value = 0;
+    final completer = Completer<String>();
+    _pendingSessionConfirmation = completer;
+    // Ticks _retryAttempts on the backend's own known retry cadence
+    // (jobs.tasks.retry_session_command re-sends every 5s) instead of
+    // waiting for its session_retry broadcast to actually arrive and be
+    // parsed -- a healthy request usually resolves via the heartbeat
+    // fallback above within a second or two, well before the backend's own
+    // first retry at 5s would ever fire, so a WebSocket-broadcast-driven
+    // counter almost never got a chance to show anything under normal
+    // conditions. This local timer shows live progress deterministically,
+    // matching what the backend is doing regardless of whether its
+    // broadcast is received in time to be useful.
+    final localTicker = Timer.periodic(const Duration(seconds: 5), (_) {
+      _retryAttempts.value++;
+    });
+    try {
+      return await completer.future.timeout(timeout, onTimeout: () {
+        throw TimeoutException('no ack');
+      });
+    } on TimeoutException {
+      return null;
+    } finally {
+      localTicker.cancel();
+      if (identical(_pendingSessionConfirmation, completer)) {
+        _pendingSessionConfirmation = null;
+      }
+    }
+  }
+
+  /// Virtual start button. The session itself appears when the device confirms
+  /// (its START heartbeat / ack), so this only sends the request.
+  Future<void> _startManualSession() async {
+    final mac = widget.deviceId;
+    if (mac == null || mac.isEmpty || _manualBusy) return;
+    setState(() => _manualBusy = true);
+    await _sendWithStatusDialog(
+      sendingText: 'Sending start request to the device…',
+      action: () => ref.read(eq_provs.equipmentControllerProvider).startDeviceSession(mac),
+      sentTextBuilder: () =>
+          'Request reached the server. Waiting for the device to confirm…',
+      waitForDeviceConfirmation: _waitForSessionAck,
+    );
+    if (!mounted) return;
+    // _manualBusy is otherwise cleared by _sessionAckSub the moment the
+    // real ack arrives (possibly well before the dialog itself finishes its
+    // brief confirmation flash) -- this only covers the "gave up" paths
+    // (send failed, or the wait timed out) where no ack is ever coming.
+    setState(() => _manualBusy = false);
+  }
+
+  // True only for a request that never got an HTTP response at all (DNS/
+  // connect/timeout failure -- see ApiService, which throws with a null
+  // statusCode specifically for this case) -- i.e. a real internet problem,
+  // as opposed to the server responding with a rejection.
+  bool _isNetworkError(Object err) => err is ApiException && err.statusCode == null;
+
+  String _manualErrorText(Object err) {
+    if (_isNetworkError(err)) {
+      return "Couldn't reach the server. Check your internet connection and try again.";
+    }
+    if (err is ApiException && err.body != null) {
+      try {
+        final body = json.decode(err.body!);
+        if (body is Map) {
+          switch (body['code']?.toString()) {
+            case 'session_active':
+              return 'A session is already running on this device.';
+            case 'not_manual_mode':
+              return 'This device is not in Manual mode.';
+            case 'no_active_session':
+              return 'No session is running on this device.';
+          }
+          if (body['error'] != null) return body['error'].toString();
+        }
+      } catch (_) {}
+    }
+    return 'Request failed: $err';
+  }
+
+  /// Shows a "Sending…" dialog while [action] runs, so a slow or failed
+  /// request to start/stop a manual session is never silently invisible.
+  ///
+  /// [sentTextBuilder] returning null skips any confirmation phase and pops
+  /// `true` immediately (e.g. the cooldown banner for an Automatic end
+  /// already covers it). A non-null value is otherwise flashed briefly
+  /// before popping `true` -- UNLESS [waitForDeviceConfirmation] is also
+  /// given, in which case [sentTextBuilder]'s text becomes a *persistent*
+  /// "waiting for device" phase (spinner, stays open) instead of a brief
+  /// flash: the dialog then stays open until [waitForDeviceConfirmation]
+  /// resolves to the device's own real confirmation message (brief flash,
+  /// then pop `true`) or times out to null (a dismissible "no response"
+  /// state the user must actively close, rather than a silent assumed
+  /// success -- pops `false`).
+  ///
+  /// On failure it shows a clear, actionable message -- distinguishing "no
+  /// internet" from a server-side rejection -- with an OK button, and pops
+  /// `false` once dismissed.
+  Future<bool> _sendWithStatusDialog({
+    required String sendingText,
+    required Future<void> Function() action,
+    String? Function()? sentTextBuilder,
+    Future<String?> Function()? waitForDeviceConfirmation,
+  }) async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _SessionRequestDialog(
+        sendingText: sendingText,
+        action: action,
+        sentTextBuilder: sentTextBuilder,
+        waitForDeviceConfirmation: waitForDeviceConfirmation,
+        errorTextBuilder: _manualErrorText,
+        isNetworkError: _isNetworkError,
+        retryAttempts: _retryAttempts,
+      ),
+    );
+    return result ?? false;
+  }
+
+  /// Schedules a check of the top banner's actual rendered height (via
+  /// _topBannerKey) after this frame, updating _topBannerHeight if it
+  /// changed. Safe to call every build -- a no-op setState is never
+  /// triggered when the height is unchanged, so this can't loop.
+  void _scheduleTopBannerMeasurement() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final height = _topBannerKey.currentContext?.size?.height;
+      if (height != null && height != _topBannerHeight) {
+        setState(() => _topBannerHeight = height);
+      }
+    });
+  }
+
+  /// Base top offset (12) plus the top banner's actual measured height when
+  /// one is showing -- falls back to a reasonable guess (52) for the first
+  /// frame or two before the real measurement lands, same as the old fixed
+  /// "64" did, but self-corrects afterwards instead of staying wrong on
+  /// screens where the banner text wraps to an extra line.
+  double _lrCardTopOffset(bool topBannerVisible) {
+    if (!topBannerVisible) return 12;
+    return 12 + (_topBannerHeight ?? 52);
+  }
+
+  /// "Ongoing" status chip shown in the AppBar title itself (Manual mode,
+  /// session actually running) -- purely a status indicator, no action.
+  /// Start/End themselves are PopupMenuItems in the overlay menu (see
+  /// itemBuilder) so there's one consistent place ("the toggle button") for
+  /// the actions, with just the live state surfaced in the title.
+  Widget _buildTitleSessionStatus({required bool ongoing}) {
+    if (!ongoing) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.green.withAlpha(40),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.greenAccent, width: 1),
+      ),
+      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.circle, size: 8, color: Colors.greenAccent),
+        SizedBox(width: 4),
+        Text('Ongoing',
+            style: TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold)),
+      ]),
+    );
+  }
+
+  /// Requests a Stop on the device's active session (Manual) or ends it
+  /// outright (Automatic), after a confirmation dialog. Was previously
+  /// inline in the overlay menu's 'end_session' handler.
+  Future<void> _endSession({
+    required int? resolvedActiveSessionId,
+    required bool isManualMode,
+    required String? resolvedControlUnitName,
+  }) async {
+    debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
+    int? sessionIdToEnd = resolvedActiveSessionId;
+
+    if (sessionIdToEnd == null) {
+      debugPrint('MonitoringScreen: resolvedActiveSessionId is null, attempting fallback lookup...');
+      try {
+        // FORCE REFRESH to ensure we have the latest active sessions
+        final sessions = await ref.refresh(activeSessionsListProvider.future);
+        debugPrint('MonitoringScreen: Fetched ${sessions.length} active sessions');
+
+        if (sessions.isNotEmpty) {
+          final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
+          debugPrint('MonitoringScreen: Searching for MAC=$normId or jobId=${widget.jobId}');
+
+          for (final s in sessions) {
+            final sId = s['id'];
+            final sJob = s['job']?.toString();
+            final sMac = (s['control_unit_mac'] ?? s['mac_addr'] ?? s['mac_address'])?.toString();
+            final normSMac = sMac != null ? canonicalizeMac(sMac) : null;
+
+            debugPrint('MonitoringScreen: Checking session ID=$sId, Job=$sJob, MAC=$sMac (Norm=$normSMac)');
+
+            if (normId != null && normSMac == normId) {
+              debugPrint('MonitoringScreen: Match found by MAC!');
+              sessionIdToEnd = sId as int?;
+              break;
+            }
+
+            if (widget.jobId != null && sJob == widget.jobId) {
+              debugPrint('MonitoringScreen: Match found by JobID!');
+              sessionIdToEnd = sId as int?;
+              break;
+            }
+          }
+
+          // Absolute fallback: if only 1 active session in the whole system for this user, assume it's the one
+          if (sessionIdToEnd == null && sessions.length == 1) {
+            debugPrint('MonitoringScreen: Single session fallback used.');
+            sessionIdToEnd = sessions.first['id'] as int?;
+          }
+        } else {
+          debugPrint('MonitoringScreen: activeSessionsList returned empty.');
+        }
+      } catch (e) {
+        debugPrint('MonitoringScreen: Error during session fallback: $e');
+      }
+    } else {
+      debugPrint('MonitoringScreen: Using already resolvedActiveSessionId=$sessionIdToEnd');
+    }
+
+    if (sessionIdToEnd == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No active session ID found.')));
+      }
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              title: const Text('End Session?'),
+              content: Text(isManualMode
+                  ? 'Stop the running session on ${resolvedControlUnitName ?? "this device"}? The stop is sent to the sprayer and the session ends when it confirms.'
+                  : 'Are you sure you want to end the active session for ${resolvedControlUnitName ?? "this device"}?'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel')),
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('End')),
+              ],
+            ));
+    if (confirmed == true) {
+      final resolvedSessionId = sessionIdToEnd; // captured non-null for the closure below
+      final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
+      bool? endedNow;
+      final sent = await _sendWithStatusDialog(
+        sendingText: 'Sending stop request…',
+        action: () async {
+          endedNow = await ref
+              .read(eq_provs.equipmentControllerProvider)
+              .endSession(resolvedSessionId, deviceId: deviceMac);
+        },
+        // Automatic mode ends immediately -- the cooldown banner below is
+        // the real feedback, so no extra confirmation phase in the dialog
+        // (sentTextBuilder returning null skips waitForDeviceConfirmation
+        // entirely). Manual mode only ever *requests* the stop, so it gets
+        // the same persistent wait-for-device-ack treatment Start does.
+        sentTextBuilder: () => endedNow == false
+            ? 'Request reached the server. Waiting for the device to confirm…'
+            : null,
+        waitForDeviceConfirmation: _waitForSessionAck,
+      );
+      if (!sent || endedNow == null) return; // error already shown by the dialog
+
+      try {
+        // Manual mode: only a stop was *requested* — the sprayer
+        // closes its own session, so nothing is cleared or put into
+        // cooldown here; the session_event / report_ready that
+        // follows updates the screen.
+        if (!endedNow!) {
+          return;
+        }
+
+        // 1. Block telemetry on this screen until the cooldown ends
+        //    (cleared automatically when the cooldown stream emits an
+        //    out-of-cooldown state).
+        _sessionEndedManually = true;
+        if (deviceMac != null) {
+          final normMac = canonicalizeMac(deviceMac);
+          // Manual cooldown is 2 min on the backend.
+          _ignoredUntil[normMac] = DateTime.now()
+              .add(const Duration(minutes: 2));
+        }
+
+        // 2. Immediate UI feedback: clear local telemetry state
+        //    and transition to cooldown immediately without waiting
+        //    for the WS event (which may be delayed).
+        final optimisticCooldown = CooldownState(
+          deviceId: deviceMac ?? '',
+          status: DeviceLifecycleStatus.cooldown,
+          cooldownEnd: DateTime.now()
+              .toUtc()
+              .add(const Duration(minutes: 2)),
+          cooldownType: 'manual_end',
+        );
+        setState(() {
+          _clearSessionState();
+          _cooldownState = optimisticCooldown;
+          _startCountdownTimer();
+        });
+        // Push the same optimistic state into the
+        // shared service so other screens (e.g.
+        // Active Devices list) show the cooldown
+        // timer immediately too, instead of
+        // waiting for the backend's WS event.
+        if (deviceMac != null) {
+          ref
+              .read(telemetryServiceProvider)
+              .setCooldownStateOptimistic(
+                  optimisticCooldown);
+        }
+        _showCooldownBannerBriefly();
+
+        // 3. Clear service cache so device is no longer "active".
+        if (deviceMac != null) {
+          ref.read(telemetryServiceProvider).clearCache(deviceMac);
+        }
+
+        // The top cooldown banner already conveys this; no extra
+        // snackbar so we don't get duplicate notifications.
+      } catch (err) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('Error: $err')));
+        }
+      }
+    }
+  }
+
   // ── Cooldown banner widget ───────────────────────────────────────────────
+  Widget _buildSdCardMissingBanner() {
+    return Container(
+      color: Colors.red.shade800.withOpacity(0.95),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          const Icon(Icons.sd_card_alert, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'No SD card detected — this report may fail verification',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: () => setState(() => _sdCardAlertDismissed = true),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.close, color: Colors.white, size: 18),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCooldownBanner(CooldownState state) {
     final isManual = state.cooldownType == 'manual_end';
     final label = isManual
@@ -650,12 +1181,24 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   Widget build(BuildContext context) {
     final conn = ref.watch(isOnlineStreamProvider);
     final online = conn.asData?.value ?? true;
+    // Not read directly -- watching is what makes every heatmap on this
+    // screen repaint immediately after Profile > Settings > Heatmap colors
+    // is saved, since HeatmapColorUtils's static fields it updates don't
+    // trigger a rebuild on their own. See heatmap_preferences_service.dart.
+    ref.watch(heatmapThresholdsProvider);
 
     final userId = ref.read(authServiceProvider).currentUserId ?? 'demo_user';
     final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
     final sprayersAsync = ref.watch(eq_provs.sprayersProvider(userId));
     final plotsAsync = ref.watch(fm_providers.plotsListProvider(userId));
-    final metricsAsync = ref.watch(monitoringStreamProvider(userId));
+    // monitoringStreamProvider used to be watched here. It only ever emitted
+    // random dummy numbers (yield/moisture/...) under keys this screen never
+    // reads, yet a new emission every second rebuilt the whole screen --
+    // including recomputing every heatmap band -- which is what made it
+    // laggy on phones. Every read below is `m[...] ?? live telemetry`, so an
+    // empty map behaves identically.
+    const metricsAsync =
+        AsyncValue<Map<String, Map<String, dynamic>>>.data({});
     final sessionsAsync = ref.watch(activeSessionsListProvider);
     final sessionsLoaded = sessionsAsync is AsyncData;
 
@@ -665,9 +1208,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     // back to the generic label.
     String? resolvedControlUnitName;
     int? resolvedActiveSessionId;
+    bool isManualMode = false;
+    // True once a control unit matching widget.deviceId is found, whether or
+    // not it currently has an active session -- a device sitting idle (no
+    // session right now) is a normal, common state, not "we don't know which
+    // device this is". The job/only-active-session fallbacks below exist for
+    // when deviceId itself couldn't identify a control unit at all; gating
+    // them on resolvedActiveSessionId alone used to let them fire for an
+    // idle-but-identified device too, overwriting resolvedControlUnitName
+    // with a DIFFERENT device's session the moment exactly one happened to
+    // be active elsewhere in the account (e.g. right after this device's
+    // Manual-mode cooldown clears and it goes idle) -- the screen would
+    // appear to "switch devices" out from under the user.
+    bool matchedByDeviceId = false;
     try {
-      final cuList = controlUnitsAsync.asData?.value;
-      final sessions = sessionsAsync.asData?.value;
+      final cuList = controlUnitsAsync.valueOrNull;
+      final sessions = sessionsAsync.valueOrNull;
       final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
 
       if (normId != null && cuList != null) {
@@ -676,14 +1232,16 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           if (candidate.isNotEmpty && canonicalizeMac(candidate) == normId) {
             resolvedControlUnitName = cu.name;
             resolvedActiveSessionId = cu.activeSessionId;
+            isManualMode = cu.isManualSessionMode;
             _backendLastSeenAt = cu.lastSeenAt;
+            matchedByDeviceId = true;
             break;
           }
         }
       }
 
       // If still null, try to find by jobId if provided
-      if (resolvedActiveSessionId == null && widget.jobId != null && sessions != null) {
+      if (!matchedByDeviceId && resolvedActiveSessionId == null && widget.jobId != null && sessions != null) {
         for (final s in sessions) {
           if (s['job']?.toString() == widget.jobId) {
             resolvedActiveSessionId = s['id'] as int?;
@@ -694,12 +1252,68 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       }
 
       // If still null and there's only one active session, use it
-      if (resolvedActiveSessionId == null && sessions != null && sessions.length == 1) {
+      if (!matchedByDeviceId && resolvedActiveSessionId == null && sessions != null && sessions.length == 1) {
         final s = sessions.first;
         resolvedActiveSessionId = s['id'] as int?;
         resolvedControlUnitName = s['control_unit_name']?.toString() ?? s['control_unit']?.toString();
       }
     } catch (_) {}
+    _isManualMode = isManualMode;
+
+    // Manual, online, no session running -- shows a "Start session" item in
+    // the overlay menu (see itemBuilder).
+    final manualIdleBarVisible = isManualMode &&
+        resolvedActiveSessionId == null &&
+        latestTelemetry != null &&
+        !(_cooldownState?.isInCooldown ?? false) &&
+        !_cooldownBannerVisible;
+    final cooldownBannerShown = _cooldownBannerVisible &&
+        _cooldownState != null &&
+        _cooldownState!.status == DeviceLifecycleStatus.cooldown;
+    // Manual mode only: without a live heartbeat there's no way for a Stop
+    // command to actually reach the device, and no Force End escape hatch to
+    // fall back on if it never confirms -- so don't let the tap go nowhere.
+    // Automatic mode is unaffected: its End always closes the session in the
+    // DB immediately regardless of reachability.
+    final endSessionUnreachable = isManualMode && latestTelemetry == null;
+    final endSessionColor = endSessionUnreachable ? Colors.grey : Colors.redAccent;
+    // Manual, has a real active session, and not mid-cooldown -- drives the
+    // "Ongoing" + End control in the AppBar title.
+    final manualSessionOngoing = isManualMode &&
+        resolvedActiveSessionId != null &&
+        !(_cooldownState?.isInCooldown ?? false) &&
+        !cooldownBannerShown;
+    // Shared with the top-left L/R card and the legend below it, so both
+    // shift down instead of being covered when the cooldown banner is
+    // showing (the Manual idle bar used to be part of this too -- its
+    // Start control now lives in the title instead of a full-width banner).
+    final topBannerVisible = cooldownBannerShown;
+    // Manual, idle (no session) -- suppress trajectory/heatmap rendering so
+    // idle movement (e.g. driving to the field before starting) never gets
+    // drawn as spray coverage or an outside-plot line. Real coverage
+    // resumes the moment a session actually starts (Automatic is
+    // unaffected -- it has no idle-vs-session distinction here).
+    //
+    // Also drop backfilled points (a connectivity gap recovered via
+    // /backfill mid-session, then pulled in by restoreTrackFromBackend on
+    // reconnect/app-resume) from the LIVE view -- otherwise the whole gap
+    // suddenly draws as a heatmap/line the instant the app resyncs, even
+    // though nobody watched it happen live. The finished report is
+    // unaffected: it reads the session's full trajectory independently and
+    // already has its own Recovered-overlay treatment for these points.
+    final mapPositions = manualIdleBarVisible
+        ? const <Map<String, dynamic>>[]
+        : positions.where((p) => p['is_buffered'] != true).toList();
+    if (topBannerVisible) {
+      _scheduleTopBannerMeasurement();
+    } else if (_topBannerHeight != null) {
+      // Neither banner is showing anymore -- drop the stale measurement so
+      // the L/R card and legend snap back to their base offsets immediately
+      // instead of leaving a gap.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _topBannerHeight = null);
+      });
+    }
 
     // Compute simple state indicators from the latest telemetry snapshot.
     final t0 = latestTelemetry;
@@ -732,11 +1346,40 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                   ),
                 ),
           title: Row(children: [
-            Column(
+            Flexible(
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(resolvedControlUnitName ?? 'Data Monitoring', style: const TextStyle(fontSize: 18)),
+                Text(resolvedControlUnitName ?? 'Data Monitoring',
+                    style: const TextStyle(fontSize: 18),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1),
+                if (isManualMode)
+                  const Text('MANUAL',
+                      style: TextStyle(
+                          color: Colors.orangeAccent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold)),
+                // Deliberately NOT gated on resolvedActiveSessionId (the
+                // internal DB session id from the slower control-units REST
+                // provider) -- live telemetry with a real deviceSessionId
+                // commonly arrives before that list next refreshes, and
+                // requiring both left this label incorrectly hidden during
+                // that window even though a session was genuinely running.
+                if (isManualMode &&
+                    formatDeviceSessionLabel(widget.deviceId,
+                            latestTelemetry?.deviceSessionId) !=
+                        null)
+                  Text(
+                    formatDeviceSessionLabel(widget.deviceId,
+                        latestTelemetry?.deviceSessionId)!,
+                    style: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 9,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
                 if (_cooldownState?.isInCooldown ?? false)
                   Builder(builder: (_) {
                     final cd = _cooldownState!;
@@ -762,11 +1405,22 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     );
                   }),
               ],
+              ),
             ),
+            if (isManualMode && manualSessionOngoing) ...[
+              const SizedBox(width: 8),
+              _buildTitleSessionStatus(ongoing: manualSessionOngoing),
+            ],
             const Spacer(),
             if (latestTelemetry != null) ...[
-              // Signal/GPS status chip
-              Container(
+              // Signal/GPS status chip. Flexible+FittedBox so this shrinks
+              // instead of hard-overflowing on narrow phones now that the
+              // title row also carries the Manual session control.
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: Colors.black.withAlpha(220), // Darker, more solid for contrast
@@ -835,7 +1489,34 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                         inactiveColor: Colors.white.withAlpha(80),
                       );
                     }),
+                    // Battery — only on firmware that sends it yet (older
+                    // devices leave this null, so the chip just omits it
+                    // rather than showing a misleading 0.0V).
+                    if (latestTelemetry!.batteryVoltage != null) ...[
+                      const SizedBox(width: 16),
+                      Builder(builder: (ctx) {
+                        final v = latestTelemetry!.batteryVoltage!;
+                        final Color battColor = v >= 12.0
+                            ? Colors.green
+                            : (v >= 11.0 ? Colors.orange : Colors.red);
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.battery_std, color: battColor, size: 18),
+                            const SizedBox(width: 2),
+                            Text('${v.toStringAsFixed(1)}V',
+                                style: TextStyle(
+                                  color: battColor,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                )),
+                          ],
+                        );
+                      }),
+                    ],
                   ],
+                ),
+                  ),
                 ),
               )
             ]
@@ -861,6 +1542,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             // Default center if no plot polygon and no positions (e.g. session just ended)
             center = const LatLng(20.5937, 78.9629); // India center approx or last known
           }
+          final trackLayers = _memoTrackLayers(plot, mapPositions);
           return Stack(children: [
             FlutterMap(
               mapController: _mapController,
@@ -880,7 +1562,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                     urlTemplate: _isSatelliteView
                         ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
                         : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-                    subdomains: const ['a', 'b', 'c']),
+                    subdomains: const ['a', 'b', 'c'],
+                    // Cache-first -- any tiles already downloaded for this
+                    // plot (Fix: plot creation/edit screen's "Download for
+                    // offline") or simply seen before load instantly, no
+                    // network round-trip. See offline_tile_cache_service.dart.
+                    tileProvider: CachedTileProvider()),
                 if (plot.polygon.isNotEmpty)
                   PolygonLayer(polygons: [
                     Polygon(
@@ -893,41 +1580,13 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                             : Colors.red,
                         borderStrokeWidth: 2.5)
                   ]),
-                // Heatmap-colored coverage bands between rows.
-                // Only inside-plot positions fill the bands; color depends on
-                // the selected heatmap type.
-                if (plot.rowLines != null && plot.rowLines!.isNotEmpty) ...[
-                  PolygonLayer(
-                    polygons: RowLineCoverage.buildHeatmapCoverageBands(
-                      rowLines: plot.rowLines!,
-                      insidePoints: _buildInsideTrackPoints(positions, plot),
-                      rowSpacing: plot.rowSpacing ?? 3.0,
-                      heatmapType: _selectedHeatmap,
-                    ),
-                  ),
-                  PolylineLayer(
-                    polylines: RowLineCoverage.buildRowLines(
-                      rowLines: plot.rowLines!,
-                    ),
-                  ),
+                ...trackLayers,
+                if (widget.deviceId != null &&
+                    mapPositions.isNotEmpty &&
+                    _selectedHeatmap == HeatmapType.gps) ...[
+                  PolylineLayer(polylines: _buildGpsJumpLines(mapPositions)),
+                  MarkerLayer(markers: _buildGpsJumpMarkers(mapPositions)),
                 ],
-                // Outside-plot trajectory lines only (inside → no line, filled
-                // rows above handle the inside visualization).
-                if (widget.deviceId != null && positions.isNotEmpty) ...[
-                  PolylineLayer(
-                      polylines:
-                          _buildColoredPolylinesFromPositions(positions, plot)),
-                ],
-                if (widget.deviceId != null && positions.isNotEmpty)
-                  MarkerLayer(markers: [
-                    Marker(
-                        point: LatLng((positions.first['lat'] as num).toDouble(),
-                            (positions.first['lon'] as num).toDouble()),
-                        width: 36,
-                        height: 36,
-                        child: const Icon(Icons.flag,
-                            color: Colors.blue)),
-                  ]),
                 if (widget.deviceId != null && latestTelemetry != null)
                   MarkerLayer(markers: [
                     Marker(
@@ -935,9 +1594,15 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                             latestTelemetry!.lon ?? 0.0),
                         width: 40,
                         height: 40,
-                        child: Icon(Icons.location_on,
-                            color: _markerColorForTelemetry(latestTelemetry!,
-                              ref.watch(fm_providers.plotByIdProvider(latestTelemetry?.plot ?? widget.plotId ?? '')).valueOrNull))),
+                        // Fixed icon + colour regardless of PTO/auto-manual/
+                        // heatmap-type state -- this marks WHERE the sprayer
+                        // currently is, not what it's doing there (that's
+                        // what the PTO/Auto-Manual overlay chips above the
+                        // map are for). It used to recolour itself to match
+                        // whichever heatmap dot colour was selected, which
+                        // made it look like it was constantly changing state.
+                        child: const Icon(Icons.agriculture,
+                            color: AppTheme.primaryGreen, size: 32)),
                   ]),
               ],
             ),
@@ -1004,7 +1669,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               if (v == 'tank_level') {
                                 try {
                                   _toggleTankLevelOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -1014,7 +1679,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               } else if (v == 'spray_on_off') {
                                 try {
                                   _toggleSolenoidOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -1024,7 +1689,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               } else if (v == 'sensor_data') {
                                 try {
                                   _toggleSensorOverlay(
-                                      controlUnitsAsync.asData?.value,
+                                      controlUnitsAsync.valueOrNull,
                                       sprayersAsync.asData?.value,
                                       userId);
                                 } catch (e, st) {
@@ -1076,139 +1741,14 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     await _setSprayOutsidePlotOverride(sessionId, nextValue);
                                   }
                                 }
+                              } else if (v == 'start_session') {
+                                _startManualSession();
                               } else if (v == 'end_session') {
-                                debugPrint('MonitoringScreen: End Session requested. jobId=${widget.jobId}, deviceId=${widget.deviceId}');
-                                int? sessionIdToEnd = resolvedActiveSessionId;
-                                
-                                if (sessionIdToEnd == null) {
-                                  debugPrint('MonitoringScreen: resolvedActiveSessionId is null, attempting fallback lookup...');
-                                  try {
-                                    // FORCE REFRESH to ensure we have the latest active sessions
-                                    final sessions = await ref.refresh(activeSessionsListProvider.future);
-                                    debugPrint('MonitoringScreen: Fetched ${sessions.length} active sessions');
-
-                                    if (sessions.isNotEmpty) {
-                                      final normId = widget.deviceId != null ? canonicalizeMac(widget.deviceId!) : null;
-                                      debugPrint('MonitoringScreen: Searching for MAC=$normId or jobId=${widget.jobId}');
-
-                                      for (final s in sessions) {
-                                        final sId = s['id'];
-                                        final sJob = s['job']?.toString();
-                                        final sMac = (s['control_unit_mac'] ?? s['mac_addr'] ?? s['mac_address'])?.toString();
-                                        final normSMac = sMac != null ? canonicalizeMac(sMac) : null;
-                                        
-                                        debugPrint('MonitoringScreen: Checking session ID=$sId, Job=$sJob, MAC=$sMac (Norm=$normSMac)');
-
-                                        if (normId != null && normSMac == normId) {
-                                          debugPrint('MonitoringScreen: Match found by MAC!');
-                                          sessionIdToEnd = sId as int?;
-                                          break;
-                                        }
-
-                                        if (widget.jobId != null && sJob == widget.jobId) {
-                                          debugPrint('MonitoringScreen: Match found by JobID!');
-                                          sessionIdToEnd = sId as int?;
-                                          break;
-                                        }
-                                      }
-
-                                      // Absolute fallback: if only 1 active session in the whole system for this user, assume it's the one
-                                      if (sessionIdToEnd == null && sessions.length == 1) {
-                                        debugPrint('MonitoringScreen: Single session fallback used.');
-                                        sessionIdToEnd = sessions.first['id'] as int?;
-                                      }
-                                    } else {
-                                      debugPrint('MonitoringScreen: activeSessionsList returned empty.');
-                                    }
-                                  } catch (e) {
-                                    debugPrint('MonitoringScreen: Error during session fallback: $e');
-                                  }
-                                } else {
-                                  debugPrint('MonitoringScreen: Using already resolvedActiveSessionId=$sessionIdToEnd');
-                                }
-
-                                if (sessionIdToEnd == null) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No active session ID found.')));
-                                  }
-                                  return;
-                                }
-                                final confirmed = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                          title: const Text('End Session?'),
-                                          content: Text(
-                                              'Are you sure you want to end the active session for ${resolvedControlUnitName ?? "this device"}?'),
-                                          actions: [
-                                            TextButton(
-                                                onPressed: () => Navigator.pop(ctx, false),
-                                                child: const Text('Cancel')),
-                                            TextButton(
-                                                onPressed: () => Navigator.pop(ctx, true),
-                                                child: const Text('End')),
-                                          ],
-                                        ));
-                                if (confirmed == true) {
-                                  try {
-                                    final deviceMac = widget.deviceId ?? latestTelemetry?.deviceId;
-                                    await ref
-                                        .read(eq_provs.equipmentControllerProvider)
-                                        .endSession(sessionIdToEnd, deviceId: deviceMac);
-
-                                    // 1. Block telemetry on this screen until the cooldown ends
-                                    //    (cleared automatically when the cooldown stream emits an
-                                    //    out-of-cooldown state).
-                                    _sessionEndedManually = true;
-                                    if (deviceMac != null) {
-                                      final normMac = canonicalizeMac(deviceMac);
-                                      // Manual cooldown is 2 min on the backend.
-                                      _ignoredUntil[normMac] = DateTime.now()
-                                          .add(const Duration(minutes: 2));
-                                    }
-
-                                    // 2. Immediate UI feedback: clear local telemetry state
-                                    //    and transition to cooldown immediately without waiting
-                                    //    for the WS event (which may be delayed).
-                                    final optimisticCooldown = CooldownState(
-                                      deviceId: deviceMac ?? '',
-                                      status: DeviceLifecycleStatus.cooldown,
-                                      cooldownEnd: DateTime.now()
-                                          .toUtc()
-                                          .add(const Duration(minutes: 2)),
-                                      cooldownType: 'manual_end',
-                                    );
-                                    setState(() {
-                                      _clearSessionState();
-                                      _cooldownState = optimisticCooldown;
-                                      _startCountdownTimer();
-                                    });
-                                    // Push the same optimistic state into the
-                                    // shared service so other screens (e.g.
-                                    // Active Devices list) show the cooldown
-                                    // timer immediately too, instead of
-                                    // waiting for the backend's WS event.
-                                    if (deviceMac != null) {
-                                      ref
-                                          .read(telemetryServiceProvider)
-                                          .setCooldownStateOptimistic(
-                                              optimisticCooldown);
-                                    }
-                                    _showCooldownBannerBriefly();
-
-                                    // 3. Clear service cache so device is no longer "active".
-                                    if (deviceMac != null) {
-                                      ref.read(telemetryServiceProvider).clearCache(deviceMac);
-                                    }
-
-                                    // The top cooldown banner already conveys this; no extra
-                                    // snackbar so we don't get duplicate notifications.
-                                  } catch (err) {
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(SnackBar(content: Text('Error: $err')));
-                                    }
-                                  }
-                                }
+                                await _endSession(
+                                  resolvedActiveSessionId: resolvedActiveSessionId,
+                                  isManualMode: isManualMode,
+                                  resolvedControlUnitName: resolvedControlUnitName,
+                                );
                               }
                             },
                             itemBuilder: (ctx) => [
@@ -1275,17 +1815,44 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                   ),
                                 ),
                               ],
-                              if (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0) ...[
+                              // Start/End session actions live here (Manual
+                              // idle -> Start, either mode with something
+                              // running -> End) -- the title only shows the
+                              // live "Ongoing" state, not the actions
+                              // themselves.
+                              if (manualIdleBarVisible) ...[
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'start_session',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.play_arrow_rounded,
+                                          color: Colors.green, size: 20),
+                                      const SizedBox(width: 8),
+                                      const Text('Start session'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              if ((isManualMode && manualSessionOngoing) ||
+                                  (!isManualMode &&
+                                      (resolvedActiveSessionId != null || latestTelemetry != null || _waitingSecondsRemaining() > 0))) ...[
                                 const PopupMenuDivider(),
                                 PopupMenuItem(
                                   value: 'end_session',
+                                  enabled: !endSessionUnreachable,
                                   child: Row(
-                                    children: const [
-                                      Icon(Icons.stop_circle_outlined,
-                                          color: Colors.redAccent, size: 20),
-                                      SizedBox(width: 8),
-                                      Text('End active device',
-                                          style: TextStyle(color: Colors.redAccent)),
+                                    children: [
+                                      Icon(Icons.stop_circle_outlined, color: endSessionColor, size: 20),
+                                      const SizedBox(width: 8),
+                                      Text(isManualMode ? 'End session' : 'End active device'),
+                                      if (endSessionUnreachable) ...[
+                                        const SizedBox(width: 8),
+                                        const Tooltip(
+                                          message: 'Device unreachable — no live heartbeat',
+                                          child: Icon(Icons.info_outline, color: Colors.grey, size: 16),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),
@@ -1300,17 +1867,42 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               ),
             ),
 
+            // Manual idle state (Start Session) is a menu item in the
+            // overlay menu instead of a full-width banner here.
+
+            // ── SD card missing banner ──────────────────────────────────────
+            // Deliberately its own standalone widget, not a SnackBar -- the
+            // out-of-plot alert below already owns the single shared
+            // ScaffoldMessenger queue, and two alerts fighting over
+            // hideCurrentSnackBar() could silently hide the wrong one.
+            // Stacks below the cooldown banner (if one is showing) instead
+            // of overlapping it.
+            if (latestTelemetry?.sdCardPresent == false && !_sdCardAlertDismissed)
+              Positioned(
+                // Cooldown banner's own SafeArea already clears the status
+                // bar, so stacking directly below it (via its measured
+                // height) needs no extra top inset; standing alone, this
+                // banner clears the status bar itself instead.
+                top: cooldownBannerShown
+                    ? (_topBannerHeight ?? 52)
+                    : MediaQuery.of(context).padding.top,
+                left: 0,
+                right: 96,
+                child: _buildSdCardMissingBanner(),
+              ),
+
             // ── Cooldown / offline-pending banner ──────────────────────────
             // Shown briefly at the top when a cooldown begins, then auto
             // dismisses after 5 s. The cooldown itself keeps running.
-            if (_cooldownBannerVisible &&
-                _cooldownState != null &&
-                _cooldownState!.status == DeviceLifecycleStatus.cooldown)
+            if (cooldownBannerShown)
               Positioned(
                 top: 0,
                 left: 0,
-                right: 0,
-                child: _buildCooldownBanner(_cooldownState!),
+                right: 96,
+                child: KeyedSubtree(
+                  key: _topBannerKey,
+                  child: _buildCooldownBanner(_cooldownState!),
+                ),
               ),
 
             // ── Heatmap legend + active info card (left side, stacked) ───
@@ -1319,8 +1911,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
             // so the two never overlap on small screens. Only one of the
             // three overlays can be visible at a time (see the _toggle*
             // methods), so at most one extra card appears here.
+            // top offset shifts down when a top banner (idle bar / cooldown)
+            // is showing, so it stays stacked below the L/R card instead of
+            // being covered by the banner.
             Positioned(
-              top: 80,
+              top: _lrCardTopOffset(topBannerVisible) + 68,
               left: 12,
               child: SafeArea(
                 child: ConstrainedBox(
@@ -1338,11 +1933,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                             _showSolenoidOverlay ||
                             _showSensorOverlay)
                           const SizedBox(height: 8),
-                        _buildTankLevelOverlay(controlUnitsAsync.asData?.value,
+                        _buildTankLevelOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
-                        _buildSolenoidOverlay(controlUnitsAsync.asData?.value,
+                        _buildSolenoidOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
-                        _buildSensorOverlay(controlUnitsAsync.asData?.value,
+                        _buildSensorOverlay(controlUnitsAsync.valueOrNull,
                             sprayersAsync.asData?.value, userId),
                       ],
                     ),
@@ -1353,7 +1948,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
             // ── Top-left L/R nozzle indicators (left/right) ───────────────
             Positioned(
-              top: 12,
+              top: _lrCardTopOffset(topBannerVisible),
               left: 12,
               child: SafeArea(
                 child: Card(
@@ -1528,9 +2123,17 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                     ]),
                               ),
                             ),
-                            // Positioned blue dot that sits slightly above the left
-                            // edge of the card. The negative top offset allows it to
-                            // overlap above the card.
+                            // Positioned live-position badge that sits slightly above
+                            // the left edge of the card. The negative top offset
+                            // allows it to overlap above the card. A plain colour
+                            // dot here used to be Colors.blue, the same blue as the
+                            // GPS heatmap's "Auto" legend colour -- easy to mistake
+                            // for a heatmap swatch rather than an app UI element. A
+                            // dark badge with a white location icon can't be
+                            // confused with any heatmap's legend colours (GPS,
+                            // Speed, Spray and Left/Right between them already use
+                            // blue, grey, orange, red, yellow, green, purple, teal
+                            // and white).
                             const Positioned(
                               left: 12,
                               top: -25,
@@ -1539,8 +2142,10 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 height: 20,
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                      color: Colors.blue,
+                                      color: Colors.black87,
                                       shape: BoxShape.circle),
+                                  child: Icon(Icons.my_location,
+                                      size: 13, color: Colors.white),
                                 ),
                               ),
                             ),
@@ -1923,52 +2528,6 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     }
   }
 
-  // Returns the live marker color based on the currently selected heatmap type.
-  // Outside plot → red for all heatmaps.
-  // Inside plot  → color rules per heatmap spec.
-  Color _markerColorForTelemetry(TelemetryData t, PlotEntity? plot) {
-    try {
-      bool inPlot = t.deviceInPlot == true ||
-          (t.deviceInPlot?.toString().toLowerCase() == 'true') ||
-          (t.deviceInPlot?.toString() == '1');
-
-      if (plot?.polygon != null &&
-          plot!.polygon.length >= 3 &&
-          t.lat != null &&
-          t.lon != null) {
-        inPlot = _isPointInPolygon(LatLng(t.lat!, t.lon!), plot.polygon);
-      }
-
-      if (!inPlot) return Colors.red; // always red when outside
-
-      final ptoOn = t.ptoState == 1;
-      final isAuto = t.sprayMode == 1;
-
-      switch (_selectedHeatmap) {
-        case HeatmapType.gps:
-          // PTO off → orange, auto → blue, manual → grey
-          if (!ptoOn) return Colors.orange;
-          return isAuto ? Colors.blue : Colors.grey;
-
-        case HeatmapType.speed:
-          return HeatmapColorUtils.getColorForSpeed(t.speed);
-
-        case HeatmapType.spraying:
-          return HeatmapColorUtils.getColorForSpray(t.flowRate);
-
-        case HeatmapType.leftRight:
-          return HeatmapColorUtils.getColorForLeftRight(
-            leftOn: t.leftSolenoidState == 1,
-            rightOn: t.rightSolenoidState == 1,
-          );
-      }
-    } catch (e, st) {
-      debugPrint('MonitoringScreen._markerColorForTelemetry error: $e');
-      debugPrint('stack: $st');
-    }
-    return Colors.red;
-  }
-
   void _goToCurrentPosition() {
     try {
       LatLng? target;
@@ -2047,17 +2606,88 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   // Build inside-plot HeatmapTrackPoints from raw position list.
+  // Heatmap bands / outside-track line / start flag, rebuilt only when what
+  // they draw actually changed. build() also runs for cooldown ticks, banner
+  // measurements, menu toggles etc., and recomputing + re-laying-out several
+  // hundred polygons for each of those made the screen stutter on phones.
+  // Returning the SAME widget instances when nothing changed also lets
+  // Flutter skip rebuilding those subtrees.
+  Object? _trackLayersKey;
+  List<Widget> _trackLayersCache = const [];
+
+  List<Widget> _memoTrackLayers(
+      PlotEntity plot, List<Map<String, dynamic>> mapPositions) {
+    final key = Object.hash(
+      identityHashCode(plot),
+      identityHashCode(plot.rowLines),
+      plot.rowSpacing,
+      _selectedHeatmap,
+      widget.deviceId != null,
+      mapPositions.length,
+      mapPositions.isEmpty ? null : mapPositions.last['timestamp'],
+    );
+    if (key == _trackLayersKey) return _trackLayersCache;
+    _trackLayersKey = key;
+    // Populated (as a side effect) by buildHeatmapCoverageBands below with
+    // every point plotted on a best-guess row while a genuine row-to-row
+    // transition was still unconfirmed -- see buildForcedTransitionMarkers.
+    final forcedTransitionPoints = <LatLng>[];
+    _trackLayersCache = [
+      // Heatmap-colored coverage bands between rows. Only inside-plot
+      // positions fill the bands; color depends on the selected heatmap.
+      if (plot.rowLines != null && plot.rowLines!.isNotEmpty) ...[
+        PolygonLayer(
+          polygons: RowLineCoverage.buildHeatmapCoverageBands(
+            rowLines: plot.rowLines!,
+            insidePoints: _buildInsideTrackPoints(mapPositions, plot),
+            rowSpacing: plot.rowSpacing ?? 3.0,
+            heatmapType: _selectedHeatmap,
+            polygon: plot.polygon,
+            forcedTransitionPoints: forcedTransitionPoints,
+          ),
+        ),
+        PolylineLayer(
+          polylines: RowLineCoverage.buildRowLines(rowLines: plot.rowLines!),
+        ),
+        MarkerLayer(
+          markers: RowLineCoverage.buildForcedTransitionMarkers(
+              forcedTransitionPoints),
+        ),
+      ],
+      // Outside-plot trajectory lines only (inside -> no line, the filled
+      // rows above handle the inside visualization).
+      if (widget.deviceId != null && mapPositions.isNotEmpty) ...[
+        PolylineLayer(
+            polylines: _buildColoredPolylinesFromPositions(mapPositions, plot)),
+      ],
+      if (widget.deviceId != null && mapPositions.isNotEmpty)
+        MarkerLayer(markers: [
+          Marker(
+              point: LatLng((mapPositions.first['lat'] as num).toDouble(),
+                  (mapPositions.first['lon'] as num).toDouble()),
+              width: 36,
+              height: 36,
+              child: const Icon(Icons.flag, color: Colors.blue)),
+        ]),
+    ];
+    return _trackLayersCache;
+  }
+
   List<HeatmapTrackPoint> _buildInsideTrackPoints(
       List<Map<String, dynamic>> positions, PlotEntity? plot) {
     final result = <HeatmapTrackPoint>[];
+    LatLng? prevPoint;
+    DateTime? prevTime;
     for (final p in positions) {
       final lat = (p['lat'] as num?)?.toDouble();
       final lon = (p['lon'] as num?)?.toDouble();
       if (lat == null || lon == null) continue;
+      final point = LatLng(lat, lon);
+      final time = DateTime.tryParse(p['timestamp']?.toString() ?? '');
 
       bool isInPlot;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
-        isInPlot = _isPointInPolygon(LatLng(lat, lon), plot.polygon);
+        isInPlot = _isPointInPolygon(point, plot.polygon);
       } else {
         final devInPlot = p['device_in_plot'];
         isInPlot = devInPlot == true ||
@@ -2066,6 +2696,25 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       }
 
       if (!isInPlot) continue;
+
+      // Whether this point is an implausible GPS jump from the PREVIOUS
+      // in-plot point in this list -- own list, own consecutive pairs, so a
+      // stretch driven outside the plot in between (a real gap, not a
+      // glitch) doesn't get mistaken for one.
+      final isJump = prevPoint != null &&
+          prevTime != null &&
+          time != null &&
+          GpsJumpDetector.isJump(prevPoint, prevTime, point, time);
+      // A connectivity gap (device silent for a while, then reconnects) --
+      // only meaningful here, live: there's no recovered path for the gap
+      // yet, unlike a completed report (which has the real /backfill data
+      // by the time it's viewed) -- see HeatmapTrackPoint.
+      // isLongGapFromPrevious.
+      final isLongGap = prevTime != null &&
+          time != null &&
+          GpsJumpDetector.isLongGap(prevTime, time);
+      prevPoint = point;
+      prevTime = time;
 
       final pto = p['pto'];
       final ptoOn =
@@ -2081,7 +2730,7 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
           (rightSol is int ? rightSol == 1 : rightSol.toString() == '1');
 
       result.add(HeatmapTrackPoint(
-        position: LatLng(lat, lon),
+        position: point,
         isInPlot: true,
         ptoOn: ptoOn,
         isAuto: isAuto,
@@ -2089,6 +2738,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         flowRate: (p['flow_rate'] as num?)?.toDouble(),
         leftSolenoidOn: leftOn,
         rightSolenoidOn: rightOn,
+        isJumpFromPrevious: isJump,
+        isLongGapFromPrevious: isLongGap,
       ));
     }
     return result;
@@ -2140,6 +2791,8 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
     // like a scribble of disconnected dashes instead of one line.
     const maxJitterStreak = 2;
     int inPlotStreak = 0;
+    LatLng? prevPoint;
+    DateTime? prevTime;
 
     for (var i = 0; i < pos.length; i++) {
       final p = pos[i];
@@ -2147,6 +2800,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
       final lon = (p['lon'] as num?)?.toDouble();
       if (lat == null || lon == null) continue;
       final point = LatLng(lat, lon);
+      final time = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+
+      // An implausible GPS jump (see GpsJumpDetector) is drawn separately
+      // (see _buildGpsJumpLines), never as part of this continuous track --
+      // breaks the line here instead of bridging straight across it.
+      final isJump = prevPoint != null &&
+          prevTime != null &&
+          time != null &&
+          GpsJumpDetector.isJump(prevPoint, prevTime, point, time);
+      prevPoint = point;
+      prevTime = time;
+      if (isJump) flush();
 
       bool isInPlot;
       if (plot?.polygon != null && plot!.polygon.length >= 3) {
@@ -2204,6 +2869,40 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
 
     flush();
     return result;
+  }
+
+  // Pink dashed segments marking implausible GPS jumps in the raw track --
+  // shown on the GPS heatmap only, regardless of plot membership. See
+  // GpsJumpDetector.
+  List<Polyline> _buildGpsJumpLines(List<Map<String, dynamic>> pos) {
+    final points = <LatLng>[];
+    final times = <DateTime>[];
+    for (final p in pos) {
+      final lat = (p['lat'] as num?)?.toDouble();
+      final lon = (p['lon'] as num?)?.toDouble();
+      final t = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+      if (lat == null || lon == null || t == null) continue;
+      points.add(LatLng(lat, lon));
+      times.add(t);
+    }
+    return GpsJumpDetector.buildJumpLines(points, times);
+  }
+
+  // Constant-size endpoint markers for every jump in _buildGpsJumpLines --
+  // see GpsJumpDetector.buildJumpMarkers's doc comment for why the line
+  // alone isn't enough (a short jump shrinks to nothing at normal zoom).
+  List<Marker> _buildGpsJumpMarkers(List<Map<String, dynamic>> pos) {
+    final points = <LatLng>[];
+    final times = <DateTime>[];
+    for (final p in pos) {
+      final lat = (p['lat'] as num?)?.toDouble();
+      final lon = (p['lon'] as num?)?.toDouble();
+      final t = DateTime.tryParse(p['timestamp']?.toString() ?? '');
+      if (lat == null || lon == null || t == null) continue;
+      points.add(LatLng(lat, lon));
+      times.add(t);
+    }
+    return GpsJumpDetector.buildJumpMarkers(points, times);
   }
 
   // Small "Flow / L-R" switch shown only while a spray-related heatmap is
@@ -2268,18 +2967,20 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         ];
         break;
       case HeatmapType.speed:
+        final labels = HeatmapColorUtils.speedLegendLabels();
         items = [
-          _legendItem('0-3 km/h', Colors.yellow),
-          _legendItem('3-7 km/h', Colors.green),
-          _legendItem('7+ km/h', Colors.red),
+          _legendItem(labels[0], Colors.yellow),
+          _legendItem(labels[1], Colors.green),
+          _legendItem(labels[2], Colors.red),
         ];
         break;
       case HeatmapType.spraying:
+        final labels = HeatmapColorUtils.sprayLegendLabels();
         items = [
-          _legendItem('0 L/m (No Spray)', Colors.white),
-          _legendItem('1-70 L/m', Colors.blue.shade800),
-          _legendItem('70-200 L/m', Colors.red.shade400),
-          _legendItem('>200 L/m', Colors.black),
+          _legendItem(labels[0], Colors.white),
+          _legendItem(labels[1], Colors.blue.shade800),
+          _legendItem(labels[2], Colors.red.shade400),
+          _legendItem(labels[3], Colors.black),
         ];
         break;
       case HeatmapType.leftRight:
@@ -2372,5 +3073,206 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
         ],
       ),
     );
+  }
+}
+
+enum _SessionRequestPhase { sending, waitingForDevice, sent, error, timedOut }
+
+/// Runs [action] behind a modal dialog so a manual start/stop request is
+/// never silently invisible while the server call is in flight -- see
+/// _MonitoringScreenState._sendWithStatusDialog. Phases: a spinner while
+/// [action] runs; then either (a) nothing further ([sentTextBuilder]
+/// returns null -- pops immediately), (b) a brief checkmark flash
+/// ([sentTextBuilder] non-null, no [waitForDeviceConfirmation] given), or
+/// (c) a *persistent* "waiting for device" spinner using [sentTextBuilder]'s
+/// text, staying open until [waitForDeviceConfirmation] resolves -- a real
+/// device ack (brief checkmark flash, then pops `true`) or a timeout (a
+/// blocking "no response" state the user must dismiss, pops `false`) --
+/// so a request is never assumed to have succeeded just because the SERVER
+/// accepted it. Or a blocking error message (network vs server-rejected,
+/// via [isNetworkError]/[errorTextBuilder]) that stays until the user taps
+/// OK.
+class _SessionRequestDialog extends StatefulWidget {
+  final String sendingText;
+  final Future<void> Function() action;
+  final String? Function()? sentTextBuilder;
+  final Future<String?> Function()? waitForDeviceConfirmation;
+  final String Function(Object err) errorTextBuilder;
+  final bool Function(Object err) isNetworkError;
+  // Live backend retry-attempt count (jobs.tasks.retry_session_command) for
+  // the waitingForDevice phase -- lets the dialog show "retried 2x" instead
+  // of a single static spinner for the whole ~20s wait-for-ack window.
+  final ValueListenable<int>? retryAttempts;
+
+  const _SessionRequestDialog({
+    required this.sendingText,
+    required this.action,
+    required this.errorTextBuilder,
+    required this.isNetworkError,
+    this.sentTextBuilder,
+    this.waitForDeviceConfirmation,
+    this.retryAttempts,
+  });
+
+  @override
+  State<_SessionRequestDialog> createState() => _SessionRequestDialogState();
+}
+
+class _SessionRequestDialogState extends State<_SessionRequestDialog> {
+  _SessionRequestPhase _phase = _SessionRequestPhase.sending;
+  String _sentText = '';
+  String _waitingText = '';
+  String _errorText = '';
+  bool _errorIsNetwork = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    try {
+      await widget.action();
+      if (!mounted) return;
+      final sentText = widget.sentTextBuilder?.call();
+      if (sentText == null) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      if (widget.waitForDeviceConfirmation != null) {
+        setState(() {
+          _phase = _SessionRequestPhase.waitingForDevice;
+          _waitingText = sentText;
+        });
+        final confirmed = await widget.waitForDeviceConfirmation!();
+        if (!mounted) return;
+        if (confirmed != null) {
+          setState(() {
+            _phase = _SessionRequestPhase.sent;
+            _sentText = confirmed;
+          });
+          await Future.delayed(const Duration(milliseconds: 1200));
+          if (mounted) Navigator.of(context).pop(true);
+        } else {
+          setState(() => _phase = _SessionRequestPhase.timedOut);
+        }
+        return;
+      }
+      setState(() {
+        _phase = _SessionRequestPhase.sent;
+        _sentText = sentText;
+      });
+      await Future.delayed(const Duration(milliseconds: 1200));
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _SessionRequestPhase.error;
+        _errorText = widget.errorTextBuilder(err);
+        _errorIsNetwork = widget.isNetworkError(err);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_phase) {
+      case _SessionRequestPhase.sending:
+        return AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: Text(widget.sendingText)),
+            ],
+          ),
+        );
+      case _SessionRequestPhase.waitingForDevice:
+        return AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_waitingText),
+                    if (widget.retryAttempts != null)
+                      ValueListenableBuilder<int>(
+                        valueListenable: widget.retryAttempts!,
+                        builder: (context, attempt, _) {
+                          if (attempt <= 0) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Retrying… (attempt $attempt)',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: Theme.of(context).hintColor),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      case _SessionRequestPhase.sent:
+        return AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green),
+              const SizedBox(width: 16),
+              Expanded(child: Text(_sentText)),
+            ],
+          ),
+        );
+      case _SessionRequestPhase.error:
+        return AlertDialog(
+          title: Text(_errorIsNetwork ? 'No connection' : 'Request failed'),
+          content: Text(_errorText),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      case _SessionRequestPhase.timedOut:
+        return AlertDialog(
+          title: const Text('No response from device'),
+          content: const Text(
+              "The server accepted the request, but the device hasn't "
+              'confirmed it yet — it may be offline or have a weak '
+              'connection. Check the device before trying again.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+    }
   }
 }

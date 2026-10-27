@@ -1,12 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/equipment_providers.dart';
 import '../../../plot_mapping/presentation/providers/plot_providers.dart'
     as fm_providers;
 import 'package:simdaas/core/services/auth_service.dart';
-import 'package:simdaas/core/services/api_exception.dart';
-import 'package:simdaas/core/utils/api_error.dart';
-import 'package:simdaas/core/utils/api_error_ui.dart';
+import 'package:simdaas/core/services/background_save_service.dart';
+import 'package:simdaas/core/widgets/buffered_save_banner.dart';
 
 class CreateControlUnitScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic>? existingData;
@@ -44,7 +44,7 @@ class _CreateControlUnitScreenState
   late final List<GlobalKey<FormState>> _pageKeys;
   final _pageController = PageController();
   int _currentPage = 0;
-  bool _isSaving = false;
+  final _bufferedSave = BufferedSaveController();
   // Unit selectors for meter inputs
   String _lidarNozzleDistanceUnit = 'm';
   String _mountHeightUnit = 'm';
@@ -99,6 +99,7 @@ class _CreateControlUnitScreenState
     _leftBackOffset.dispose();
     _flowPulseCount.dispose();
     _pageController.dispose();
+    _bufferedSave.dispose();
     super.dispose();
   }
 
@@ -161,6 +162,9 @@ class _CreateControlUnitScreenState
   void initState() {
     super.initState();
     _pageKeys = List.generate(9, (_) => GlobalKey<FormState>());
+    _bufferedSave.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   Widget _buildOffsetPage({
@@ -994,7 +998,7 @@ class _CreateControlUnitScreenState
                     Expanded(
                       flex: 2,
                       child: ElevatedButton(
-                        onPressed: _isSaving
+                        onPressed: _bufferedSave.isSaving
                             ? null
                             : () async {
                                 // validate current page
@@ -1040,7 +1044,6 @@ class _CreateControlUnitScreenState
                                 }
 
                                 // final save
-                                setState(() => _isSaving = true);
                                 final ctrl =
                                     ref.read(equipmentControllerProvider);
                                 final navigator = Navigator.of(context);
@@ -1146,7 +1149,19 @@ class _CreateControlUnitScreenState
                                   'flowPulseCount': parsedFlowPulseCount,
                                 };
 
-                                try {
+                                // Buffered save: fire the actual network call
+                                // through BackgroundSaveService instead of
+                                // awaiting it directly here. That service
+                                // runs the save to completion (and shows the
+                                // eventual result via a global snackbar)
+                                // regardless of whether this screen is still
+                                // around to see it -- so a slow/hung request
+                                // no longer looks like nothing happened if
+                                // the user gets impatient and navigates away
+                                // (or the OS backgrounds the app) before it
+                                // resolves.
+                                _bufferedSave.start();
+                                Future<void> saveAction() async {
                                   if (_isEditing &&
                                       (widget.existingData?.containsKey('id') ==
                                           true)) {
@@ -1169,34 +1184,25 @@ class _CreateControlUnitScreenState
                                     data['id'] = id;
                                     await ctrl.add(data);
                                   }
-
-                                  if (!mounted) return;
-                                  if (mounted) {
-                                    setState(() => _isSaving = false);
-                                  }
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                          content: Text(_isEditing
-                                              ? 'Control unit updated'
-                                              : 'Control unit added')));
-                                  await Future.delayed(
-                                      const Duration(milliseconds: 700));
-                                  if (!mounted) return;
-                                  navigator.pop(true);
-                                } catch (e) {
-                                  if (e is ApiException) {
-                                    final err = ApiError.fromResponse(
-                                        e.statusCode, e.body);
-                                    showApiErrorSnackBar(context, err);
-                                  } else {
-                                    showGenericErrorSnackBar(
-                                        context, e.toString());
-                                  }
-                                } finally {
-                                  if (mounted) {
-                                    setState(() => _isSaving = false);
-                                  }
                                 }
+
+                                unawaited(
+                                    ref.read(backgroundSaveServiceProvider).run(
+                                          action: saveAction,
+                                          successMessage: _isEditing
+                                              ? 'Control unit updated'
+                                              : 'Control unit added',
+                                          onSuccess: () async {
+                                            if (mounted) navigator.pop(true);
+                                          },
+                                          onSettled: [
+                                            () {
+                                              if (mounted) {
+                                                _bufferedSave.finish();
+                                              }
+                                            },
+                                          ],
+                                        ));
                               },
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -1213,15 +1219,17 @@ class _CreateControlUnitScreenState
               ),
             ],
           ),
-          if (_isSaving)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black45,
-                child: const Center(
-                  child: CircularProgressIndicator(),
-                ),
-              ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: BufferedSaveBanner(
+              controller: _bufferedSave,
+              label: _isEditing
+                  ? 'Updating control unit…'
+                  : 'Adding control unit…',
             ),
+          ),
         ]),
       ),
     );

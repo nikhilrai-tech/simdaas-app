@@ -26,7 +26,6 @@ import 'features/equipments/presentation/screens/create_control_unit_screen.dart
 import 'features/equipments/presentation/screens/create_tractor_screen.dart';
 import 'features/equipments/presentation/screens/create_sprayer_screen.dart';
 import 'features/home/presentation/screens/technician_dashboard_screen.dart';
-import 'features/home/presentation/screens/job_reports_screen.dart';
 import 'features/home/presentation/screens/settings_screen.dart';
 import 'features/auth/presentation/screens/register_screen.dart';
 import 'features/auth/presentation/screens/verify_email_screen.dart';
@@ -40,6 +39,7 @@ import 'core/services/connectivity_service.dart';
 import 'debug/telemetry_debug_screen.dart';
 import 'core/services/auth_service.dart';
 import 'core/utils/mac_utils.dart';
+import 'core/config.dart';
 import 'features/equipments/presentation/providers/equipment_providers.dart'
     as eq_provs;
 
@@ -84,10 +84,22 @@ class MyApp extends StatelessWidget {
       builder: (context, child) {
         final mq = MediaQuery.of(context);
         final clampedScale = mq.textScaler.scale(1.0).clamp(0.9, 1.15);
-        return MediaQuery(
+        Widget result = MediaQuery(
           data: mq.copyWith(textScaler: TextScaler.linear(clampedScale)),
           child: child!,
         );
+        // Visible in every build tapped from apiBaseUrl == staging (see
+        // core/config.dart) so a build handed to the testing team is never
+        // mistaken for prod — no separate flag to remember to flip.
+        if (isStaging) {
+          result = Banner(
+            message: 'STAGING',
+            location: BannerLocation.topEnd,
+            color: Colors.deepOrange,
+            child: result,
+          );
+        }
+        return result;
       },
       // Use AuthGate as home so we can wait for persisted tokens to load
       // Wrap with WillPopScope to confirm app exit when at the root.
@@ -141,7 +153,6 @@ class MyApp extends StatelessWidget {
         '/job_supervisor_dashboard': (ctx) =>
             const JobSupervisorDashboardScreen(),
         '/technician_dashboard': (ctx) => const TechnicianDashboardScreen(),
-        '/job_reports': (ctx) => const JobReportsScreen(),
         '/settings': (ctx) => const SettingsScreen(),
         '/map': (ctx) => const MapScreen(),
         '/jobs': (ctx) => const JobPlannerScreen(),

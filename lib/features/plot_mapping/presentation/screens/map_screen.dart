@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -10,8 +11,12 @@ import 'package:simdaas/core/services/geocoding_service.dart';
 import 'package:latlong2/latlong.dart';
 // plot providers/imports moved to helper where needed
 import '../providers/map_state_providers.dart';
+import '../providers/plot_providers.dart';
 // Plot model and auth service used in save helper
 import 'package:simdaas/core/services/location_service.dart';
+import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/services/background_save_service.dart';
+import 'package:simdaas/core/widgets/buffered_save_banner.dart';
 import '../../data/models/plot_model.dart';
 import '../widgets/plot_save_sheet.dart';
 import '../widgets/map_layers.dart';
@@ -42,6 +47,7 @@ class MapScreen extends ConsumerStatefulWidget {
 
 class _MapScreenState extends ConsumerState<MapScreen> {
   final MapController _mapController = MapController();
+  final _bufferedSave = BufferedSaveController();
   bool _locatingDevice = false;
   bool _isSatelliteView = true;
   // Latest fix from MapLayers' own live MyLocationLayer stream. Reused by
@@ -180,6 +186,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void initState() {
     super.initState();
+    _bufferedSave.addListener(() {
+      if (mounted) setState(() {});
+    });
     // Initialize polygon state
     try {
       if (widget.initialPoints != null && widget.initialPoints!.isNotEmpty) {
@@ -237,6 +246,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     _searchCtrl.removeListener(_onSearchChanged);
     _searchCtrl.dispose();
     _searchFocus.dispose();
+    _bufferedSave.dispose();
     super.dispose();
   }
 
@@ -400,38 +410,76 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // update stored points to normalized
     ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
 
-    final savedPlot =
-        await showPlotSaveSheet(context, ref, normalizedPoints, _computeAreaHa, existingPlot: widget.existingPlot);
-    if (savedPlot != null && mounted) {
-      final goToRowLine = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('AB Line Plotting'),
-          content: const Text(
-              'Plot saved successfully. Do you want to proceed to AB line (row line) plotting now?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Skip'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Proceed'),
-            ),
-          ],
+    final pendingModel = await showPlotSaveSheet(
+        context, ref, normalizedPoints, _computeAreaHa,
+        existingPlot: widget.existingPlot);
+    if (pendingModel == null) return;
+
+    final repo = ref.read(plotRepoProvider);
+    final isEditing = widget.existingPlot != null;
+    var savedModel = pendingModel;
+
+    // Buffered save: see BackgroundSaveService's doc comment. The AB-line
+    // prompt below only fires from onSuccess, using the confirmed saved
+    // model -- if the user discards/navigates away before the save actually
+    // completes, they simply don't get prompted here (never builds row
+    // lines on a plot that may not have been created).
+    _bufferedSave.start();
+    Future<void> saveAction() async {
+      if (isEditing) {
+        await repo.updatePlot(pendingModel);
+      } else {
+        savedModel = await repo.addPlot(pendingModel);
+      }
+    }
+
+    unawaited(ref.read(backgroundSaveServiceProvider).run(
+      action: saveAction,
+      successMessage: isEditing ? 'Plot updated' : 'Plot saved',
+      onSuccess: () async {
+        final currentUserId =
+            ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+        ref.invalidate(plotsListProvider(currentUserId));
+        if (!mounted) return;
+        await _promptRowLinePlotting(savedModel);
+      },
+      onSettled: [
+        () {
+          if (mounted) _bufferedSave.finish();
+        },
+      ],
+    ));
+  }
+
+  Future<void> _promptRowLinePlotting(PlotModel savedPlot) async {
+    final goToRowLine = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('AB Line Plotting'),
+        content: const Text(
+            'Plot saved successfully. Do you want to proceed to AB line (row line) plotting now?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Skip'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Proceed'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (goToRowLine == true) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => RowLineScreen(plot: savedPlot),
         ),
       );
-      if (!mounted) return;
-      if (goToRowLine == true) {
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => RowLineScreen(plot: savedPlot),
-          ),
-        );
-        if (mounted) Navigator.of(context).pop(true);
-      } else {
-        Navigator.of(context).pop(true);
-      }
+      if (mounted) Navigator.of(context).pop(true);
+    } else {
+      if (mounted) Navigator.of(context).pop(true);
     }
   }
 
@@ -783,7 +831,18 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                   ]),
                 ),
               ),
-            )
+            ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: BufferedSaveBanner(
+              controller: _bufferedSave,
+              label: widget.existingPlot != null
+                  ? 'Updating plot…'
+                  : 'Saving plot…',
+            ),
+          ),
         ],
       ),
       floatingActionButton: Column(
@@ -791,7 +850,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         children: [
           FloatingActionButton(
             heroTag: 'save_plot',
-            onPressed: _saveField,
+            onPressed: _bufferedSave.isSaving ? null : _saveField,
             child: const Icon(Icons.save),
           ),
           const SizedBox(height: 12),
@@ -816,6 +875,16 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             mini: true,
             child: const Icon(Icons.remove),
           ),
+          const SizedBox(height: 8),
+          FloatingActionButton(
+            heroTag: 'download_offline',
+            tooltip: 'Download map for offline use',
+            mini: true,
+            onPressed: points.length < 3
+                ? null
+                : () => _showDownloadOfflineSheet(context, points),
+            child: const Icon(Icons.download_for_offline_outlined),
+          ),
           const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: 'locate_device',
@@ -830,6 +899,165 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // "Download for offline" -- lets a layer-select + tile-count-estimate +
+  // progress sheet (same shape as the reference app's own "select the
+  // layer to download" flow) pre-fetch every tile covering this plot's
+  // drawn boundary (padded so panning slightly past the edge still hits
+  // cache) at a zoom range useful for field work. Once downloaded, this
+  // same plot loads instantly on this screen and on the monitoring screen
+  // (both now use CachedTileProvider) even with no/poor connectivity.
+  static const int _offlineMinZoom = 15;
+  static const int _offlineMaxZoom = 20;
+
+  Future<void> _showDownloadOfflineSheet(BuildContext context, List<LatLng> points) async {
+    final bounds = paddedBoundsForPoints(points);
+    bool wantSatellite = true;
+    bool wantNormal = true;
+    bool downloading = false;
+    bool cancelled = false;
+    OfflineDownloadProgress? progress;
+
+    List<String> templatesFor(bool sat, bool normal) => [
+          if (sat) 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+          if (normal) 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+        ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isDismissible: true,
+      enableDrag: !downloading,
+      builder: (sheetContext) {
+        return StatefulBuilder(builder: (sheetContext, setSheetState) {
+          final selectedCount = (wantSatellite ? 1 : 0) + (wantNormal ? 1 : 0);
+          final tileEstimate = selectedCount == 0
+              ? 0
+              : estimateTileCount(
+                  bounds: bounds,
+                  minZoom: _offlineMinZoom,
+                  maxZoom: _offlineMaxZoom,
+                  templateCount: selectedCount,
+                );
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Download map for offline use',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      if (!downloading)
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'So this plot loads instantly here and on the monitoring '
+                    'screen, even with no signal in the field.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    value: wantSatellite,
+                    onChanged: downloading
+                        ? null
+                        : (v) => setSheetState(() => wantSatellite = v ?? false),
+                    title: const Text('Satellite'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  CheckboxListTile(
+                    value: wantNormal,
+                    onChanged: downloading
+                        ? null
+                        : (v) => setSheetState(() => wantNormal = v ?? false),
+                    title: const Text('Normal'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    selectedCount == 0
+                        ? 'Pick at least one map type'
+                        : '~$tileEstimate tiles to check/download',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: (selectedCount == 0 || downloading)
+                          ? null
+                          : () async {
+                              setSheetState(() => downloading = true);
+                              final result = await downloadRegion(
+                                bounds: bounds,
+                                minZoom: _offlineMinZoom,
+                                maxZoom: _offlineMaxZoom,
+                                urlTemplates: templatesFor(wantSatellite, wantNormal),
+                                isCancelled: () => cancelled,
+                                onProgress: (p) {
+                                  progress = p;
+                                  setSheetState(() {});
+                                },
+                              );
+                              if (!sheetContext.mounted) return;
+                              Navigator.of(sheetContext).pop();
+                              if (context.mounted) {
+                                showSuccessSnackBar(
+                                  context,
+                                  result.failed > 0
+                                      ? 'Downloaded for offline use (${result.failed} tiles failed, will retry live)'
+                                      : 'Downloaded for offline use',
+                                );
+                              }
+                            },
+                      child: downloading
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(progress == null
+                                    ? 'Starting…'
+                                    : '${progress!.done} / ${progress!.total}'),
+                              ],
+                            )
+                          : const Text('Download'),
+                    ),
+                  ),
+                  if (downloading) ...[
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton(
+                        onPressed: () {
+                          cancelled = true;
+                        },
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        });
+      },
     );
   }
 

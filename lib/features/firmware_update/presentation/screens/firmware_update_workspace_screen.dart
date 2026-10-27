@@ -33,6 +33,10 @@ class _FirmwareUpdateWorkspaceScreenState
     extends ConsumerState<FirmwareUpdateWorkspaceScreen> {
   final _ssidController = TextEditingController();
   final _passwordController = TextEditingController();
+  // WiFi/Cellular choice for the Update button -- WiFi stays the default
+  // (unchanged behaviour); only the hardware spec's new cellular path
+  // needs this at all.
+  String _transport = 'wifi';
 
   @override
   void dispose() {
@@ -109,23 +113,49 @@ class _FirmwareUpdateWorkspaceScreenState
         );
       case FirmwareUpdateStage.downloading:
         return _ProgressView(percent: state.progressPercent ?? 0);
+      case FirmwareUpdateStage.cellularDownloading:
+        return const _CellularDownloadingView();
       case FirmwareUpdateStage.verifying:
         return _VerifyingView(secondsRemaining: state.verifyCountdownSeconds);
       case FirmwareUpdateStage.connectionLost:
-        return _ConnectionLostView(controller: controller);
+        return _ConnectionLostView(
+          controller: controller,
+          title: 'Connection Lost',
+          message: 'Connection lost. Please make sure the device and '
+              'Wi-Fi hotspot are turned on and placed close to each other.',
+        );
+      case FirmwareUpdateStage.cellularUnavailable:
+        return _ConnectionLostView(
+          controller: controller,
+          title: 'Cellular Unavailable',
+          message: state.errorReason ??
+              'Cellular connection unavailable. Please try again.',
+        );
       case FirmwareUpdateStage.waitingToConnect:
         return const _WaitingView();
       case FirmwareUpdateStage.idle:
-        return _HandshakeView(state: state, controller: controller);
+        return _HandshakeView(
+          state: state,
+          controller: controller,
+          transport: _transport,
+          onTransportChanged: (t) => setState(() => _transport = t),
+        );
     }
   }
 }
 
 class _HandshakeView extends StatelessWidget {
-  const _HandshakeView({required this.state, required this.controller});
+  const _HandshakeView({
+    required this.state,
+    required this.controller,
+    required this.transport,
+    required this.onTransportChanged,
+  });
 
   final FirmwareUpdateState state;
   final FirmwareUpdateController controller;
+  final String transport;
+  final ValueChanged<String> onTransportChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -165,9 +195,31 @@ class _HandshakeView extends StatelessWidget {
                     ? 'Retry'
                     : 'Check Live Version'),
           ),
+        if (canUpdate) ...[
+          const SizedBox(height: 16),
+          const Text('Update via', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'wifi', label: Text('WiFi'), icon: Icon(Icons.wifi)),
+              ButtonSegment(
+                  value: 'cellular', label: Text('Cellular'), icon: Icon(Icons.cell_tower)),
+            ],
+            selected: {transport},
+            onSelectionChanged: (s) => onTransportChanged(s.first),
+          ),
+          if (transport == 'cellular') ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Cellular downloads are slower (around 2 minutes) and show no '
+              'progress percentage while downloading.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
+        ],
         const SizedBox(height: 12),
         ElevatedButton(
-          onPressed: canUpdate ? controller.startUpdate : null,
+          onPressed: canUpdate ? () => controller.startUpdate(transport: transport) : null,
           child: const Text('Update'),
         ),
       ],
@@ -313,6 +365,31 @@ class _ProgressView extends StatelessWidget {
   }
 }
 
+class _CellularDownloadingView extends StatelessWidget {
+  const _CellularDownloadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Downloading firmware over cellular…', style: TextStyle(fontSize: 16)),
+          SizedBox(height: 8),
+          Text(
+            'This can take a couple of minutes — no progress percentage is '
+            'available for cellular downloads.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _VerifyingView extends StatelessWidget {
   const _VerifyingView({required this.secondsRemaining});
   final int secondsRemaining;
@@ -381,8 +458,14 @@ class _TerminalBanner extends StatelessWidget {
 }
 
 class _ConnectionLostView extends StatelessWidget {
-  const _ConnectionLostView({required this.controller});
+  const _ConnectionLostView({
+    required this.controller,
+    required this.title,
+    required this.message,
+  });
   final FirmwareUpdateController controller;
+  final String title;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
@@ -391,9 +474,8 @@ class _ConnectionLostView extends StatelessWidget {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Connection Lost'),
-          content: const Text('Connection lost. Please make sure the device and '
-              'Wi-Fi hotspot are turned on and placed close to each other.'),
+          title: Text(title),
+          content: Text(message),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
           ],
