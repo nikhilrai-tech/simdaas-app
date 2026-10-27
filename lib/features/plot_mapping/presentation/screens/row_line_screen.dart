@@ -406,7 +406,20 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Row Lines — ${widget.plot.name}'),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Row Lines — ${widget.plot.name}'),
+            Text(
+              '${_rowLines.length} row${_rowLines.length == 1 ? '' : 's'}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).appBarTheme.foregroundColor?.withValues(alpha: 0.75) ??
+                        Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
         actions: [
           if (_isSaving)
             const Padding(
