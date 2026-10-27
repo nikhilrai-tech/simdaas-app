@@ -28,4 +28,6 @@ class EquipmentRepositoryImpl {
   Future<Map<String, dynamic>> stopDeviceSession(String mac) => remote.stopDeviceSession(mac);
   Future<void> pushDemoConfig(String id, {required bool demo}) =>
       remote.pushDemoConfig(id, demo: demo);
+  Future<String> getDemoConfigStatus(String id) =>
+      remote.getDemoConfigStatus(id);
 }
