@@ -60,6 +60,10 @@ dependencies:
   pdf: ^3.11.3
   share_plus: ^13.3.1
   path_provider: ^2.1.5
+
+  # Plot boundary/row-line KML export+import (lib/features/plot_mapping/presentation/utils/plot_kml.dart)
+  xml: ^6.5.0
+  file_picker: ^13.3.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
