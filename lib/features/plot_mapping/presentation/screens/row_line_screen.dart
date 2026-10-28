@@ -510,11 +510,18 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        // Taller than the default 56dp toolbar to give the row-count
+        // subtitle room without clipping at larger OS text-scale settings.
+        toolbarHeight: 64,
         title: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Row Lines — ${widget.plot.name}'),
+            Text(
+              'Row Lines — ${widget.plot.name}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             Text(
               '${_rowLines.length} row${_rowLines.length == 1 ? '' : 's'}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
