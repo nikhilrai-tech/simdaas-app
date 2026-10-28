@@ -106,8 +106,13 @@ class CorridorStrip {
   /// lateral bounds, or null where the strip is outside the plot. When the
   /// plot is concave the cross-section can have several pieces; the one that
   /// overlaps the strip most is used.
-  ({double lo, double hi})? clippedAt(double s) {
-    final lo = _lo(s), hi = _hi(s);
+  ({double lo, double hi})? clippedAt(double s) => _clipLateral(s, _lo(s), _hi(s));
+
+  /// Like [clippedAt], but against the given lateral bounds (absolute, same
+  /// axis as [_lo]/[_hi]) instead of the strip's own full width — used to cut
+  /// a data-bounded paint width (see [clippedBoundsAt]) by the plot boundary
+  /// the same way the full-width strip already is.
+  ({double lo, double hi})? _clipLateral(double s, double lo, double hi) {
     final xs = <double>[];
     final n = _polyS.length;
     for (var i = 0; i < n; i++) {
@@ -131,6 +136,15 @@ class CorridorStrip {
     return best;
   }
 
+  /// Like [clippedAt] but bounded to [loOffset]..[hiOffset] (signed, relative
+  /// to the centre line — same convention as [signedOffset]) instead of the
+  /// strip's own full geometric width. Still clipped by the plot boundary.
+  ({double lo, double hi})? clippedBoundsAt(
+      double s, double loOffset, double hiOffset) {
+    final mid = _midL(s);
+    return _clipLateral(s, mid + loOffset, mid + hiOffset);
+  }
+
   /// Corners of the slice of the strip between axial fractions [t0]..[t1],
   /// following the two boundary lines and cut by the plot boundary. Null if
   /// the slice lies entirely outside the plot.
@@ -147,6 +161,40 @@ class CorridorStrip {
       point(s1, c1.hi),
       point(s0, c0.hi),
     ];
+  }
+
+  /// Like [bandCorners], but the lateral span at each end is bounded to
+  /// [loOffset]..[hiOffset] (signed, relative to the centre line) instead of
+  /// the strip's full geometric width — used to paint only as far as the
+  /// sprayer's track actually reached (plus a margin), not the whole real
+  /// gap between two rows. Null if the slice lies entirely outside the plot.
+  List<LatLng>? boundedBandCorners(
+      double t0, double t1, double loOffset, double hiOffset) {
+    final s0 = sMin + t0 * length, s1 = sMin + t1 * length;
+    var c0 = clippedBoundsAt(s0, loOffset, hiOffset);
+    var c1 = clippedBoundsAt(s1, loOffset, hiOffset);
+    if (c0 == null && c1 == null) return null;
+    c0 ??= c1;
+    c1 ??= c0;
+    return [
+      point(s0, c0!.lo),
+      point(s1, c1!.lo),
+      point(s1, c1.hi),
+      point(s0, c0.hi),
+    ];
+  }
+
+  /// Signed lateral offset of [p] from the corridor's centre line, on the
+  /// same axis as [project] but WITHOUT the abs() — negative toward boundary
+  /// A, positive toward boundary B. Only used to bound how much of the
+  /// corridor actually gets painted (see [boundedBandCorners]); row
+  /// crediting (which corridor/row a point belongs to) always uses
+  /// [project]'s unsigned distance and is completely unaffected by this.
+  double signedOffset(LatLng p) {
+    final q = plane.toXY(p);
+    final s = q.x * ux + q.y * uy;
+    final l = q.x * nx + q.y * ny;
+    return l - _midL(s.clamp(sMin, sMax));
   }
 
   /// Width (m) of the strip inside the plot at axial position [s].
