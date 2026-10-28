@@ -169,6 +169,11 @@ class EquipmentController {
     await repo.pushDemoConfig(id, demo: demo);
   }
 
+  Future<String> getDemoConfigStatus(String id) async {
+    final repo = ref.read(equipmentRepoProvider);
+    return repo.getDemoConfigStatus(id);
+  }
+
   Future<void> setSprayOutsidePlotOverride(int sessionId, {required bool allow, String? pin}) async {
     final repo = ref.read(equipmentRepoProvider);
     await repo.setSprayOutsidePlotOverride(sessionId, allow: allow, pin: pin);
