@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/offline_tile_cache_service.dart';
@@ -20,6 +22,7 @@ import 'package:simdaas/core/widgets/buffered_save_banner.dart';
 import '../../data/models/plot_model.dart';
 import '../widgets/plot_save_sheet.dart';
 import '../widgets/map_layers.dart';
+import '../utils/plot_kml.dart';
 import 'row_line_screen.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
@@ -483,6 +486,90 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
+  /// Create a new plot straight from a KML file's boundary (+ row lines, if
+  /// present) instead of manually tapping out the polygon and (optionally)
+  /// generating AB lines. Only available while creating a brand new plot
+  /// (widget.existingPlot == null) -- importing onto an EXISTING plot isn't
+  /// offered here; see plot_details_screen.dart's own Export-only menu.
+  Future<void> _importFromKml() async {
+    try {
+      final picked = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['kml'],
+      );
+      if (picked.isEmpty) return; // user cancelled
+
+      final kmlText = utf8.decode(await picked.first.readAsBytes());
+      final parsed = parsePlotKml(kmlText);
+      if (parsed.polygon == null || parsed.polygon!.length < 3) {
+        if (mounted) {
+          showGenericErrorSnackBar(
+              context, 'This KML has no plot boundary to import.');
+        }
+        return;
+      }
+      if (!mounted) return;
+
+      final normalizedPoints = _normalizePolygon(parsed.polygon!);
+      ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
+
+      // Carries the imported row lines through showPlotSaveSheet (it copies
+      // existingPlot?.rowLines onto the PlotModel it returns) without
+      // pre-filling the name/area/etc. fields a REAL existing plot would --
+      // this one only exists to smuggle rowLines through, it's never saved
+      // itself and its id is never looked at beyond the sheet's own
+      // duplicate-name check (which it can't collide with).
+      final importedRowsCarrier = parsed.rowLines.isEmpty
+          ? null
+          : PlotModel(
+              id: '__kml_import__',
+              name: '',
+              polygon: normalizedPoints,
+              rowLines: parsed.rowLines,
+            );
+
+      final pendingModel = await showPlotSaveSheet(
+          context, ref, normalizedPoints, _computeAreaHa,
+          existingPlot: importedRowsCarrier);
+      if (pendingModel == null) return;
+
+      final repo = ref.read(plotRepoProvider);
+      var savedModel = pendingModel;
+
+      _bufferedSave.start();
+      unawaited(ref.read(backgroundSaveServiceProvider).run(
+        action: () async {
+          savedModel = await repo.addPlot(pendingModel);
+        },
+        successMessage: 'Plot imported from KML',
+        onSuccess: () async {
+          final currentUserId =
+              ref.read(authServiceProvider).currentUserId ?? 'demo_user';
+          ref.invalidate(plotsListProvider(currentUserId));
+          if (!mounted) return;
+          if (parsed.rowLines.isEmpty) {
+            // Boundary only -- fall back to the normal AB-line prompt so
+            // the plot still ends up with row lines one way or another.
+            await _promptRowLinePlotting(savedModel);
+          } else {
+            // Boundary AND row lines both came from the file -- nothing
+            // left to do.
+            Navigator.of(context).pop(true);
+          }
+        },
+        onSettled: [
+          () {
+            if (mounted) _bufferedSave.finish();
+          },
+        ],
+      ));
+    } on FormatException catch (e) {
+      if (mounted) showGenericErrorSnackBar(context, e.message);
+    } catch (e) {
+      if (mounted) showGenericErrorSnackBar(context, 'Failed to import KML — $e');
+    }
+  }
+
   Future<void> _centerOnCurrentLocation() async {
     if (_locatingDevice) return;
 
@@ -573,6 +660,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       appBar: AppBar(
         title: const Text('Map Plot'),
         actions: [
+          if (widget.existingPlot == null)
+            IconButton(
+              tooltip: 'Import from KML',
+              icon: const Icon(Icons.file_upload_outlined),
+              onPressed: _importFromKml,
+            ),
           IconButton(
             tooltip: 'Clear all vertices',
             icon: const Icon(Icons.delete_sweep),
