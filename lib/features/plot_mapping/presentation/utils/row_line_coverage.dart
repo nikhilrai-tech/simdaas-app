@@ -264,6 +264,9 @@ class RowLineCoverage {
       }
 
       if (strip != null) {
+        // "Between two real rows" -- both A and B are genuine rows, so the
+        // paint loop's row-choosing logic (see buildHeatmapCoverageBands'
+        // isRibbon/anchorSide comments) is left to pick based on the data.
         corridors.add(_corridorFromStrip(strip));
         continue;
       }
@@ -313,20 +316,28 @@ class RowLineCoverage {
       // Only when the outermost ENTRY is a real row: a deleted outermost row
       // leaves an unknown gap, which stays uncredited like any other.
       if (firstReal == 0 && secondReal != null) {
-        corridors.add(_corridorFromStrip(CorridorStrip.outer(
+        final outerStrip = CorridorStrip.outer(
             plane: plane,
             polygon: polygon!,
             row: rowLines[0],
-            otherRow: rowLines[secondReal])));
+            otherRow: rowLines[secondReal]);
+        if (outerStrip != null) {
+          corridors.add(_corridorFromStrip(outerStrip,
+              anchorSide: _stripRowSide(outerStrip)));
+        }
       }
       if (lastReal == rowLines.length - 1 &&
           beforeLast != null &&
           lastReal != firstReal) {
-        corridors.add(_corridorFromStrip(CorridorStrip.outer(
+        final outerStrip = CorridorStrip.outer(
             plane: plane,
             polygon: polygon!,
             row: rowLines[lastReal!],
-            otherRow: rowLines[beforeLast])));
+            otherRow: rowLines[beforeLast]);
+        if (outerStrip != null) {
+          corridors.add(_corridorFromStrip(outerStrip,
+              anchorSide: _stripRowSide(outerStrip)));
+        }
       }
     }
 
@@ -789,54 +800,75 @@ class RowLineCoverage {
         final t1 = (i + 1) / numSub;
         final List<LatLng> corners;
         if (geo.strip != null) {
-          // Bound the painted width to where the sprayer's track actually
-          // reached in this sub-band (subBandMinOffset/MaxOffset), plus a
-          // per-row margin on each side -- not the corridor's full real gap
-          // between its two bounding rows. Without this, a corridor whose
-          // real gap is much wider than the configured row spacing (two
-          // ordinary rows that happen to be unusually far apart, or a
-          // deleted-row remnant) painted its ENTIRE width for any stretch
-          // the sprayer passed through, even when the track stayed close to
-          // one row the whole time -- see report #9945 (gap 9.18m vs
-          // configured 3.56m spacing; paint reached ~4.6m from the row the
-          // sprayer never left). rowSpacing/2 as the margin matches the
-          // half-width already used elsewhere for a single real row with no
-          // neighbour to measure against (_edgeCorridorGeometry/_ribbonCorridor),
-          // so a normal corridor (real gap ≈ configured spacing, swept down
-          // the middle) still paints its full width exactly as before --
-          // this only narrows painting where the real gap is wider than
-          // what was actually driven.
-          //
-          // The margin is NOT re-clamped to this corridor's own half-width.
-          // A credited point's offset is already <= halfWidthAt(t) (that's
-          // the crediting tolerance from the main sweep above), so when the
-          // sprayer actually drove right along one of this corridor's two
-          // bounding rows -- the normal case -- that row's own line sits AT
-          // the clamp boundary, and clamping the margin there gave that row
-          // paint on only the inward (toward the other row) side, none on
-          // its outward side (away from the other row) at all: the band
-          // stopped dead exactly on the row's line instead of straddling it
-          // like a real spray swath. Clamping only ever mattered for the
-          // margin's reach, not the observed offsets themselves (those are
-          // already bounded); dropping it lets the margin extend naturally
-          // past a row actually hugged, while the data-driven bound on the
-          // OTHER (unreached, e.g. toward a distant neighbor) side still
-          // prevents the #9945 over-paint -- only the plot's own polygon
-          // boundary (via clippedBoundsAt) still limits how far this goes.
-          final minOff = subBandMinOffset[ri][i];
-          final maxOff = subBandMaxOffset[ri][i];
-          final margin = rowSpacing / 2;
-          final halfW = geo.halfWidthAt((t0 + t1) / 2);
-          var loOff = minOff.isFinite ? minOff - margin : -halfW;
-          var hiOff = maxOff.isFinite ? maxOff + margin : halfW;
-          if (hiOff < loOff) {
-            final tmp = loOff;
-            loOff = hiOff;
-            hiOff = tmp;
+          final strip = geo.strip!;
+          if (geo.isRibbon) {
+            // A single real row with no second row to choose between --
+            // its own geometric width already IS rowSpacing, centred
+            // exactly on that row. Never re-anchor/narrow it by the
+            // row-choosing logic below, which only makes sense where there
+            // are genuinely two different rows to pick from.
+            final c = strip.bandCorners(t0, t1);
+            if (c == null) continue;
+            corners = c;
+          } else {
+            // Between two real rows (or an outer strip, row + plot
+            // boundary): bound the painted width to WHICHEVER ROW the
+            // credited points actually leaned toward, anchored to that
+            // row's own geometric position -- not the raw (GPS-jittery)
+            // observed offset, and not the corridor's full real gap.
+            //
+            // An earlier version of this fix bounded painting to the raw
+            // observed offset +/- a margin. That fixed the #9945 over-paint
+            // (reaching toward a distant, un-driven neighbor) but could
+            // still paint visibly OFF either row's own mapped line --
+            // wherever the noisy GPS track happened to sit, which looked
+            // like the band was floating "in the corridor" instead of on a
+            // row. Snapping to the nearer row's own geometric position
+            // instead keeps the result aligned with the row lines
+            // themselves, as a farmer actually expects, while still
+            // bounding reach toward an unreached neighbor the same way.
+            final minOff = subBandMinOffset[ri][i];
+            final maxOff = subBandMaxOffset[ri][i];
+            final margin = rowSpacing / 2;
+            final halfW = geo.halfWidthAt((t0 + t1) / 2);
+            double loOff, hiOff;
+            if (!minOff.isFinite) {
+              loOff = -halfW;
+              hiOff = halfW; // shouldn't happen; safe fallback
+            } else if (minOff < 0 && maxOff > 0) {
+              // Credited points genuinely straddle both rows' sides (a
+              // dense, multi-directional sweep, not a single pass) --
+              // union the two independently, same as bounding by the raw
+              // observed extent plus margin on each end. Applies equally
+              // to an outer strip genuinely swept from the row to the
+              // plot boundary.
+              loOff = minOff - margin;
+              hiOff = maxOff + margin;
+            } else {
+              // Every credited point stayed on one side (however much raw
+              // GPS jitter/offset it had) -- anchor exactly to that side's
+              // own mapped row position. Between two real rows, that's
+              // whichever side the data leaned toward (either is a real
+              // row). For an outer strip (anchorSide set), boundary A is
+              // ALWAYS the real row and the other side is just the plot
+              // wall -- always anchor there regardless of which raw sign
+              // the data happened to have (e.g. a point merely landing
+              // closer to the wall than the row due to noise must still
+              // paint around the row, not the wall).
+              final side = geo.anchorSide ?? (maxOff <= 0 ? -1.0 : 1.0);
+              final rowOff = side * halfW;
+              loOff = rowOff - margin;
+              hiOff = rowOff + margin;
+            }
+            if (hiOff < loOff) {
+              final tmp = loOff;
+              loOff = hiOff;
+              hiOff = tmp;
+            }
+            final c = strip.boundedBandCorners(t0, t1, loOff, hiOff);
+            if (c == null) continue; // slice lies outside the plot
+            corners = c;
           }
-          final c = geo.strip!.boundedBandCorners(t0, t1, loOff, hiOff);
-          if (c == null) continue; // slice lies outside the plot
-          corners = c;
         } else if (geo.hasRows) {
           // Bounded by the two actual row lines -- the band follows the
           // corridor's real (tapering) outline instead of a rectangle
@@ -1041,7 +1073,8 @@ class RowLineCoverage {
     return LatLng(py / mPerDeg, px / (cosLat * mPerDeg));
   }
 
-  static _CorridorGeometry? _corridorFromStrip(CorridorStrip? strip) {
+  static _CorridorGeometry? _corridorFromStrip(CorridorStrip? strip,
+      {bool isRibbon = false, double? anchorSide}) {
     if (strip == null) return null;
     final numSub = (strip.length / subSegmentLengthMeters)
         .ceil()
@@ -1054,6 +1087,8 @@ class RowLineCoverage {
       halfWidthEnd: strip.halfWidthEnd,
       numSub: numSub,
       strip: strip,
+      isRibbon: isRibbon,
+      anchorSide: anchorSide,
     );
   }
 
@@ -1061,12 +1096,23 @@ class RowLineCoverage {
   /// of the plot (the polygon-aware counterpart of [_edgeCorridorGeometry]).
   static _CorridorGeometry? _ribbonCorridor(MetricPlane plane,
       List<LatLng> polygon, List<LatLng> row, double halfWidth) {
-    return _corridorFromStrip(CorridorStrip.ribbon(
-        plane: plane,
-        polygon: polygon,
-        row: row,
-        halfWidthMeters: halfWidth));
+    return _corridorFromStrip(
+        CorridorStrip.ribbon(
+            plane: plane,
+            polygon: polygon,
+            row: row,
+            halfWidthMeters: halfWidth),
+        isRibbon: true);
   }
+
+  /// Which side (-1.0 or +1.0, [CorridorStrip.signedOffset]'s convention)
+  /// boundary A sits on. For an outer strip ([CorridorStrip.outer])
+  /// boundary A is always the real row, so this tells the paint loop which
+  /// side to always anchor to, regardless of which side the data leans
+  /// toward (the other side there is just the plot boundary, never a
+  /// second row worth anchoring to).
+  static double _stripRowSide(CorridorStrip strip) =>
+      strip.aStart <= strip.bStart ? -1.0 : 1.0;
 
   /// A narrow corridor hugging a single real row line's own position,
   /// row_spacing wide — used where the row on the other side is missing
@@ -1201,6 +1247,26 @@ class _CorridorGeometry {
   // Polygon-aware corridor (see CorridorStrip). When set, crediting and band
   // drawing use it instead of the mid-line segment / row endpoints above.
   final CorridorStrip? strip;
+  // True for a corridor built around a SINGLE real row (CorridorStrip.ribbon
+  // / _edgeCorridorGeometry: no second real row to choose between, so its
+  // own half-width already IS rowSpacing/2, centred exactly on that row) --
+  // as opposed to one built between two distinct real rows, or an outer
+  // strip (row + plot boundary). See the paint loop in
+  // buildHeatmapCoverageBands for why this matters: a ribbon corridor's full
+  // width is always the correct row swath and must never be
+  // re-anchored/narrowed by the row-choosing logic meant for the
+  // two-real-row case.
+  final bool isRibbon;
+  // For an OUTER strip (CorridorStrip.outer: one real row + the plot
+  // boundary, not a second row) -- which side (-1.0 or +1.0, see
+  // CorridorStrip.signedOffset's convention) carries the real row, so
+  // painting always anchors there regardless of which side the credited
+  // data happens to lean toward. Unlike a between-two-real-rows corridor,
+  // the OTHER side here is just a boundary wall, never a second row worth
+  // anchoring to -- data-driven sign-picking would be wrong whenever a
+  // point lands merely closer to the wall than to the row. Null for every
+  // other corridor kind (sign-picking from the data is correct there).
+  final double? anchorSide;
 
   const _CorridorGeometry({
     required this.midStart,
@@ -1213,6 +1279,8 @@ class _CorridorGeometry {
     this.rowB0,
     this.rowB1,
     this.strip,
+    this.isRibbon = false,
+    this.anchorSide,
   });
 
   /// Distance from the corridor's centre line and position along it (t in

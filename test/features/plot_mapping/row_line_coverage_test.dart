@@ -240,10 +240,16 @@ void main() {
           heatmapType: HeatmapType.gps,
           polygon: square);
       expect(bands, isNotEmpty);
+      // An outer strip has only ONE real row (x=30) -- the other side is
+      // just the plot boundary wall, nothing worth anchoring to -- so
+      // painting here always anchors to the row itself (x=30 +/- a
+      // rowSpacing/2=15 margin) regardless of where exactly the track was
+      // (x=10), not to the raw track position. That reaches up to x=45,
+      // past the old boundary-to-row bound of 30.5.
       for (final b in bands) {
         for (final p in b.points) {
           final x = (p.longitude - lon0) * cosLat * _mPerDeg;
-          expect(x, inInclusiveRange(-0.5, 30.5)); // boundary .. first row
+          expect(x, inInclusiveRange(-0.5, 45.5));
         }
       }
     });
@@ -276,13 +282,55 @@ void main() {
         for (final p in b.points) {
           final x = (p.longitude - lon0) * cosLat * _mPerDeg;
           // Before the fix this reached all the way to the midpoint (x=60,
-          // 30 m from the driven row). Bounded now to the driven track
-          // (x≈31) plus one row-spacing margin (5 m) on each side.
-          expect(x, inInclusiveRange(25.0, 37.0),
+          // 30 m from the driven row). Bounded now to row x=30's own
+          // mapped position (not the raw x≈31 track) plus one
+          // row-spacing margin (5 m) on each side: x in [25,35], with a
+          // little slack for floating-point.
+          expect(x, inInclusiveRange(24.9, 35.1),
               reason: 'band corner $p painted past where the sprayer drove '
                   '-- it should hug row x=30, not stretch toward x=90');
         }
       }
+    });
+
+    test('painted band snaps to the row itself, not the raw (jittery) GPS '
+        'offset', () {
+      // Real sprayer GPS always carries a few metres of systematic offset
+      // from the true row line (antenna placement, mapping imprecision --
+      // see the #9945 writeup's own measurement). The sprayer actually
+      // drives row A (x=5, deliberately close to the plot edge so the two
+      // hypotheses below give different, distinguishable bounds once
+      // boundary-clipped) but its raw GPS track reads 5m east of it (x=10)
+      // the whole time, still comfortably inside this corridor's own
+      // tolerance (half-width 15, row B at x=35).
+      //
+      // Anchored to row A's own mapped position (x=5): band x in [-10,20],
+      // clipped to the plot at x in [0,20]. Anchored to the raw track
+      // position instead (x=10, the pre-this-fix behaviour): band x in
+      // [-5,25], clipped to [0,25]. The two must stay distinguishable for
+      // this test to actually prove which one happened.
+      final twoRows = [
+        [at(5, 0), at(5, 100)],
+        [at(35, 0), at(35, 100)],
+      ];
+      final track = [
+        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(10, y).latitude, at(10, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: twoRows,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bands, isNotEmpty);
+      final maxX = bands
+          .expand((b) => b.points)
+          .map((p) => (p.longitude - lon0) * cosLat * _mPerDeg)
+          .reduce(math.max);
+      expect(maxX, lessThan(22.0),
+          reason: 'band reached x=$maxX -- should stay clipped near row '
+              'x=5 (up to ~20), not extend toward the raw track position '
+              'x=10 (which would reach ~25)');
     });
 
     test('driving a single row paints both sides of it, not just the side '
