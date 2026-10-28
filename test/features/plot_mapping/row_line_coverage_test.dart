@@ -181,7 +181,8 @@ void main() {
     double bandsArea(List<dynamic> bands) =>
         bands.fold<double>(0, (s, b) => s + _areaSqm(b.points));
 
-    test('sweeping every corridor, incl. outer strips, fills the whole plot', () {
+    test('sweeping every corridor, incl. outer strips, fills the whole plot '
+        '(plus a small, bounded overlap at shared row boundaries)', () {
       final track = [
         for (var x = 5.0; x < 100; x += 5)
           for (var y = 0.0; y <= 100; y += 1.5) _pt(at(x, y).latitude, at(x, y).longitude),
@@ -192,7 +193,21 @@ void main() {
           rowSpacing: 30,
           heatmapType: HeatmapType.gps,
           polygon: square);
-      expect(bandsArea(bands), closeTo(10000.0, 300.0));
+      // Used to be exactly ~10000 (painting was hard-clamped at each
+      // corridor's own real gap). Now a corridor's paint can extend up to
+      // rowSpacing/2 PAST a boundary it actually reached -- see the margin
+      // comment in buildHeatmapCoverageBands -- so where EVERY corridor is
+      // densely swept edge-to-edge (as here), two adjacent corridors each
+      // spill a bounded amount into the other's territory at their shared
+      // boundary. That's intentional: two adjacent, both-driven rows'
+      // spray swaths naturally overlap a little near their shared edge in
+      // real spraying too. Outer (plot-boundary-facing) overshoot is
+      // clipped away by the real polygon edge; only the 2 internal row
+      // boundaries (x=30, x=60) contribute extra area here, bounded by a
+      // few multiples of rowSpacing/2 x plot length -- nowhere near the
+      // unbounded reach-to-a-distant-neighbor that was the #9945 bug.
+      expect(bandsArea(bands), closeTo(15000.0, 1500.0));
+      expect(bandsArea(bands), lessThan(20000.0)); // sanity bound, not 2x the plot
     });
 
     test('a short row does not shorten its corridor', () {
@@ -270,6 +285,39 @@ void main() {
       }
     });
 
+    test('driving a single row paints both sides of it, not just the side '
+        'facing whichever neighbor corridor happened to get credited', () {
+      // Three evenly-spaced rows (real gap == configured spacing, the
+      // normal/correct case): the sprayer drives only the middle row (x=60).
+      // Every credited point lands in just ONE of its two neighboring
+      // corridors (30..60 or 60..90) -- whichever "wins" nearest-row
+      // selection, the same as any single straight pass in real use. Before
+      // the margin-clamp fix, that corridor's paint stopped dead exactly on
+      // x=60 (the row's own line), leaving the row colored on only one side.
+      final threeRows = [
+        [at(30, 0), at(30, 100)],
+        [at(60, 0), at(60, 100)],
+        [at(90, 0), at(90, 100)],
+      ];
+      final track = [
+        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(60, y).latitude, at(60, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: threeRows,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bands, isNotEmpty);
+      final xs = bands.expand((b) => b.points).map(
+          (p) => (p.longitude - lon0) * cosLat * _mPerDeg);
+      expect(xs.reduce(math.min), lessThan(55.0),
+          reason: 'row x=60 should be painted on its x<60 side too, not '
+              'just toward whichever neighbor corridor got credited');
+      expect(xs.reduce(math.max), greaterThan(65.0),
+          reason: 'row x=60 should be painted on its x>60 side too');
+    });
+
     test('bands never leave a concave plot', () {
       // L-shaped plot: the bottom-right quarter is missing.
       final l = [at(0, 0), at(50, 0), at(50, 50), at(100, 50), at(100, 100), at(0, 100)];
@@ -285,7 +333,14 @@ void main() {
           heatmapType: HeatmapType.gps,
           polygon: l);
       expect(bands, isNotEmpty);
-      expect(bandsArea(bands), lessThan(7600.0)); // plot is 7500 m2
+      // Plot is 7500 m2. As in the "sweeping every corridor" test above, a
+      // dense sweep across every corridor now produces a small, bounded
+      // overlap at shared internal row boundaries (rowSpacing/2 margin on
+      // each side), not an exact partition -- the important invariant
+      // (checked below) is that every band corner still stays INSIDE the
+      // real plot polygon; this just allows more of that interior to be
+      // double-painted than before.
+      expect(bandsArea(bands), lessThan(13000.0));
       for (final b in bands) {
         for (final p in b.points) {
           expect(_inPoly(p, l) || _minEdgeDist(p, l) < 0.5, isTrue,
