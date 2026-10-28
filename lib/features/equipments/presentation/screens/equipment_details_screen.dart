@@ -31,6 +31,10 @@ class _EquipmentDetailsScreenState
     extends ConsumerState<EquipmentDetailsScreen> {
   late EquipmentEntity displayedEquipment;
   bool _demoOn = false;
+  // Lets the leave-screen handler below check whether a toggle initiated
+  // from the _DemoModeToggle widget is still mid push+poll, so it doesn't
+  // fire a competing revert push on top of one already in flight.
+  final GlobalKey<_DemoModeToggleState> _demoToggleKey = GlobalKey();
 
   String _ownerDisplay(String? userField) {
     if (userField == null) return '-';
@@ -200,8 +204,15 @@ class _EquipmentDetailsScreenState
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        // If demo is ON, restore original config before leaving.
+        // If demo is ON, restore original config before leaving -- but not
+        // while the toggle widget's own push+poll cycle is still running,
+        // since firing a second, competing pushDemoConfig here would race
+        // it (see _DemoModeToggleState._busy). That in-flight toggle's own
+        // result (including its own revert-on-leave-equivalent handling,
+        // if any) is left to stand instead.
+        final toggleBusy = _demoToggleKey.currentState?._busy ?? false;
         if (_demoOn &&
+            !toggleBusy &&
             displayedEquipment.category.toLowerCase() == 'control_unit') {
           try {
             await ref
@@ -387,6 +398,7 @@ class _EquipmentDetailsScreenState
             if (displayedEquipment.category.toLowerCase() == 'control_unit') ...[
               const SizedBox(height: 16),
               _DemoModeToggle(
+                key: _demoToggleKey,
                 equipmentId: displayedEquipment.id,
                 value: _demoOn,
                 onChanged: (v) => setState(() => _demoOn = v),
@@ -766,6 +778,7 @@ class _DemoModeToggle extends ConsumerStatefulWidget {
   final ValueChanged<bool> onChanged;
 
   const _DemoModeToggle({
+    super.key,
     required this.equipmentId,
     required this.value,
     required this.onChanged,
@@ -777,6 +790,16 @@ class _DemoModeToggle extends ConsumerStatefulWidget {
 
 class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
   bool _loading = false;
+  // True from the moment a toggle starts until its full push+poll cycle
+  // finishes (success, timeout, or error) -- separate from `_loading`
+  // (which only covers the push itself, for the brief spinner) so the
+  // Switch stays disabled for the whole ~20s delivery window too. Without
+  // this, a second tap part-way through the first toggle's poll starts a
+  // second concurrent poll loop racing the first, and the PopScope
+  // revert-on-leave handler (above, in the parent screen) can fire its own
+  // competing push while this one is still in flight -- see that handler's
+  // check of `_busy` via GlobalKey.
+  bool _busy = false;
   // Shown under the row while the delivery watcher (jobs.tasks.
   // retry_demo_config_push on the backend) is still polling -- null means
   // nothing to show (idle, or the last poll finished).
@@ -792,6 +815,7 @@ class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
   Future<void> _toggle(bool value) async {
     setState(() {
       _loading = true;
+      _busy = true;
       _statusMessage = null;
     });
     try {
@@ -799,16 +823,25 @@ class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
           .read(equipmentControllerProvider)
           .pushDemoConfig(widget.equipmentId, demo: value);
       widget.onChanged(value);
-      if (mounted) setState(() => _loading = false);
-      await _pollDeliveryStatus();
     } catch (e) {
+      // Only the push itself lands here now -- a failure from the polling
+      // phase below is handled entirely inside _pollDeliveryStatus, so it
+      // can never be misattributed to the push (which, by the time polling
+      // starts, has already succeeded).
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Demo config error: $e')),
         );
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _busy = false;
+        });
       }
+      return;
     }
+    if (mounted) setState(() => _loading = false);
+    await _pollDeliveryStatus();
+    if (mounted) setState(() => _busy = false);
   }
 
   Future<void> _pollDeliveryStatus() async {
@@ -824,9 +857,22 @@ class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
         status = await ref
             .read(equipmentControllerProvider)
             .getDemoConfigStatus(widget.equipmentId);
+      } on ApiException catch (e) {
+        if (e.statusCode == 401 || e.statusCode == 403) {
+          // Not "still waiting" -- the session itself is the problem, and
+          // every later poll in this window would fail the same way, so
+          // stop immediately instead of burning the rest of the ~20s
+          // window on retries that can't succeed.
+          if (mounted) {
+            setState(() => _statusMessage =
+                'Session expired -- please sign in again to confirm delivery.');
+          }
+          return;
+        }
+        // Any other server/network error isn't fatal -- the backend
+        // watcher is still retrying regardless; just try again next tick.
+        status = 'pending';
       } catch (_) {
-        // A failed poll isn't fatal -- the backend watcher is still
-        // retrying regardless; just try again next tick.
         status = 'pending';
       }
       if (status == 'delivered') {
@@ -883,7 +929,9 @@ class _DemoModeToggleState extends ConsumerState<_DemoModeToggle> {
                 else
                   Switch(
                     value: widget.value,
-                    onChanged: _toggle,
+                    // Disabled for the whole push+poll cycle, not just the
+                    // push -- see `_busy`'s doc comment above.
+                    onChanged: _busy ? null : _toggle,
                   ),
               ],
             ),
