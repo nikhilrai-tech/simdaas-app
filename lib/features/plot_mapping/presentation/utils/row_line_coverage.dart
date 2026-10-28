@@ -806,14 +806,29 @@ class RowLineCoverage {
           // the middle) still paints its full width exactly as before --
           // this only narrows painting where the real gap is wider than
           // what was actually driven.
-          final halfW = geo.halfWidthAt((t0 + t1) / 2);
+          //
+          // The margin is NOT re-clamped to this corridor's own half-width.
+          // A credited point's offset is already <= halfWidthAt(t) (that's
+          // the crediting tolerance from the main sweep above), so when the
+          // sprayer actually drove right along one of this corridor's two
+          // bounding rows -- the normal case -- that row's own line sits AT
+          // the clamp boundary, and clamping the margin there gave that row
+          // paint on only the inward (toward the other row) side, none on
+          // its outward side (away from the other row) at all: the band
+          // stopped dead exactly on the row's line instead of straddling it
+          // like a real spray swath. Clamping only ever mattered for the
+          // margin's reach, not the observed offsets themselves (those are
+          // already bounded); dropping it lets the margin extend naturally
+          // past a row actually hugged, while the data-driven bound on the
+          // OTHER (unreached, e.g. toward a distant neighbor) side still
+          // prevents the #9945 over-paint -- only the plot's own polygon
+          // boundary (via clippedBoundsAt) still limits how far this goes.
           final minOff = subBandMinOffset[ri][i];
           final maxOff = subBandMaxOffset[ri][i];
           final margin = rowSpacing / 2;
+          final halfW = geo.halfWidthAt((t0 + t1) / 2);
           var loOff = minOff.isFinite ? minOff - margin : -halfW;
           var hiOff = maxOff.isFinite ? maxOff + margin : halfW;
-          loOff = loOff.clamp(-halfW, halfW);
-          hiOff = hiOff.clamp(-halfW, halfW);
           if (hiOff < loOff) {
             final tmp = loOff;
             loOff = hiOff;
