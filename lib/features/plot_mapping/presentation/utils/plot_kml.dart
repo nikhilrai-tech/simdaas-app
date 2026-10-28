@@ -93,12 +93,51 @@ String buildPlotKml({
     }
   }
 
-  final rowLines = <List<LatLng>>[];
-  for (final lineEl in doc.findAllElements('LineString')) {
-    final coordsEls = lineEl.findAllElements('coordinates');
+  // buildPlotKml names each row Placemark "Row N" using N = its ORIGINAL
+  // index in the plot's rowLines list (1-indexed), not a running counter --
+  // a deleted-row gap (an empty [] placeholder in this app's own rowLines
+  // representation, see row_line_screen.dart) skips that Placemark entirely
+  // rather than renumbering the ones after it. Reconstructing rowLines as a
+  // plain contiguous append here would collapse that gap, which the
+  // coverage/corridor algorithm and row_line_screen.dart's own
+  // _nearestRealRow rely on to know row N and row N+2 were never actually
+  // adjacent -- so the row's real index has to be parsed back out of its
+  // name, not assumed from document order.
+  final rowsByIndex = <int, List<LatLng>>{};
+  var highestIndex = -1;
+  var untitledOrdinal = 0;
+  for (final placemark in doc.findAllElements('Placemark')) {
+    final lineEls = placemark.findElements('LineString');
+    if (lineEls.isEmpty) continue;
+    final coordsEls = lineEls.first.findAllElements('coordinates');
     if (coordsEls.isEmpty) continue;
     final pts = _parseCoordinates(coordsEls.first.innerText);
-    if (pts.length >= 2) rowLines.add(pts);
+    if (pts.length < 2) continue;
+
+    final nameEls = placemark.findElements('name');
+    final name = nameEls.isNotEmpty ? nameEls.first.innerText : '';
+    final match = RegExp(r'Row\s+(\d+)').firstMatch(name);
+    // A KML from some other tool (or a hand-edited one) may have
+    // LineStrings with no parseable "Row N" name at all -- fall back to
+    // appending them after whatever indexed rows were found, rather than
+    // dropping them.
+    final rowIndex = match != null ? int.parse(match.group(1)!) - 1 : null;
+
+    if (rowIndex != null) {
+      rowsByIndex[rowIndex] = pts;
+      if (rowIndex > highestIndex) highestIndex = rowIndex;
+    } else {
+      rowsByIndex[highestIndex + 1 + untitledOrdinal] = pts;
+      untitledOrdinal++;
+    }
+  }
+
+  final rowLines = <List<LatLng>>[];
+  final lastIndex = rowsByIndex.keys.isEmpty
+      ? -1
+      : rowsByIndex.keys.reduce((a, b) => a > b ? a : b);
+  for (var i = 0; i <= lastIndex; i++) {
+    rowLines.add(rowsByIndex[i] ?? const <LatLng>[]);
   }
 
   if (polygon == null && rowLines.isEmpty) {

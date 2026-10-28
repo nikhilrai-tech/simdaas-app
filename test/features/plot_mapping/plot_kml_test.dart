@@ -56,18 +56,33 @@ void main() {
       expect(parsed.polygon, isNotNull);
     });
 
-    test('skips a 2-point placeholder-free deleted row', () {
-      final kml = buildPlotKml(
-        plotName: 'Plot',
-        polygon: polygon,
-        rowLines: [
-          rowLines[0],
-          const [], // a deleted-row placeholder, same shape row_line_screen.dart leaves behind
-          rowLines[1],
-        ],
-      );
+    test('preserves a deleted row\'s index gap on round-trip', () {
+      // row_line_screen.dart never removes a deleted row's slot from
+      // rowLines -- it leaves an empty [] placeholder so later rows keep
+      // their original index (the coverage/corridor algorithm and
+      // _nearestRealRow rely on this to know row N and row N+2 were never
+      // actually adjacent). buildPlotKml skips the placeholder when writing
+      // Placemarks but encodes the real index in each one's "Row N" name;
+      // parsePlotKml must read that back and reconstruct the same gap,
+      // not collapse it into a contiguous list.
+      final original = [
+        rowLines[0],
+        const <LatLng>[], // deleted-row placeholder
+        rowLines[1],
+      ];
+      final kml = buildPlotKml(plotName: 'Plot', polygon: polygon, rowLines: original);
       final parsed = parsePlotKml(kml);
-      expect(parsed.rowLines.length, 2);
+
+      expect(parsed.rowLines.length, 3);
+      expect(parsed.rowLines[1], isEmpty);
+      expect(parsed.rowLines[0].length, rowLines[0].length);
+      for (var j = 0; j < rowLines[0].length; j++) {
+        expectClose(parsed.rowLines[0][j], rowLines[0][j]);
+      }
+      expect(parsed.rowLines[2].length, rowLines[1].length);
+      for (var j = 0; j < rowLines[1].length; j++) {
+        expectClose(parsed.rowLines[2][j], rowLines[1][j]);
+      }
     });
 
     test('parses a boundary-only KML (no row lines)', () {

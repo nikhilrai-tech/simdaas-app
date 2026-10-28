@@ -391,7 +391,7 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
             tooltip: 'More',
             onSelected: (value) {
               if (value == 'export_kml') {
-                _exportPlotKml(context, ref, plot);
+                _exportPlotKml(context, plot);
               } else if (value == 'import_kml') {
                 _importPlotKml(context, ref, plot);
               }
@@ -615,7 +615,39 @@ Future<String> _kmlScratchDirPath() async {
   return dir.path;
 }
 
-Future<void> _exportPlotKml(BuildContext context, WidgetRef ref, PlotEntity plot) async {
+/// Same shoelace-formula area calculation as map_screen.dart's private
+/// `_computeAreaHa` (that one is scoped to the map screen's State and not
+/// importable from here) -- kept in sync by reference to that file rather
+/// than factored into a shared helper, since this is the only other call
+/// site today.
+double _computeAreaHa(List<LatLng> poly) {
+  if (poly.length < 3) return 0.0;
+  const earthRadiusMeters = 6371000.0;
+  double sumLat = 0;
+  for (final p in poly) {
+    sumLat += p.latitude;
+  }
+  final lat0 = (sumLat / poly.length) * (math.pi / 180.0);
+
+  final xs = <double>[];
+  final ys = <double>[];
+  for (final p in poly) {
+    final latRad = p.latitude * (math.pi / 180.0);
+    final lonRad = p.longitude * (math.pi / 180.0);
+    xs.add(earthRadiusMeters * lonRad * math.cos(lat0));
+    ys.add(earthRadiusMeters * latRad);
+  }
+
+  double area = 0.0;
+  for (int i = 0; i < xs.length; i++) {
+    final j = (i + 1) % xs.length;
+    area += xs[i] * ys[j] - xs[j] * ys[i];
+  }
+  area = area.abs() * 0.5; // square metres
+  return area / 10000.0; // hectares
+}
+
+Future<void> _exportPlotKml(BuildContext context, PlotEntity plot) async {
   try {
     final kml = buildPlotKml(
       plotName: plot.name,
@@ -682,15 +714,23 @@ Future<void> _importPlotKml(BuildContext context, WidgetRef ref, PlotEntity plot
     if (confirmed != true) return;
 
     final repo = ref.read(plotRepoProvider);
+    final newPolygon = parsed.polygon ?? plot.polygon;
+    // A new boundary means the old area/centroid are stale -- every other
+    // boundary-edit path (map_screen.dart -> plot_save_sheet.dart) always
+    // recomputes area from the new points and leaves centroid null for the
+    // backend to recompute, rather than carrying over values tied to
+    // geometry that no longer exists.
+    final recomputedArea =
+        parsed.polygon != null ? _computeAreaHa(newPolygon) : plot.area;
     final updated = PlotModel(
       id: plot.id,
       name: plot.name,
       userId: plot.userId,
-      area: plot.area,
+      area: recomputedArea,
       treeCount: plot.treeCount,
       rowSpacing: plot.rowSpacing,
-      polygon: parsed.polygon ?? plot.polygon,
-      centroid: plot.centroid,
+      polygon: newPolygon,
+      centroid: parsed.polygon != null ? null : plot.centroid,
       bedHeight: plot.bedHeight,
       createdAt: plot.createdAt,
       rowLines: parsed.rowLines.isNotEmpty ? parsed.rowLines : plot.rowLines,
