@@ -50,11 +50,6 @@ class RowLineCoverage {
   /// long stretch it never covered.
   static const int maxForcedCreditBridgeSubBands = 3;
 
-  /// A corridor whose measured gap exceeds rowSpacing by more than this is
-  /// treated as "a row is missing here" rather than a genuine tapering
-  /// field — see the anomalous-gap check in [buildHeatmapCoverageBands].
-  static const double _anomalousGapMultiplier = 4.0;
-
   /// Build coverage band polygons (the colored strips between tree rows).
   ///
   /// Each band lives in the corridor between rowLines[i] and rowLines[i+1].
@@ -195,28 +190,27 @@ class RowLineCoverage {
     // nothing past this point relies on a corridor's index lining up with
     // its position in rowLines, only on iterating every corridor that
     // exists.
+    // "Row" means the gap between two consecutive REAL row lines -- the
+    // whole alley a sprayer drives through -- not a single mapped line. A
+    // deleted row (an empty [] entry) is simply skipped: the corridor
+    // between the two real rows on either side of it is built exactly like
+    // any other between-two-real-rows corridor (same CorridorStrip.between,
+    // same full-width fill), just naturally wider -- there is no narrower
+    // "the row really belongs here" to fall back to once its own dividing
+    // line is gone, and the farmer's own row spacing doesn't change just
+    // because the app's record of one dividing line did. Two (or more)
+    // consecutive deletions widen it further the same way. This also means
+    // every corridor is anchored to a REAL row on each side, so a GPS point
+    // is always credited to some row's own corridor rather than falling
+    // into a gap with no credit at all.
+    final realRows = <int>[
+      for (int i = 0; i < rowLines.length; i++)
+        if (rowLines[i].length >= 2) i,
+    ];
     final corridors = <_CorridorGeometry?>[];
-    for (int ri = 0; ri < rowLines.length - 1; ri++) {
-      final rowA = rowLines[ri];
-      final rowB = rowLines[ri + 1];
-      final aReal = rowA.length >= 2;
-      final bReal = rowB.length >= 2;
-      if (!aReal && !bReal) continue; // both rows missing — no corridor here
-
-      if (!aReal || !bReal) {
-        // Exactly one row is missing (an explicit deleted-row placeholder,
-        // or the field boundary) — a narrow band hugging whichever row is
-        // real, row_spacing wide, instead of stretching all the way to a
-        // row that no longer has a defined position. The genuinely empty
-        // stretch in between two such bands gets no credit at all — there's
-        // no way to know real spraying happened there since the dividing
-        // row's true position is gone.
-        final realRow = aReal ? rowA : rowB;
-        corridors.add(plane != null
-            ? _ribbonCorridor(plane, polygon!, realRow, rowSpacing / 2)
-            : _edgeCorridorGeometry(realRow, rowSpacing));
-        continue;
-      }
+    for (int k = 0; k < realRows.length - 1; k++) {
+      final rowA = rowLines[realRows[k]];
+      final rowB = rowLines[realRows[k + 1]];
 
       // Rows drawn for a tapering (clipped-to-polygon) field don't end at
       // the same place along their own length -- their far ends are
@@ -240,26 +234,6 @@ class RowLineCoverage {
         gapStart = strip.halfWidthStart * 2;
         gapEnd = strip.halfWidthEnd * 2;
       } else {
-        continue;
-      }
-
-      // A row deleted between two others leaves no trace in THIS pair's own
-      // measurement — a plot mapped before the row-delete button existed
-      // (or edited some other way) can have a genuine gap this large with
-      // no placeholder marking it. Real tapering fields stay within a few
-      // times rowSpacing at their widest observed so far, so anything
-      // beyond that is treated the same as an explicit deleted-row
-      // placeholder: two independent edge bands (one per side) instead of
-      // one merged corridor spanning the whole gap.
-      if (gapStart > rowSpacing * _anomalousGapMultiplier ||
-          gapEnd > rowSpacing * _anomalousGapMultiplier) {
-        if (plane != null) {
-          corridors.add(_ribbonCorridor(plane, polygon!, rowA, rowSpacing / 2));
-          corridors.add(_ribbonCorridor(plane, polygon, rowB, rowSpacing / 2));
-        } else {
-          corridors.add(_edgeCorridorGeometry(rowA, rowSpacing));
-          corridors.add(_edgeCorridorGeometry(rowB, rowSpacing));
-        }
         continue;
       }
 
@@ -291,43 +265,32 @@ class RowLineCoverage {
       ));
     }
 
-    // The stretch between the plot boundary and the outermost rows.
-    if (plane != null) {
-      int? firstReal, secondReal, lastReal, beforeLast;
-      for (int i = 0; i < rowLines.length; i++) {
-        if (rowLines[i].length < 2) continue;
-        if (firstReal == null) {
-          firstReal = i;
-        } else {
-          secondReal ??= i;
-        }
-      }
-      for (int i = rowLines.length - 1; i >= 0; i--) {
-        if (rowLines[i].length < 2) continue;
-        if (lastReal == null) {
-          lastReal = i;
-        } else {
-          beforeLast ??= i;
-        }
-      }
-      // Only when the outermost ENTRY is a real row: a deleted outermost row
-      // leaves an unknown gap, which stays uncredited like any other.
-      if (firstReal == 0 && secondReal != null) {
-        corridors.add(_corridorFromStrip(CorridorStrip.outer(
-            plane: plane,
-            polygon: polygon!,
-            row: rowLines[0],
-            otherRow: rowLines[secondReal])));
-      }
-      if (lastReal == rowLines.length - 1 &&
-          beforeLast != null &&
-          lastReal != firstReal) {
-        corridors.add(_corridorFromStrip(CorridorStrip.outer(
-            plane: plane,
-            polygon: polygon!,
-            row: rowLines[lastReal!],
-            otherRow: rowLines[beforeLast])));
-      }
+    if (realRows.length == 1) {
+      // Only one real row anywhere in the plot -- nothing to build a
+      // between-rows corridor with, so fall back to a rowSpacing-wide band
+      // hugging just that row, same as a plot with only one row mapped at
+      // all.
+      final row = rowLines[realRows[0]];
+      corridors.add(plane != null
+          ? _ribbonCorridor(plane, polygon!, row, rowSpacing / 2)
+          : _edgeCorridorGeometry(row, rowSpacing));
+    }
+
+    // The stretch between the plot boundary and the first/last REAL row,
+    // whichever array slot it's actually at -- a deleted row at the very
+    // edge doesn't leave that whole boundary-to-row stretch uncredited,
+    // same as any other deleted row no longer gets special treatment.
+    if (plane != null && realRows.length >= 2) {
+      corridors.add(_corridorFromStrip(CorridorStrip.outer(
+          plane: plane,
+          polygon: polygon!,
+          row: rowLines[realRows.first],
+          otherRow: rowLines[realRows[1]])));
+      corridors.add(_corridorFromStrip(CorridorStrip.outer(
+          plane: plane,
+          polygon: polygon,
+          row: rowLines[realRows.last],
+          otherRow: rowLines[realRows[realRows.length - 2]])));
     }
 
     final n = corridors.length;

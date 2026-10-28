@@ -142,7 +142,8 @@ void main() {
     }
   });
 
-  test('deleted row placeholder: neighbours get independent edge bands', () {
+  test('deleted row placeholder: the whole widened gap between its real '
+      'neighbours fills, not two separate edge bands', () {
     const lat0 = 20.0, lon0 = 73.0;
     final dLon = 6.0 / (_mPerDeg * math.cos(lat0 * math.pi / 180));
     final dLat = 100.0 / _mPerDeg;
@@ -157,10 +158,14 @@ void main() {
         rowSpacing: 3.0,
         heatmapType: HeatmapType.gps);
     expect(bands, isNotEmpty);
+    // "Row" means the gap between two real row lines -- a deletion widens
+    // that gap (here, to the full 6m between A and C), it doesn't split it
+    // into two separate rowSpacing-wide edge bands with a blank middle.
     for (final b in bands) {
       for (final p in b.points) {
-        expect(_distToLine(p, a[0], a[1]), lessThan(1.6),
-            reason: 'edge band must hug row A, not span the deleted gap');
+        expect(_distToLine(p, a[0], a[1]), lessThan(6.1),
+            reason: 'band must stay within the real A..C gap, not spill '
+                'past row C');
       }
     }
   });
@@ -231,6 +236,52 @@ void main() {
           expect(x, inInclusiveRange(-0.5, 30.5)); // boundary .. first row
         }
       }
+    });
+
+    test('a deleted row in the middle still fills the whole widened gap, '
+        'no blank middle', () {
+      // Row at x=60 deleted (empty placeholder) between real rows at x=30
+      // and x=90: the corridor should span the FULL 60m gap as ONE
+      // corridor -- not two separate rowSpacing-wide ribbons with an
+      // uncredited gap between them. "Row" means the gap between two real
+      // row lines; a deletion widens that gap, it doesn't create a dead
+      // zone.
+      final rowsWithDeletion = [
+        [at(30, 0), at(30, 100)],
+        <LatLng>[],
+        [at(90, 0), at(90, 100)],
+      ];
+      final track = [
+        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(50, y).latitude, at(50, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rowsWithDeletion,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bandsArea(bands), closeTo(60.0 * 98.0, 300.0));
+    });
+
+    test('outer strip still builds even when the outermost slot is deleted', () {
+      // First row_lines entry deleted; the first REAL row is at x=30. The
+      // boundary-to-first-real-row stretch (x 0..30) should still be a
+      // corridor, not uncredited just because array slot 0 is empty.
+      final rowsWithDeletion = [
+        <LatLng>[],
+        [at(30, 0), at(30, 100)],
+        [at(60, 0), at(60, 100)],
+      ];
+      final track = [
+        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(10, y).latitude, at(10, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rowsWithDeletion,
+          insidePoints: track,
+          rowSpacing: 30,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bandsArea(bands), closeTo(30.0 * 98.0, 200.0));
     });
 
     test('bands never leave a concave plot', () {
