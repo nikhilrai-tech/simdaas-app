@@ -194,19 +194,20 @@ void main() {
           heatmapType: HeatmapType.gps,
           polygon: square);
       // Used to be exactly ~10000 (painting was hard-clamped at each
-      // corridor's own real gap). Now a corridor's paint can extend up to
-      // rowSpacing/2 PAST a boundary it actually reached -- see the margin
-      // comment in buildHeatmapCoverageBands -- so where EVERY corridor is
-      // densely swept edge-to-edge (as here), two adjacent corridors each
-      // spill a bounded amount into the other's territory at their shared
-      // boundary. That's intentional: two adjacent, both-driven rows'
-      // spray swaths naturally overlap a little near their shared edge in
-      // real spraying too. Outer (plot-boundary-facing) overshoot is
-      // clipped away by the real polygon edge; only the 2 internal row
-      // boundaries (x=30, x=60) contribute extra area here, bounded by a
-      // few multiples of rowSpacing/2 x plot length -- nowhere near the
-      // unbounded reach-to-a-distant-neighbor that was the #9945 bug.
-      expect(bandsArea(bands), closeTo(15000.0, 1500.0));
+      // corridor's own real gap). Each covered sub-band now paints a
+      // rowSpacing-wide band independently around EVERY row side its
+      // credited points reached (never one band unioning both sides
+      // together -- see buildHeatmapCoverageBands' comment on why not:
+      // that reproduced the #9945 shape again whenever ordinary GPS
+      // jitter, on a real single pass down just one row, happened to cross
+      // a narrow corridor's own centre line). Three corridors (x 0-30,
+      // 30-60, 60-100) here are each swept densely end to end, so every
+      // row gets its own ~rowSpacing-wide band -- the strip from
+      // rowSpacing/2 past each row inward toward the corridor's own middle
+      // is no longer painted (that's the genuinely-never-happens-in-real-
+      // use part of this synthetic sweep), while outer (plot-boundary-
+      // facing) bands are clipped by the real polygon edge.
+      expect(bandsArea(bands), closeTo(12000.0, 1200.0));
       expect(bandsArea(bands), lessThan(20000.0)); // sanity bound, not 2x the plot
     });
 
@@ -251,6 +252,48 @@ void main() {
           final x = (p.longitude - lon0) * cosLat * _mPerDeg;
           expect(x, inInclusiveRange(-0.5, 45.5));
         }
+      }
+    });
+
+    test('ordinary GPS jitter crossing a narrow corridor\'s centre line '
+        'does not merge into one wide band', () {
+      // Reproduces production report #9945's actual shape (plot 233, Row
+      // 23 <-> Row 24): real gap 5.3m, configured rowSpacing 3.56m.
+      // Driving along JUST row A, ordinary GPS jitter easily reaches past
+      // this narrow corridor's own centre line toward row B's side on a
+      // handful of samples -- min observed offset -2.47m, max +2.645m,
+      // found directly in that report's real GPS points (row A sits at
+      // -2.648m, row B at +2.648m from centre). An earlier version of this
+      // fix unioned minOffset-margin..maxOffset+margin into ONE band
+      // whenever both signs appeared at all, giving an 8.7m-wide band --
+      // wider than the whole 5.3m real gap, and visually identical to the
+      // original #9945 bug (one band spanning across both row lines
+      // instead of two bands hugging each row separately, with a gap
+      // between them).
+      final rows = [[at(30, 0), at(30, 100)], [at(35.3, 0), at(35.3, 100)]];
+      // Mostly hugs row A (x~30.2-30.5); a handful of samples drift toward
+      // row B's side (x~34.7-34.9) -- ordinary jitter on a single pass,
+      // not a second, independent drive down row B.
+      final track = [
+        for (final y in [5.0, 10.0, 15.0, 20.0, 85.0, 90.0, 95.0])
+          _pt(at(30.3, y).latitude, at(30.3, y).longitude),
+        for (final y in [48.0, 50.0, 52.0])
+          _pt(at(34.8, y).latitude, at(34.8, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: rows,
+          insidePoints: track,
+          rowSpacing: 3.56,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bands, isNotEmpty);
+      for (final b in bands) {
+        final xs = b.points.map((p) => (p.longitude - lon0) * cosLat * _mPerDeg);
+        final width = xs.reduce(math.max) - xs.reduce(math.min);
+        expect(width, lessThan(4.0),
+            reason: 'a single band ${width.toStringAsFixed(2)}m wide -- '
+                'should be ~rowSpacing (3.56m) per row, not merged across '
+                'both row lines (the old bug gave ~8.7m)');
       }
     });
 

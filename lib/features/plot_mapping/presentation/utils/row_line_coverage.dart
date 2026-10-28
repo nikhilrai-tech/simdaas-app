@@ -798,6 +798,16 @@ class RowLineCoverage {
 
         final t0 = i / numSub;
         final t1 = (i + 1) / numSub;
+        void addBand(List<LatLng>? c) {
+          if (c == null) return; // slice lies outside the plot
+          bands.add(Polygon(
+            points: c,
+            color: bandColor.withAlpha(alpha),
+            borderColor: Colors.transparent,
+            borderStrokeWidth: 0,
+          ));
+        }
+
         final List<LatLng> corners;
         if (geo.strip != null) {
           final strip = geo.strip!;
@@ -810,64 +820,62 @@ class RowLineCoverage {
             final c = strip.bandCorners(t0, t1);
             if (c == null) continue;
             corners = c;
-          } else {
-            // Between two real rows (or an outer strip, row + plot
-            // boundary): bound the painted width to WHICHEVER ROW the
-            // credited points actually leaned toward, anchored to that
-            // row's own geometric position -- not the raw (GPS-jittery)
-            // observed offset, and not the corridor's full real gap.
-            //
-            // An earlier version of this fix bounded painting to the raw
-            // observed offset +/- a margin. That fixed the #9945 over-paint
-            // (reaching toward a distant, un-driven neighbor) but could
-            // still paint visibly OFF either row's own mapped line --
-            // wherever the noisy GPS track happened to sit, which looked
-            // like the band was floating "in the corridor" instead of on a
-            // row. Snapping to the nearer row's own geometric position
-            // instead keeps the result aligned with the row lines
-            // themselves, as a farmer actually expects, while still
-            // bounding reach toward an unreached neighbor the same way.
-            final minOff = subBandMinOffset[ri][i];
-            final maxOff = subBandMaxOffset[ri][i];
+          } else if (geo.anchorSide != null) {
+            // Outer strip: boundary A is ALWAYS the real row, the other
+            // side is just the plot wall -- always anchor here, never let
+            // the data's own lean (e.g. a point that merely landed closer
+            // to the wall than the row) pick the wrong side.
             final margin = rowSpacing / 2;
             final halfW = geo.halfWidthAt((t0 + t1) / 2);
-            double loOff, hiOff;
+            final rowOff = geo.anchorSide! * halfW;
+            addBand(strip.boundedBandCorners(t0, t1, rowOff - margin, rowOff + margin));
+            continue;
+          } else {
+            // Between two real rows: paint a row-spacing-wide band
+            // independently around EVERY row side the credited points
+            // actually reached this sub-band (never union both sides into
+            // one band spanning from one row's margin to the other's).
+            //
+            // An earlier version of this fix unioned minOffset-margin ..
+            // maxOffset+margin into a SINGLE band whenever a sub-band's
+            // credited points touched both signs at all. That still
+            // reproduced the #9945 shape (one wide band spanning across
+            // both row lines) because ordinary GPS jitter, over enough
+            // samples on a single pass down just ONE row, easily crosses a
+            // narrow corridor's own centre line a few times -- confirmed
+            // directly against report #9945's own GPS points (Row 23<->Row
+            // 24, real gap 5.3m): observed offsets -2.47..+2.65m (row lines
+            // at +/-2.648m) unioned into an 8.7m-wide band, wider than the
+            // whole real gap. Treating each side independently instead
+            // gives two separate ~rowSpacing-wide bands with a gap between
+            // them -- correct whether this sub-band saw one row's jitter
+            // brushing the centre line, or two genuinely separate passes.
+            final minOff = subBandMinOffset[ri][i];
+            final maxOff = subBandMaxOffset[ri][i];
             if (!minOff.isFinite) {
-              loOff = -halfW;
-              hiOff = halfW; // shouldn't happen; safe fallback
-            } else if (minOff < 0 && maxOff > 0) {
-              // Credited points genuinely straddle both rows' sides (a
-              // dense, multi-directional sweep, not a single pass) --
-              // union the two independently, same as bounding by the raw
-              // observed extent plus margin on each end. Applies equally
-              // to an outer strip genuinely swept from the row to the
-              // plot boundary.
-              loOff = minOff - margin;
-              hiOff = maxOff + margin;
-            } else {
-              // Every credited point stayed on one side (however much raw
-              // GPS jitter/offset it had) -- anchor exactly to that side's
-              // own mapped row position. Between two real rows, that's
-              // whichever side the data leaned toward (either is a real
-              // row). For an outer strip (anchorSide set), boundary A is
-              // ALWAYS the real row and the other side is just the plot
-              // wall -- always anchor there regardless of which raw sign
-              // the data happened to have (e.g. a point merely landing
-              // closer to the wall than the row due to noise must still
-              // paint around the row, not the wall).
-              final side = geo.anchorSide ?? (maxOff <= 0 ? -1.0 : 1.0);
-              final rowOff = side * halfW;
-              loOff = rowOff - margin;
-              hiOff = rowOff + margin;
+              // Shouldn't happen (passCount>0 implies an offset was
+              // recorded); safe full-width fallback.
+              addBand(strip.bandCorners(t0, t1));
+              continue;
             }
-            if (hiOff < loOff) {
-              final tmp = loOff;
-              loOff = hiOff;
-              hiOff = tmp;
+            final margin = rowSpacing / 2;
+            final halfW = geo.halfWidthAt((t0 + t1) / 2);
+            var any = false;
+            if (minOff < 0) {
+              addBand(strip.boundedBandCorners(t0, t1, -halfW - margin, -halfW + margin));
+              any = true;
             }
-            final c = strip.boundedBandCorners(t0, t1, loOff, hiOff);
-            if (c == null) continue; // slice lies outside the plot
-            corners = c;
+            if (maxOff > 0) {
+              addBand(strip.boundedBandCorners(t0, t1, halfW - margin, halfW + margin));
+              any = true;
+            }
+            if (!any) {
+              // minOff == maxOff == 0 exactly (credited dead-centre) -- an
+              // arbitrary but harmless pick, no row is favoured by the
+              // data either way.
+              addBand(strip.boundedBandCorners(t0, t1, -halfW - margin, -halfW + margin));
+            }
+            continue;
           }
         } else if (geo.hasRows) {
           // Bounded by the two actual row lines -- the band follows the
