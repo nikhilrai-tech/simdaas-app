@@ -1,4 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/services/auth_service.dart';
@@ -10,8 +16,12 @@ import 'package:flutter_map/flutter_map.dart';
 // avoid importing plot_list_screen to prevent a circular import; reimplement a small preview widget here
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
+import '../utils/plot_kml.dart';
 import 'map_screen.dart';
 import 'row_line_screen.dart';
 
@@ -376,7 +386,39 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
                 }
               }
             },
-          )
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (value) {
+              if (value == 'export_kml') {
+                _exportPlotKml(context, plot);
+              } else if (value == 'import_kml') {
+                _importPlotKml(context, ref, plot);
+              }
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(
+                value: 'export_kml',
+                child: Row(
+                  children: [
+                    Icon(Icons.upload_file_outlined, size: 20),
+                    SizedBox(width: 8),
+                    Text('Export as KML'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'import_kml',
+                child: Row(
+                  children: [
+                    Icon(Icons.download_outlined, size: 20),
+                    SizedBox(width: 8),
+                    Text('Import from KML'),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: CustomScrollView(
@@ -550,6 +592,163 @@ class _PlotDetailsScreenState extends State<PlotDetailsScreen> {
       ),
     );
   });
+  }
+}
+
+// ── Plot boundary + row-line KML export/import ──────────────────────────
+//
+// Hand-rolled MethodChannel for the Android scratch dir (not path_provider),
+// same reasoning as report_details_screen.dart's _scratchDirPath: on this
+// project's toolchain path_provider_android has repeatedly failed to
+// register on real devices (MissingPluginException) despite every local
+// check showing it should work, while this app's own MainActivity.kt can
+// never drift out of registration that way.
+const _androidCacheDirChannel = MethodChannel('com.simdaas.agrios/cache_dir');
+
+Future<String> _kmlScratchDirPath() async {
+  if (Platform.isAndroid) {
+    final path = await _androidCacheDirChannel.invokeMethod<String>('getCacheDir');
+    if (path != null && path.isNotEmpty) return path;
+    throw 'Android cache_dir channel returned no path';
+  }
+  final dir = await getTemporaryDirectory();
+  return dir.path;
+}
+
+/// Same shoelace-formula area calculation as map_screen.dart's private
+/// `_computeAreaHa` (that one is scoped to the map screen's State and not
+/// importable from here) -- kept in sync by reference to that file rather
+/// than factored into a shared helper, since this is the only other call
+/// site today.
+double _computeAreaHa(List<LatLng> poly) {
+  if (poly.length < 3) return 0.0;
+  const earthRadiusMeters = 6371000.0;
+  double sumLat = 0;
+  for (final p in poly) {
+    sumLat += p.latitude;
+  }
+  final lat0 = (sumLat / poly.length) * (math.pi / 180.0);
+
+  final xs = <double>[];
+  final ys = <double>[];
+  for (final p in poly) {
+    final latRad = p.latitude * (math.pi / 180.0);
+    final lonRad = p.longitude * (math.pi / 180.0);
+    xs.add(earthRadiusMeters * lonRad * math.cos(lat0));
+    ys.add(earthRadiusMeters * latRad);
+  }
+
+  double area = 0.0;
+  for (int i = 0; i < xs.length; i++) {
+    final j = (i + 1) % xs.length;
+    area += xs[i] * ys[j] - xs[j] * ys[i];
+  }
+  area = area.abs() * 0.5; // square metres
+  return area / 10000.0; // hectares
+}
+
+Future<void> _exportPlotKml(BuildContext context, PlotEntity plot) async {
+  try {
+    final kml = buildPlotKml(
+      plotName: plot.name,
+      polygon: plot.polygon,
+      rowLines: plot.rowLines ?? const [],
+    );
+    final fileName = 'plot_${plot.id}.kml';
+    final bytes = Uint8List.fromList(utf8.encode(kml));
+
+    final XFile xfile;
+    if (kIsWeb) {
+      xfile = XFile.fromData(bytes, name: fileName, mimeType: 'application/vnd.google-earth.kml+xml');
+    } else {
+      final dirPath = await _kmlScratchDirPath();
+      final file = File('$dirPath/$fileName');
+      await file.writeAsBytes(bytes, flush: true);
+      xfile = XFile(file.path, mimeType: 'application/vnd.google-earth.kml+xml');
+    }
+
+    await SharePlus.instance.share(ShareParams(
+      files: [xfile],
+      text: 'Agrios plot — ${plot.name}',
+      subject: 'Plot ${plot.name}.kml',
+    ));
+  } catch (e) {
+    if (context.mounted) {
+      showGenericErrorSnackBar(context, 'Failed to export KML — $e');
+    }
+  }
+}
+
+Future<void> _importPlotKml(BuildContext context, WidgetRef ref, PlotEntity plot) async {
+  try {
+    final picked = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['kml'],
+    );
+    if (picked.isEmpty) return; // user cancelled
+
+    final kmlText = utf8.decode(await picked.first.readAsBytes());
+    final parsed = parsePlotKml(kmlText);
+
+    if (!context.mounted) return;
+    final summary = [
+      if (parsed.polygon != null) 'a plot boundary (${parsed.polygon!.length} points)',
+      if (parsed.rowLines.isNotEmpty) '${parsed.rowLines.length} row line${parsed.rowLines.length == 1 ? '' : 's'}',
+    ].join(' and ');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import from KML?'),
+        content: Text(
+          'Found $summary in this file. Importing will replace this plot\'s '
+          '${parsed.polygon != null ? 'boundary' : ''}'
+          '${parsed.polygon != null && parsed.rowLines.isNotEmpty ? ' and ' : ''}'
+          '${parsed.rowLines.isNotEmpty ? 'row lines' : ''}. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Import')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final repo = ref.read(plotRepoProvider);
+    final newPolygon = parsed.polygon ?? plot.polygon;
+    // A new boundary means the old area/centroid are stale -- every other
+    // boundary-edit path (map_screen.dart -> plot_save_sheet.dart) always
+    // recomputes area from the new points and leaves centroid null for the
+    // backend to recompute, rather than carrying over values tied to
+    // geometry that no longer exists.
+    final recomputedArea =
+        parsed.polygon != null ? _computeAreaHa(newPolygon) : plot.area;
+    final updated = PlotModel(
+      id: plot.id,
+      name: plot.name,
+      userId: plot.userId,
+      area: recomputedArea,
+      treeCount: plot.treeCount,
+      rowSpacing: plot.rowSpacing,
+      polygon: newPolygon,
+      centroid: parsed.polygon != null ? null : plot.centroid,
+      bedHeight: plot.bedHeight,
+      createdAt: plot.createdAt,
+      rowLines: parsed.rowLines.isNotEmpty ? parsed.rowLines : plot.rowLines,
+    );
+    await repo.updatePlot(updated);
+
+    if (context.mounted) {
+      final currentUserId = ref.read(authServiceProvider).currentUserId;
+      if (currentUserId != null) ref.invalidate(plotsListProvider(currentUserId));
+      showSuccessSnackBar(context, 'Plot imported from KML');
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => PlotDetailsScreen(plot: updated)),
+      );
+    }
+  } on FormatException catch (e) {
+    if (context.mounted) showGenericErrorSnackBar(context, e.message);
+  } catch (e) {
+    if (context.mounted) showGenericErrorSnackBar(context, 'Failed to import KML — $e');
   }
 }
 
