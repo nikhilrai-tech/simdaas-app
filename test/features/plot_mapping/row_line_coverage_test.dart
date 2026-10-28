@@ -181,8 +181,7 @@ void main() {
     double bandsArea(List<dynamic> bands) =>
         bands.fold<double>(0, (s, b) => s + _areaSqm(b.points));
 
-    test('sweeping every corridor, incl. outer strips, fills the whole plot '
-        '(plus a small, bounded overlap at shared row boundaries)', () {
+    test('sweeping every corridor, incl. outer strips, fills the whole plot', () {
       final track = [
         for (var x = 5.0; x < 100; x += 5)
           for (var y = 0.0; y <= 100; y += 1.5) _pt(at(x, y).latitude, at(x, y).longitude),
@@ -193,22 +192,7 @@ void main() {
           rowSpacing: 30,
           heatmapType: HeatmapType.gps,
           polygon: square);
-      // Used to be exactly ~10000 (painting was hard-clamped at each
-      // corridor's own real gap). Each covered sub-band now paints a
-      // rowSpacing-wide band independently around EVERY row side its
-      // credited points reached (never one band unioning both sides
-      // together -- see buildHeatmapCoverageBands' comment on why not:
-      // that reproduced the #9945 shape again whenever ordinary GPS
-      // jitter, on a real single pass down just one row, happened to cross
-      // a narrow corridor's own centre line). Three corridors (x 0-30,
-      // 30-60, 60-100) here are each swept densely end to end, so every
-      // row gets its own ~rowSpacing-wide band -- the strip from
-      // rowSpacing/2 past each row inward toward the corridor's own middle
-      // is no longer painted (that's the genuinely-never-happens-in-real-
-      // use part of this synthetic sweep), while outer (plot-boundary-
-      // facing) bands are clipped by the real polygon edge.
-      expect(bandsArea(bands), closeTo(12000.0, 1200.0));
-      expect(bandsArea(bands), lessThan(20000.0)); // sanity bound, not 2x the plot
+      expect(bandsArea(bands), closeTo(10000.0, 300.0));
     });
 
     test('a short row does not shorten its corridor', () {
@@ -241,172 +225,12 @@ void main() {
           heatmapType: HeatmapType.gps,
           polygon: square);
       expect(bands, isNotEmpty);
-      // An outer strip has only ONE real row (x=30) -- the other side is
-      // just the plot boundary wall, nothing worth anchoring to -- so
-      // painting here always anchors to the row itself (x=30 +/- a
-      // rowSpacing/2=15 margin) regardless of where exactly the track was
-      // (x=10), not to the raw track position. That reaches up to x=45,
-      // past the old boundary-to-row bound of 30.5.
       for (final b in bands) {
         for (final p in b.points) {
           final x = (p.longitude - lon0) * cosLat * _mPerDeg;
-          expect(x, inInclusiveRange(-0.5, 45.5));
+          expect(x, inInclusiveRange(-0.5, 30.5)); // boundary .. first row
         }
       }
-    });
-
-    test('ordinary GPS jitter crossing a narrow corridor\'s centre line '
-        'does not merge into one wide band', () {
-      // Reproduces production report #9945's actual shape (plot 233, Row
-      // 23 <-> Row 24): real gap 5.3m, configured rowSpacing 3.56m.
-      // Driving along JUST row A, ordinary GPS jitter easily reaches past
-      // this narrow corridor's own centre line toward row B's side on a
-      // handful of samples -- min observed offset -2.47m, max +2.645m,
-      // found directly in that report's real GPS points (row A sits at
-      // -2.648m, row B at +2.648m from centre). An earlier version of this
-      // fix unioned minOffset-margin..maxOffset+margin into ONE band
-      // whenever both signs appeared at all, giving an 8.7m-wide band --
-      // wider than the whole 5.3m real gap, and visually identical to the
-      // original #9945 bug (one band spanning across both row lines
-      // instead of two bands hugging each row separately, with a gap
-      // between them).
-      final rows = [[at(30, 0), at(30, 100)], [at(35.3, 0), at(35.3, 100)]];
-      // Mostly hugs row A (x~30.2-30.5); a handful of samples drift toward
-      // row B's side (x~34.7-34.9) -- ordinary jitter on a single pass,
-      // not a second, independent drive down row B.
-      final track = [
-        for (final y in [5.0, 10.0, 15.0, 20.0, 85.0, 90.0, 95.0])
-          _pt(at(30.3, y).latitude, at(30.3, y).longitude),
-        for (final y in [48.0, 50.0, 52.0])
-          _pt(at(34.8, y).latitude, at(34.8, y).longitude),
-      ];
-      final bands = RowLineCoverage.buildHeatmapCoverageBands(
-          rowLines: rows,
-          insidePoints: track,
-          rowSpacing: 3.56,
-          heatmapType: HeatmapType.gps,
-          polygon: square);
-      expect(bands, isNotEmpty);
-      for (final b in bands) {
-        final xs = b.points.map((p) => (p.longitude - lon0) * cosLat * _mPerDeg);
-        final width = xs.reduce(math.max) - xs.reduce(math.min);
-        expect(width, lessThan(4.0),
-            reason: 'a single band ${width.toStringAsFixed(2)}m wide -- '
-                'should be ~rowSpacing (3.56m) per row, not merged across '
-                'both row lines (the old bug gave ~8.7m)');
-      }
-    });
-
-    test('a real gap much wider than configured row spacing only paints '
-        'near the row actually driven (report #9945)', () {
-      // Two ordinary (non-deleted) rows that just ended up far apart: real
-      // gap 60 m, configured row spacing only 10 m -- same shape as plot
-      // 233's Row 9 <-> Row 11 (real gap 9.18 m vs configured 3.56 m), just
-      // scaled up for a clean test polygon. Below _anomalousGapMultiplier
-      // (4x), so this is still one shared "strip between" corridor, not an
-      // anomalous-gap edge-band pair.
-      final wideRows = [
-        [at(30, 0), at(30, 100)],
-        [at(90, 0), at(90, 100)],
-      ];
-      // Sprayer stays close to the row at x=30 the entire time -- it never
-      // drives anywhere near x=90 or the midpoint (x=60).
-      final track = [
-        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(31, y).latitude, at(31, y).longitude),
-      ];
-      final bands = RowLineCoverage.buildHeatmapCoverageBands(
-          rowLines: wideRows,
-          insidePoints: track,
-          rowSpacing: 10,
-          heatmapType: HeatmapType.gps,
-          polygon: square);
-      expect(bands, isNotEmpty);
-      for (final b in bands) {
-        for (final p in b.points) {
-          final x = (p.longitude - lon0) * cosLat * _mPerDeg;
-          // Before the fix this reached all the way to the midpoint (x=60,
-          // 30 m from the driven row). Bounded now to row x=30's own
-          // mapped position (not the raw x≈31 track) plus one
-          // row-spacing margin (5 m) on each side: x in [25,35], with a
-          // little slack for floating-point.
-          expect(x, inInclusiveRange(24.9, 35.1),
-              reason: 'band corner $p painted past where the sprayer drove '
-                  '-- it should hug row x=30, not stretch toward x=90');
-        }
-      }
-    });
-
-    test('painted band snaps to the row itself, not the raw (jittery) GPS '
-        'offset', () {
-      // Real sprayer GPS always carries a few metres of systematic offset
-      // from the true row line (antenna placement, mapping imprecision --
-      // see the #9945 writeup's own measurement). The sprayer actually
-      // drives row A (x=5, deliberately close to the plot edge so the two
-      // hypotheses below give different, distinguishable bounds once
-      // boundary-clipped) but its raw GPS track reads 5m east of it (x=10)
-      // the whole time, still comfortably inside this corridor's own
-      // tolerance (half-width 15, row B at x=35).
-      //
-      // Anchored to row A's own mapped position (x=5): band x in [-10,20],
-      // clipped to the plot at x in [0,20]. Anchored to the raw track
-      // position instead (x=10, the pre-this-fix behaviour): band x in
-      // [-5,25], clipped to [0,25]. The two must stay distinguishable for
-      // this test to actually prove which one happened.
-      final twoRows = [
-        [at(5, 0), at(5, 100)],
-        [at(35, 0), at(35, 100)],
-      ];
-      final track = [
-        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(10, y).latitude, at(10, y).longitude),
-      ];
-      final bands = RowLineCoverage.buildHeatmapCoverageBands(
-          rowLines: twoRows,
-          insidePoints: track,
-          rowSpacing: 30,
-          heatmapType: HeatmapType.gps,
-          polygon: square);
-      expect(bands, isNotEmpty);
-      final maxX = bands
-          .expand((b) => b.points)
-          .map((p) => (p.longitude - lon0) * cosLat * _mPerDeg)
-          .reduce(math.max);
-      expect(maxX, lessThan(22.0),
-          reason: 'band reached x=$maxX -- should stay clipped near row '
-              'x=5 (up to ~20), not extend toward the raw track position '
-              'x=10 (which would reach ~25)');
-    });
-
-    test('driving a single row paints both sides of it, not just the side '
-        'facing whichever neighbor corridor happened to get credited', () {
-      // Three evenly-spaced rows (real gap == configured spacing, the
-      // normal/correct case): the sprayer drives only the middle row (x=60).
-      // Every credited point lands in just ONE of its two neighboring
-      // corridors (30..60 or 60..90) -- whichever "wins" nearest-row
-      // selection, the same as any single straight pass in real use. Before
-      // the margin-clamp fix, that corridor's paint stopped dead exactly on
-      // x=60 (the row's own line), leaving the row colored on only one side.
-      final threeRows = [
-        [at(30, 0), at(30, 100)],
-        [at(60, 0), at(60, 100)],
-        [at(90, 0), at(90, 100)],
-      ];
-      final track = [
-        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(60, y).latitude, at(60, y).longitude),
-      ];
-      final bands = RowLineCoverage.buildHeatmapCoverageBands(
-          rowLines: threeRows,
-          insidePoints: track,
-          rowSpacing: 30,
-          heatmapType: HeatmapType.gps,
-          polygon: square);
-      expect(bands, isNotEmpty);
-      final xs = bands.expand((b) => b.points).map(
-          (p) => (p.longitude - lon0) * cosLat * _mPerDeg);
-      expect(xs.reduce(math.min), lessThan(55.0),
-          reason: 'row x=60 should be painted on its x<60 side too, not '
-              'just toward whichever neighbor corridor got credited');
-      expect(xs.reduce(math.max), greaterThan(65.0),
-          reason: 'row x=60 should be painted on its x>60 side too');
     });
 
     test('bands never leave a concave plot', () {
@@ -424,14 +248,7 @@ void main() {
           heatmapType: HeatmapType.gps,
           polygon: l);
       expect(bands, isNotEmpty);
-      // Plot is 7500 m2. As in the "sweeping every corridor" test above, a
-      // dense sweep across every corridor now produces a small, bounded
-      // overlap at shared internal row boundaries (rowSpacing/2 margin on
-      // each side), not an exact partition -- the important invariant
-      // (checked below) is that every band corner still stays INSIDE the
-      // real plot polygon; this just allows more of that interior to be
-      // double-painted than before.
-      expect(bandsArea(bands), lessThan(13000.0));
+      expect(bandsArea(bands), lessThan(7600.0)); // plot is 7500 m2
       for (final b in bands) {
         for (final p in b.points) {
           expect(_inPoly(p, l) || _minEdgeDist(p, l) < 0.5, isTrue,
