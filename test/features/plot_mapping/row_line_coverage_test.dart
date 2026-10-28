@@ -233,6 +233,43 @@ void main() {
       }
     });
 
+    test('a real gap much wider than configured row spacing only paints '
+        'near the row actually driven (report #9945)', () {
+      // Two ordinary (non-deleted) rows that just ended up far apart: real
+      // gap 60 m, configured row spacing only 10 m -- same shape as plot
+      // 233's Row 9 <-> Row 11 (real gap 9.18 m vs configured 3.56 m), just
+      // scaled up for a clean test polygon. Below _anomalousGapMultiplier
+      // (4x), so this is still one shared "strip between" corridor, not an
+      // anomalous-gap edge-band pair.
+      final wideRows = [
+        [at(30, 0), at(30, 100)],
+        [at(90, 0), at(90, 100)],
+      ];
+      // Sprayer stays close to the row at x=30 the entire time -- it never
+      // drives anywhere near x=90 or the midpoint (x=60).
+      final track = [
+        for (var y = 1.0; y <= 99; y += 1.5) _pt(at(31, y).latitude, at(31, y).longitude),
+      ];
+      final bands = RowLineCoverage.buildHeatmapCoverageBands(
+          rowLines: wideRows,
+          insidePoints: track,
+          rowSpacing: 10,
+          heatmapType: HeatmapType.gps,
+          polygon: square);
+      expect(bands, isNotEmpty);
+      for (final b in bands) {
+        for (final p in b.points) {
+          final x = (p.longitude - lon0) * cosLat * _mPerDeg;
+          // Before the fix this reached all the way to the midpoint (x=60,
+          // 30 m from the driven row). Bounded now to the driven track
+          // (x≈31) plus one row-spacing margin (5 m) on each side.
+          expect(x, inInclusiveRange(25.0, 37.0),
+              reason: 'band corner $p painted past where the sprayer drove '
+                  '-- it should hug row x=30, not stretch toward x=90');
+        }
+      }
+    });
+
     test('bands never leave a concave plot', () {
       // L-shaped plot: the bottom-right quarter is missing.
       final l = [at(0, 0), at(50, 0), at(50, 50), at(100, 50), at(100, 100), at(0, 100)];

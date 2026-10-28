@@ -350,6 +350,25 @@ class RowLineCoverage {
     final subBandMaxPass = <List<int>>[
       for (final geo in corridors) List<int>.filled(geo?.numSub ?? 0, 0)
     ];
+    // Lateral extent (signed, see CorridorStrip.signedOffset) actually
+    // reached by points credited to each sub-band, polygon-aware (strip)
+    // corridors only. Lets the painted band be bounded by where the
+    // sprayer's track really got to -- plus a per-row margin, see the paint
+    // loop below -- instead of always the corridor's full real gap between
+    // its two bounding rows, which is what caused coverage to paint past the
+    // row actually driven on a wide/irregular real gap (report #9945: a real
+    // gap of 9.18m between two ordinary rows, configured row spacing 3.56m).
+    // Row crediting itself (which corridor a point belongs to, the jitter/
+    // glitch/streak handling above) is entirely unaffected -- this only
+    // bounds how much of the credited corridor gets painted.
+    final subBandMinOffset = <List<double>>[
+      for (final geo in corridors)
+        List<double>.filled(geo?.numSub ?? 0, double.infinity)
+    ];
+    final subBandMaxOffset = <List<double>>[
+      for (final geo in corridors)
+        List<double>.filled(geo?.numSub ?? 0, double.negativeInfinity)
+    ];
     // asBackfillOverlay only: whether ANY point crediting this sub-band was
     // recovered via /backfill -- one bool per sub-band, independent of the
     // per-heatmap-type colour tracking above.
@@ -430,6 +449,8 @@ class RowLineCoverage {
             accumulatedCount: accumulatedCount,
             gpsMaxPriority: gpsMaxPriority,
             latestColor: latestColor,
+            subBandMinOffset: subBandMinOffset,
+            subBandMaxOffset: subBandMaxOffset,
           );
         }
       }
@@ -574,6 +595,8 @@ class RowLineCoverage {
             accumulatedCount: accumulatedCount,
             gpsMaxPriority: gpsMaxPriority,
             latestColor: latestColor,
+            subBandMinOffset: subBandMinOffset,
+            subBandMaxOffset: subBandMaxOffset,
           );
           continue;
         } else {
@@ -710,6 +733,8 @@ class RowLineCoverage {
         accumulatedCount: accumulatedCount,
         gpsMaxPriority: gpsMaxPriority,
         latestColor: latestColor,
+        subBandMinOffset: subBandMinOffset,
+        subBandMaxOffset: subBandMaxOffset,
       );
     }
     // The track ended mid-transition (pending, never confirmed) -- nothing
@@ -764,7 +789,37 @@ class RowLineCoverage {
         final t1 = (i + 1) / numSub;
         final List<LatLng> corners;
         if (geo.strip != null) {
-          final c = geo.strip!.bandCorners(t0, t1);
+          // Bound the painted width to where the sprayer's track actually
+          // reached in this sub-band (subBandMinOffset/MaxOffset), plus a
+          // per-row margin on each side -- not the corridor's full real gap
+          // between its two bounding rows. Without this, a corridor whose
+          // real gap is much wider than the configured row spacing (two
+          // ordinary rows that happen to be unusually far apart, or a
+          // deleted-row remnant) painted its ENTIRE width for any stretch
+          // the sprayer passed through, even when the track stayed close to
+          // one row the whole time -- see report #9945 (gap 9.18m vs
+          // configured 3.56m spacing; paint reached ~4.6m from the row the
+          // sprayer never left). rowSpacing/2 as the margin matches the
+          // half-width already used elsewhere for a single real row with no
+          // neighbour to measure against (_edgeCorridorGeometry/_ribbonCorridor),
+          // so a normal corridor (real gap ≈ configured spacing, swept down
+          // the middle) still paints its full width exactly as before --
+          // this only narrows painting where the real gap is wider than
+          // what was actually driven.
+          final halfW = geo.halfWidthAt((t0 + t1) / 2);
+          final minOff = subBandMinOffset[ri][i];
+          final maxOff = subBandMaxOffset[ri][i];
+          final margin = rowSpacing / 2;
+          var loOff = minOff.isFinite ? minOff - margin : -halfW;
+          var hiOff = maxOff.isFinite ? maxOff + margin : halfW;
+          loOff = loOff.clamp(-halfW, halfW);
+          hiOff = hiOff.clamp(-halfW, halfW);
+          if (hiOff < loOff) {
+            final tmp = loOff;
+            loOff = hiOff;
+            hiOff = tmp;
+          }
+          final c = geo.strip!.boundedBandCorners(t0, t1, loOff, hiOff);
           if (c == null) continue; // slice lies outside the plot
           corners = c;
         } else if (geo.hasRows) {
@@ -861,8 +916,11 @@ class RowLineCoverage {
     required List<List<int>> accumulatedCount,
     required List<List<int>> gpsMaxPriority,
     required List<List<Color?>> latestColor,
+    required List<List<double>> subBandMinOffset,
+    required List<List<double>> subBandMaxOffset,
   }) {
     final info = geo.project(pt.position);
+    final signedOffset = geo.strip?.signedOffset(pt.position);
 
     if (prevIdxInCorridor[ri] == null) {
       corridorPassCount[ri]++; // entered (or re-entered) the corridor
@@ -899,6 +957,14 @@ class RowLineCoverage {
     for (int s = lo; s <= hi; s++) {
       subBandMaxPass[ri][s] =
           math.max(subBandMaxPass[ri][s], corridorPassCount[ri]);
+      if (signedOffset != null) {
+        if (signedOffset < subBandMinOffset[ri][s]) {
+          subBandMinOffset[ri][s] = signedOffset;
+        }
+        if (signedOffset > subBandMaxOffset[ri][s]) {
+          subBandMaxOffset[ri][s] = signedOffset;
+        }
+      }
       if (asBackfillOverlay) {
         if (pt.isBuffered) hasBuffered[ri][s] = true;
         continue;
