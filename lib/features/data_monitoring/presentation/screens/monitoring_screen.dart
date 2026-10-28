@@ -92,6 +92,11 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   // docstring), so starting this at false here matches that without
   // needing a separate fetch just to read it back.
   bool _sprayOverrideAllowed = false;
+  // Guards against a second tap starting a concurrent toggle+poll while one
+  // is already in flight -- two overlapping _setSprayOutsidePlotOverride
+  // calls would race on _sprayOverrideAllowed and show contradictory
+  // SnackBars (same pattern as Demo Mode's own `_loading` flag).
+  bool _sprayOverrideBusy = false;
 
   // Last known telemetry values — persist across waiting/cooldown gaps
   double? _lastFlowRate;
@@ -563,33 +568,43 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   }
 
   Future<void> _setSprayOutsidePlotOverride(int sessionId, bool allow) async {
-    String? pin;
-    while (true) {
-      try {
-        await ref
-            .read(eq_provs.equipmentControllerProvider)
-            .setSprayOutsidePlotOverride(sessionId, allow: allow, pin: pin);
-        break;
-      } catch (e) {
-        final code = _sessionPinErrorCode(e);
-        if (code == 'pin_required' || code == 'invalid_pin') {
-          if (!mounted) return;
-          pin = await _promptPin(
-            errorText: code == 'invalid_pin' ? 'Incorrect PIN' : null,
-          );
-          if (pin == null) return; // user cancelled
-          continue;
+    if (_sprayOverrideBusy) return; // a toggle + its status poll is already in flight
+    if (mounted) setState(() => _sprayOverrideBusy = true);
+    try {
+      String? pin;
+      while (true) {
+        try {
+          await ref
+              .read(eq_provs.equipmentControllerProvider)
+              .setSprayOutsidePlotOverride(sessionId, allow: allow, pin: pin);
+          break;
+        } catch (e) {
+          final code = _sessionPinErrorCode(e);
+          if (code == 'pin_required' || code == 'invalid_pin') {
+            if (!mounted) return;
+            pin = await _promptPin(
+              errorText: code == 'invalid_pin' ? 'Incorrect PIN' : null,
+            );
+            if (pin == null) return; // user cancelled
+            // The dialog's own await can outlive this State (e.g. the user
+            // navigated away while it was open) -- re-check before touching
+            // ref/context again, same guard already applied before showing it.
+            if (!mounted) return;
+            continue;
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Could not update spray-outside-plot setting: $e')),
+            );
+          }
+          return;
         }
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not update spray-outside-plot setting: $e')),
-          );
-        }
-        return;
       }
+      if (mounted) setState(() => _sprayOverrideAllowed = allow);
+      await _pollSprayOverrideStatus(sessionId);
+    } finally {
+      if (mounted) setState(() => _sprayOverrideBusy = false);
     }
-    if (mounted) setState(() => _sprayOverrideAllowed = allow);
-    await _pollSprayOverrideStatus(sessionId);
   }
 
   /// Same ~20s-window/3s-poll shape as Demo Mode's own delivery watcher
@@ -1709,6 +1724,12 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                   _selectedHeatmap = HeatmapType.gps;
                                 });
                               } else if (v == 'spray_outside_plot') {
+                                if (_sprayOverrideBusy) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Still applying the previous change -- please wait.')),
+                                  );
+                                  return;
+                                }
                                 final sessionId = resolvedActiveSessionId;
                                 if (sessionId == null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
