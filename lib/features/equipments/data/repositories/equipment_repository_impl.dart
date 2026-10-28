@@ -30,4 +30,8 @@ class EquipmentRepositoryImpl {
       remote.pushDemoConfig(id, demo: demo);
   Future<String> getDemoConfigStatus(String id) =>
       remote.getDemoConfigStatus(id);
+  Future<void> setSprayOutsidePlotOverride(int sessionId, {required bool allow, String? pin}) =>
+      remote.setSprayOutsidePlotOverride(sessionId, allow: allow, pin: pin);
+  Future<String> getSprayOutsidePlotStatus(int sessionId) =>
+      remote.getSprayOutsidePlotStatus(sessionId);
 }

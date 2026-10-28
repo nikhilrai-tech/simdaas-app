@@ -23,6 +23,19 @@ abstract class EquipmentRemoteDataSource {
   /// handed to the device, not confirmation it was actually applied
   /// (no such signal exists without a firmware change).
   Future<String> getDemoConfigStatus(String id);
+
+  /// PIN-protected, session-scoped override letting the sprayer keep
+  /// spraying outside the mapped plot boundary. [pin] is only required
+  /// once the account has a session PIN set -- omit it on the first
+  /// attempt; a 403 with body code "pin_required"/"invalid_pin" means the
+  /// caller needs to prompt for one and retry.
+  Future<void> setSprayOutsidePlotOverride(int sessionId, {required bool allow, String? pin});
+
+  /// Polls delivery status for the most recent setSprayOutsidePlotOverride
+  /// call -- "pending" | "delivered" | "timeout". See the backend's own
+  /// SprayOutsidePlotOverrideStatusView docstring for exactly what
+  /// "delivered" does and doesn't confirm (no firmware-side ack exists).
+  Future<String> getSprayOutsidePlotStatus(int sessionId);
 }
 
 class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
@@ -446,6 +459,20 @@ class EquipmentRemoteDataSourceImpl implements EquipmentRemoteDataSource {
   @override
   Future<String> getDemoConfigStatus(String id) async {
     final resp = await api.getJson('/api/control-units/$id/demo-mode/status/');
+    return (resp is Map ? resp['status']?.toString() : null) ?? 'pending';
+  }
+
+  @override
+  Future<void> setSprayOutsidePlotOverride(int sessionId, {required bool allow, String? pin}) async {
+    await api.postJson(
+      '/jobs/api/sessions/$sessionId/spray-outside-plot/',
+      jsonBody: {'allow': allow, if (pin != null) 'pin': pin},
+    );
+  }
+
+  @override
+  Future<String> getSprayOutsidePlotStatus(int sessionId) async {
+    final resp = await api.getJson('/jobs/api/sessions/$sessionId/spray-outside-plot/status/');
     return (resp is Map ? resp['status']?.toString() : null) ?? 'pending';
   }
 }

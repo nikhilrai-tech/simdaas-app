@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:signal_strength_indicator/signal_strength_indicator.dart';
 import 'package:simdaas/core/services/api_exception.dart';
+import 'package:signal_strength_indicator/signal_strength_indicator.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -85,6 +85,18 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   // begins. The cooldown itself still runs to completion in the background.
   bool _cooldownBannerVisible = false;
   Timer? _cooldownBannerDismissTimer;
+
+  // Local, UI-only tracking of the spray-outside-plot override for the
+  // current session -- the backend defaults every new session to False
+  // (fail-closed, see JobSession.allow_spray_outside_plot's own
+  // docstring), so starting this at false here matches that without
+  // needing a separate fetch just to read it back.
+  bool _sprayOverrideAllowed = false;
+  // Guards against a second tap starting a concurrent toggle+poll while one
+  // is already in flight -- two overlapping _setSprayOutsidePlotOverride
+  // calls would race on _sprayOverrideAllowed and show contradictory
+  // SnackBars (same pattern as Demo Mode's own `_loading` flag).
+  bool _sprayOverrideBusy = false;
 
   // Last known telemetry values — persist across waiting/cooldown gaps
   double? _lastFlowRate;
@@ -504,6 +516,137 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
   void _stopCountdownTimer() {
     _countdownTimer?.cancel();
     _countdownTimer = null;
+  }
+
+  // ── Spray-outside-plot override (PIN-protected, session-scoped) ────────
+
+  /// A small numeric-PIN entry dialog, shown only when the backend actually
+  /// asks for one (ApiException body code "pin_required"/"invalid_pin" --
+  /// see tools.views._check_session_pin's docstring: a user with no PIN
+  /// set never sees this at all). Returns null if cancelled.
+  Future<String?> _promptPin({String? errorText}) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enter Session PIN'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: InputDecoration(
+            labelText: 'PIN',
+            errorText: errorText,
+            counterText: '',
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Reads the "pin_required"/"invalid_pin" code the backend's
+  /// _check_session_pin puts in a 403 response body, or null for any other
+  /// error.
+  String? _sessionPinErrorCode(Object error) {
+    if (error is! ApiException || error.body == null) return null;
+    try {
+      final decoded = jsonDecode(error.body!);
+      if (decoded is Map) return decoded['code']?.toString();
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _setSprayOutsidePlotOverride(int sessionId, bool allow) async {
+    if (_sprayOverrideBusy) return; // a toggle + its status poll is already in flight
+    if (mounted) setState(() => _sprayOverrideBusy = true);
+    try {
+      String? pin;
+      while (true) {
+        try {
+          await ref
+              .read(eq_provs.equipmentControllerProvider)
+              .setSprayOutsidePlotOverride(sessionId, allow: allow, pin: pin);
+          break;
+        } catch (e) {
+          final code = _sessionPinErrorCode(e);
+          if (code == 'pin_required' || code == 'invalid_pin') {
+            if (!mounted) return;
+            pin = await _promptPin(
+              errorText: code == 'invalid_pin' ? 'Incorrect PIN' : null,
+            );
+            if (pin == null) return; // user cancelled
+            // The dialog's own await can outlive this State (e.g. the user
+            // navigated away while it was open) -- re-check before touching
+            // ref/context again, same guard already applied before showing it.
+            if (!mounted) return;
+            continue;
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Could not update spray-outside-plot setting: $e')),
+            );
+          }
+          return;
+        }
+      }
+      if (mounted) setState(() => _sprayOverrideAllowed = allow);
+      await _pollSprayOverrideStatus(sessionId);
+    } finally {
+      if (mounted) setState(() => _sprayOverrideBusy = false);
+    }
+  }
+
+  /// Same ~20s-window/3s-poll shape as Demo Mode's own delivery watcher
+  /// (equipment_details_screen.dart's _DemoModeToggleState) -- there's no
+  /// WebSocket listener for the backend's live broadcast of this today, so
+  /// this screen asks instead of being told. "delivered" only means the
+  /// device appeared reachable when the command was (re-)sent, not proof
+  /// it actually applied the override -- see the backend's
+  /// SprayOutsidePlotOverrideStatusView docstring.
+  Future<void> _pollSprayOverrideStatus(int sessionId) async {
+    const pollInterval = Duration(seconds: 3);
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    while (mounted && DateTime.now().isBefore(deadline)) {
+      String status;
+      try {
+        status = await ref
+            .read(eq_provs.equipmentControllerProvider)
+            .getSprayOutsidePlotStatus(sessionId);
+      } catch (_) {
+        status = 'pending';
+      }
+      if (status == 'delivered') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Spray-outside-plot setting sent to the device.')),
+          );
+        }
+        return;
+      }
+      if (status == 'timeout') break;
+      await Future.delayed(pollInterval);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Device not responding -- it may be offline. '
+            'The setting is still queued and will apply once it reconnects.',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -1580,6 +1723,45 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                                 setState(() {
                                   _selectedHeatmap = HeatmapType.gps;
                                 });
+                              } else if (v == 'spray_outside_plot') {
+                                if (_sprayOverrideBusy) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Still applying the previous change -- please wait.')),
+                                  );
+                                  return;
+                                }
+                                final sessionId = resolvedActiveSessionId;
+                                if (sessionId == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('No active session found.')),
+                                  );
+                                } else {
+                                  final nextValue = !_sprayOverrideAllowed;
+                                  final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: Text(nextValue
+                                          ? 'Allow spraying outside the plot?'
+                                          : 'Disallow spraying outside the plot?'),
+                                      content: Text(nextValue
+                                          ? 'The sprayer will keep spraying even when it reads as outside the mapped plot boundary, for this session only.'
+                                          : 'The sprayer will go back to the normal plot-boundary behaviour for this session.'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx, true),
+                                          child: Text(nextValue ? 'Allow' : 'Disallow'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirmed == true) {
+                                    await _setSprayOutsidePlotOverride(sessionId, nextValue);
+                                  }
+                                }
                               } else if (v == 'start_session') {
                                 _startManualSession();
                               } else if (v == 'end_session') {
@@ -1634,6 +1816,26 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
                               const PopupMenuItem(
                                   value: 'spray_on_off',
                                   child: Text('Spray on/off view')),
+                              if (resolvedActiveSessionId != null) ...[
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'spray_outside_plot',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        _sprayOverrideAllowed
+                                            ? Icons.shield_outlined
+                                            : Icons.shield_moon_outlined,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(_sprayOverrideAllowed
+                                          ? 'Disallow spray outside plot'
+                                          : 'Allow spray outside plot'),
+                                    ],
+                                  ),
+                                ),
+                              ],
                               // Start/End session actions live here (Manual
                               // idle -> Start, either mode with something
                               // running -> End) -- the title only shows the
