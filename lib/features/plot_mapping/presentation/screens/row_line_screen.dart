@@ -14,6 +14,8 @@ import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
 import '../utils/corridor_strip.dart';
 import '../utils/row_line_generator.dart';
+import '../utils/historical_map_service.dart';
+import '../widgets/historical_map_picker_sheet.dart';
 
 enum _Mode { guide, manual }
 
@@ -27,6 +29,12 @@ class RowLineScreen extends ConsumerStatefulWidget {
 
 class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   final MapController _mapController = MapController();
+  // Active historical-imagery overlay, if any -- see
+  // historical_map_picker_sheet.dart. Null (the default) means the normal
+  // current-map tiles render exactly as before.
+  HistoricalMapTileSource? _historicalTileSource;
+  String? _historicalProviderId;
+  DateTime? _historicalDate;
 
   _Mode _mode = _Mode.guide;
 
@@ -131,6 +139,42 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
     });
     if (rows.isEmpty) {
       showInfoSnackBar(context, 'Guide line does not intersect the plot polygon.');
+    }
+  }
+
+  Future<void> _openHistoricalMapPicker() async {
+    final result = await showHistoricalMapPicker(
+      context,
+      ref,
+      isActive: _historicalTileSource != null,
+      initialProviderId: _historicalProviderId,
+      initialDate: _historicalDate,
+    );
+    if (result == null || !mounted) return;
+    if (result is HistoricalMapClear) {
+      setState(() {
+        _historicalTileSource = null;
+        _historicalProviderId = null;
+        _historicalDate = null;
+      });
+      return;
+    }
+    final show = result as HistoricalMapShow;
+    try {
+      final source = await ref.read(historicalMapServiceProvider).getTileSource(
+            providerId: show.providerId,
+            date: show.date,
+          );
+      if (!mounted) return;
+      setState(() {
+        _historicalTileSource = source;
+        _historicalProviderId = show.providerId;
+        _historicalDate = show.date;
+      });
+    } catch (e) {
+      if (mounted) {
+        showGenericErrorSnackBar(context, 'Could not load historical map — $e');
+      }
     }
   }
 
@@ -532,6 +576,11 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Historical map',
+            icon: Icon(_historicalTileSource != null ? Icons.history_toggle_off : Icons.history),
+            onPressed: _openHistoricalMapPicker,
+          ),
           if (_isSaving)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
@@ -564,6 +613,13 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                 subdomains: const ['a', 'b', 'c'],
               ),
+              // Historical-imagery overlay (see historical_map_picker_sheet.dart)
+              // -- null until a farmer explicitly picks one, same as map_screen.dart.
+              if (_historicalTileSource != null)
+                TileLayer(
+                  urlTemplate: _historicalTileSource!.urlTemplate,
+                  tileProvider: NetworkTileProvider(headers: _historicalTileSource!.headers),
+                ),
               const MyLocationLayer(),
               // Plot polygon
               if (widget.plot.polygon.isNotEmpty)

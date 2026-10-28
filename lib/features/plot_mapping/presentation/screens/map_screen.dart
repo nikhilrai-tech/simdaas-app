@@ -22,7 +22,9 @@ import 'package:simdaas/core/widgets/buffered_save_banner.dart';
 import '../../data/models/plot_model.dart';
 import '../widgets/plot_save_sheet.dart';
 import '../widgets/map_layers.dart';
+import '../widgets/historical_map_picker_sheet.dart';
 import '../utils/plot_kml.dart';
+import '../utils/historical_map_service.dart';
 import 'row_line_screen.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
@@ -53,6 +55,13 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   final _bufferedSave = BufferedSaveController();
   bool _locatingDevice = false;
   bool _isSatelliteView = true;
+  // Active historical-imagery overlay, if any -- see
+  // historical_map_picker_sheet.dart. Null (the default) means the normal
+  // current-map tiles render exactly as before; set only while a farmer has
+  // explicitly chosen to view a past date, and cleared the same way.
+  HistoricalMapTileSource? _historicalTileSource;
+  String? _historicalProviderId;
+  DateTime? _historicalDate;
   // Latest fix from MapLayers' own live MyLocationLayer stream. Reused by
   // the "center on me" button instead of starting a second, competing
   // GPS request (see _centerOnCurrentLocation).
@@ -570,6 +579,42 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     }
   }
 
+  Future<void> _openHistoricalMapPicker() async {
+    final result = await showHistoricalMapPicker(
+      context,
+      ref,
+      isActive: _historicalTileSource != null,
+      initialProviderId: _historicalProviderId,
+      initialDate: _historicalDate,
+    );
+    if (result == null || !mounted) return;
+    if (result is HistoricalMapClear) {
+      setState(() {
+        _historicalTileSource = null;
+        _historicalProviderId = null;
+        _historicalDate = null;
+      });
+      return;
+    }
+    final show = result as HistoricalMapShow;
+    try {
+      final source = await ref.read(historicalMapServiceProvider).getTileSource(
+            providerId: show.providerId,
+            date: show.date,
+          );
+      if (!mounted) return;
+      setState(() {
+        _historicalTileSource = source;
+        _historicalProviderId = show.providerId;
+        _historicalDate = show.date;
+      });
+    } catch (e) {
+      if (mounted) {
+        showGenericErrorSnackBar(context, 'Could not load historical map — $e');
+      }
+    }
+  }
+
   Future<void> _centerOnCurrentLocation() async {
     if (_locatingDevice) return;
 
@@ -667,6 +712,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               onPressed: _importFromKml,
             ),
           IconButton(
+            tooltip: 'Historical map',
+            icon: Icon(_historicalTileSource != null ? Icons.history_toggle_off : Icons.history),
+            onPressed: _openHistoricalMapPicker,
+          ),
+          IconButton(
             tooltip: 'Clear all vertices',
             icon: const Icon(Icons.delete_sweep),
             onPressed: () async {
@@ -722,6 +772,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             onTap: _onTapTap,
             onMyLocation: (pos) => _liveStreamPosition = pos,
             isSatellite: _isSatelliteView,
+            historicalTileUrlTemplate: _historicalTileSource?.urlTemplate,
+            historicalTileHeaders: _historicalTileSource?.headers,
             onMarkerPointerDown: (i, event) {
               final mapNotifier = ref.read(mapStateProvider.notifier);
               mapNotifier.selectVertex(i);
