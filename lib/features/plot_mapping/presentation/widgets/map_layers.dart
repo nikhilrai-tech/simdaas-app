@@ -19,6 +19,15 @@ class MapLayers extends StatelessWidget {
   // road map tiles.
   final bool isSatellite;
 
+  // Historical-imagery overlay (see historical_map_service.dart) -- null
+  // (the default, every existing caller) means no overlay at all, and the
+  // normal tile layer below renders exactly as it always has. When set,
+  // drawn as a second, fully opaque TileLayer on top of the normal one, so
+  // turning the overlay back off (setting these back to null) is a plain
+  // rebuild, nothing to restore.
+  final String? historicalTileUrlTemplate;
+  final Map<String, String>? historicalTileHeaders;
+
   // Pointer event forwards for markers
   final void Function(int index, PointerEvent event) onMarkerPointerDown;
   final void Function(int index, PointerEvent event) onMarkerPointerMove;
@@ -36,6 +45,8 @@ class MapLayers extends StatelessWidget {
     this.onTap,
     this.onMyLocation,
     this.isSatellite = true,
+    this.historicalTileUrlTemplate,
+    this.historicalTileHeaders,
     required this.onMarkerPointerDown,
     required this.onMarkerPointerMove,
     required this.onMarkerPointerUp,
@@ -67,6 +78,11 @@ class MapLayers extends StatelessWidget {
             // service.dart for why this is a from-scratch implementation
             // rather than the usual flutter_map_tile_caching package (GPL).
             tileProvider: CachedTileProvider()),
+        if (historicalTileUrlTemplate != null)
+          TileLayer(
+            urlTemplate: historicalTileUrlTemplate,
+            tileProvider: NetworkTileProvider(headers: historicalTileHeaders),
+          ),
         MyLocationLayer(onPosition: onMyLocation),
         if (points.isNotEmpty) ...[
           PolygonLayer(polygons: [
