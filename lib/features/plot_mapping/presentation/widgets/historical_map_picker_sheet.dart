@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../utils/historical_map_service.dart';
@@ -74,6 +76,7 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
   String? _selectedProviderId;
   late DateTime _selectedDate;
   bool _previewing = false;
+  Timer? _stepDebounce;
 
   @override
   void initState() {
@@ -135,6 +138,14 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
     _preview();
   }
 
+  // Each tap fires a real backend tile fetch -- fine for one tap, but
+  // flipping through several dates quickly would queue a full fetch wave
+  // per tap behind the last one on the server's limited worker pool,
+  // making rapid browsing feel far slower than a single lookup actually
+  // is. Debounce so only the date the farmer settles on is fetched; the
+  // date label itself still updates on every tap, no delay there.
+  static const Duration _stepDebounceDelay = Duration(milliseconds: 400);
+
   void _stepDate(int direction) {
     final stepped = _selectedDate.add(Duration(days: _stepDays * direction));
     final now = DateTime.now();
@@ -147,7 +158,14 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
         _selectedDate = stepped;
       }
     });
-    _preview();
+    _stepDebounce?.cancel();
+    _stepDebounce = Timer(_stepDebounceDelay, _preview);
+  }
+
+  @override
+  void dispose() {
+    _stepDebounce?.cancel();
+    super.dispose();
   }
 
   @override
