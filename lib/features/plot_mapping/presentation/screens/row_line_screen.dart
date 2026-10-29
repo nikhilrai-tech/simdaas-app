@@ -9,6 +9,7 @@ import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 
 import 'package:simdaas/core/services/location_service.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/widgets/my_location_layer.dart';
 import '../../data/models/plot_model.dart';
 import '../providers/plot_providers.dart';
@@ -616,6 +617,12 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               TileLayer(
                 urlTemplate: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                 subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
+                // Cache-first -- same disk cache map_screen.dart/
+                // monitoring_screen.dart already use, so a plot seen before
+                // (here or on either of those screens, since the cache key
+                // is just the tile URL) loads instantly with no network
+                // round-trip at all.
+                tileProvider: CachedTileProvider(),
               ),
               // Historical-imagery overlay (see historical_map_picker_sheet.dart)
               // -- null until a farmer explicitly picks one, same as map_screen.dart.

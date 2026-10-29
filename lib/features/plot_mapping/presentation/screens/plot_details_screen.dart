@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/utils/error_utils.dart';
 import 'package:simdaas/core/utils/api_error_ui.dart';
 // job providers intentionally not imported here to avoid circular deps
@@ -71,6 +72,7 @@ class PlotPreview extends StatelessWidget {
                     urlTemplate:
                         'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                     subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
+                    tileProvider: CachedTileProvider(),
                   ),
                   PolygonLayer(
                     polygons: [

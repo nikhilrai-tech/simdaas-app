@@ -16,6 +16,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/utils/heatmap_color_utils.dart';
 import 'package:simdaas/core/services/heatmap_preferences_service.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/utils/mac_utils.dart';
 import 'package:simdaas/core/utils/gps_jump_detector.dart';
 import '../../domain/report.dart';
@@ -1247,6 +1248,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                   urlTemplate:
                       _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
                   subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
+                  tileProvider: CachedTileProvider(),
                 ),
                 if (report.plot != null)
                   PolygonLayer(
@@ -2043,6 +2045,7 @@ class _FullScreenMapPageState extends ConsumerState<_FullScreenMapPage> {
                 urlTemplate:
                     _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
                 subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
+                tileProvider: CachedTileProvider(),
               ),
               if (report.plot != null)
                 PolygonLayer(
