@@ -969,8 +969,8 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                         children: [
                           TileLayer(
                               urlTemplate:
-                                  'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-                              subdomains: const ['a', 'b', 'c']),
+                                  'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                              subdomains: const ['mt0', 'mt1', 'mt2', 'mt3']),
                           const MyLocationLayer(),
                           for (final f in (fields
                               .cast<fm_models.PlotModel>()

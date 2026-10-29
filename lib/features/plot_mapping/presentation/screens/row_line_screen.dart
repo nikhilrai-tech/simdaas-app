@@ -614,8 +614,8 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-                subdomains: const ['a', 'b', 'c'],
+                urlTemplate: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
               ),
               // Historical-imagery overlay (see historical_map_picker_sheet.dart)
               // -- null until a farmer explicitly picks one, same as map_screen.dart.

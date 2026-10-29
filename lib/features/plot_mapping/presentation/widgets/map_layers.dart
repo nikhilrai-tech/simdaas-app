@@ -69,9 +69,14 @@ class MapLayers extends StatelessWidget {
       children: [
         TileLayer(
             urlTemplate: isSatellite
-                ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
-                : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-            subdomains: const ['a', 'b', 'c'],
+                ? 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+                : 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+            // Real Google tile subdomains, round-robinned by {s} above --
+            // a fixed single host (the old 'mt1.google.com' with no {s} in
+            // the template, making this subdomains list a no-op) capped
+            // every map's tile loading at one host's ~6 concurrent
+            // connections no matter how many tiles a viewport needed.
+            subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
             // Cache-first: tiles already downloaded (via "Download for
             // offline" on this screen) or simply seen before load instantly
             // from disk, no network round-trip. See offline_tile_cache_

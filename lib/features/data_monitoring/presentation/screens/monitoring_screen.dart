@@ -1575,9 +1575,9 @@ class _MonitoringScreenState extends ConsumerState<MonitoringScreen>
               children: [
                 TileLayer(
                     urlTemplate: _isSatelliteView
-                        ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
-                        : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-                    subdomains: const ['a', 'b', 'c'],
+                        ? 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+                        : 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                    subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
                     // Cache-first -- any tiles already downloaded for this
                     // plot (Fix: plot creation/edit screen's "Download for
                     // offline") or simply seen before load instantly, no

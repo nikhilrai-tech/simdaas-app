@@ -69,8 +69,8 @@ class PlotPreview extends StatelessWidget {
                 children: [
                   TileLayer(
                     urlTemplate:
-                        'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-                    subdomains: const ['a', 'b', 'c'],
+                        'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                    subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
                   ),
                   PolygonLayer(
                     polygons: [
