@@ -153,6 +153,15 @@ class RetryingNetworkTileProvider extends TileProvider {
   @override
   ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
     final url = getTileUrl(coordinates, options);
+    // Same web carve-out as CachedTileProvider above: manually decoding
+    // bytes via dart:ui's ImmutableBuffer (what _RetryingNetworkTileImage
+    // below does) doesn't reliably paint on Flutter Web even when the
+    // underlying HTTP request succeeds (observed: 200 OK with real image
+    // bytes in DevTools' Network tab, tile stays blank) -- NetworkImage
+    // uses the browser's own image decoding instead. Retry-on-429/503 is
+    // lost on web as a result, but web is a secondary target here (the
+    // real app is Android/iOS); getting it to render at all matters more.
+    if (kIsWeb) return NetworkImage(url, headers: headers);
     return _RetryingNetworkTileImage(url, headers);
   }
 }
