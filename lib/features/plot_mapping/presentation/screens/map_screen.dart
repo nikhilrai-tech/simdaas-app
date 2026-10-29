@@ -587,27 +587,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       isActive: _historicalTileSource != null,
       initialProviderId: _historicalProviderId,
       initialDate: _historicalDate,
+      onPreview: _applyHistoricalSelection,
     );
-    if (result == null || !mounted) return;
-    if (result is HistoricalMapClear) {
+    if (result is HistoricalMapClear && mounted) {
       setState(() {
         _historicalTileSource = null;
         _historicalProviderId = null;
         _historicalDate = null;
       });
-      return;
     }
-    final show = result as HistoricalMapShow;
+  }
+
+  /// Fetches and applies one provider/date live -- called by the picker
+  /// sheet on every arrow tap/provider change while it's still open, not
+  /// just once when it closes, so the map updates as the farmer browses.
+  Future<void> _applyHistoricalSelection(String providerId, DateTime date) async {
     try {
       final source = await ref.read(historicalMapServiceProvider).getTileSource(
-            providerId: show.providerId,
-            date: show.date,
+            providerId: providerId,
+            date: date,
           );
       if (!mounted) return;
       setState(() {
         _historicalTileSource = source;
-        _historicalProviderId = show.providerId;
-        _historicalDate = show.date;
+        _historicalProviderId = providerId;
+        _historicalDate = date;
       });
     } catch (e) {
       if (mounted) {
