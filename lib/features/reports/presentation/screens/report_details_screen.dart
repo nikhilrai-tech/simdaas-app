@@ -189,7 +189,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
         (report.distanceWithPtoKm - report.distanceWithLeftSprayKm).clamp(0.0, double.infinity);
     final rightSolenoidOffKm =
         (report.distanceWithPtoKm - report.distanceWithRightSprayKm).clamp(0.0, double.infinity);
-    final plotAreaHa = report.plotAreaSqm / 10000;
+    final plotAreaAcres = report.plotAreaSqm / 4046.86;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -901,7 +901,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       report.plot?.name ?? '-',
                       const Color(0xFF2E7D32)),
                   _equipRow(Icons.straighten, 'Plot Area',
-                      '${plotAreaHa.toStringAsFixed(2)} ha',
+                      '${plotAreaAcres.toStringAsFixed(2)} acre',
                       Colors.blueGrey),
                   _equipRow(Icons.water_drop_outlined, 'Linked Sprayer',
                       report.linkedSprayerName ?? '-',
