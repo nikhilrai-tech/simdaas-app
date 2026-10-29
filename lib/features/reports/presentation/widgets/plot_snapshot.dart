@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'dart:ui' as ui;
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import '../../../plot_mapping/domain/entities/plot.dart';
 
 class PlotSnapshot extends StatefulWidget {
@@ -114,6 +115,7 @@ class _PlotSnapshotState extends State<PlotSnapshot> {
                       ? 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
                       : 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                   subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
+                  tileProvider: CachedTileProvider(),
                 ),
                 PolygonLayer(
                   polygons: [

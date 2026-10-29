@@ -8,6 +8,7 @@ import '../../domain/entities/job.dart';
 import '../providers/job_providers.dart';
 import '../providers/create_job_form_provider.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/widgets/my_location_layer.dart';
@@ -970,7 +971,8 @@ class _CreateJobScreenState extends ConsumerState<CreateJobScreen> {
                           TileLayer(
                               urlTemplate:
                                   'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-                              subdomains: const ['mt0', 'mt1', 'mt2', 'mt3']),
+                              subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
+                              tileProvider: CachedTileProvider()),
                           const MyLocationLayer(),
                           for (final f in (fields
                               .cast<fm_models.PlotModel>()
