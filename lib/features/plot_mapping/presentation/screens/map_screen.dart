@@ -740,6 +740,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final absorbMap = mapState.absorbMap;
     final searchSuggestions = searchState.suggestions;
     final isSearching = searchState.isSearching;
+    final historicalMapAvailable =
+        ref.watch(historicalMapAvailableProvider).valueOrNull ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -751,11 +753,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
               icon: const Icon(Icons.file_upload_outlined),
               onPressed: _importFromKml,
             ),
-          IconButton(
-            tooltip: 'Historical map',
-            icon: Icon(_historicalImageBytes != null ? Icons.history_toggle_off : Icons.history),
-            onPressed: _openHistoricalMapPicker,
-          ),
+          if (historicalMapAvailable)
+            IconButton(
+              tooltip: 'Historical map',
+              icon: Icon(_historicalImageBytes != null ? Icons.history_toggle_off : Icons.history),
+              onPressed: _openHistoricalMapPicker,
+            ),
           IconButton(
             tooltip: 'Clear all vertices',
             icon: const Icon(Icons.delete_sweep),

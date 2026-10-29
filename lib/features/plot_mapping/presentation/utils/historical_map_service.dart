@@ -89,3 +89,25 @@ class HistoricalMapService {
 
 final historicalMapServiceProvider = Provider<HistoricalMapService>(
     (ref) => HistoricalMapService(ref.read(apiServiceProvider)));
+
+/// Whether the "Historical map" entry point should be shown at all -- not
+/// just the per-provider "Not set up yet" greying-out inside the picker
+/// sheet, the icon button itself. True once the backend reports at least
+/// one provider as configured, false (hides the icon entirely) while
+/// neither is, and false while still loading or on any error -- fails
+/// closed, never flashes the icon on briefly before hiding it.
+///
+/// A pure runtime check against the live backend, not a build-time flag:
+/// turning a provider on server-side (adding its real credentials, the
+/// same deploy steps already used for CDSE/GEE on staging) makes the icon
+/// appear for every already-installed copy of the app automatically, no
+/// new release needed -- as long as that copy's build already includes
+/// this check, which every build from this point on does.
+final historicalMapAvailableProvider = FutureProvider<bool>((ref) async {
+  try {
+    final providers = await ref.read(historicalMapServiceProvider).getProviders();
+    return providers.any((p) => p.configured);
+  } catch (_) {
+    return false;
+  }
+});

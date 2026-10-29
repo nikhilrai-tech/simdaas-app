@@ -573,6 +573,8 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   @override
   Widget build(BuildContext context) {
     final guideComplete = _guideStart != null && _guideEnd != null;
+    final historicalMapAvailable =
+        ref.watch(historicalMapAvailableProvider).valueOrNull ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -598,11 +600,12 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Historical map',
-            icon: Icon(_historicalImageBytes != null ? Icons.history_toggle_off : Icons.history),
-            onPressed: _openHistoricalMapPicker,
-          ),
+          if (historicalMapAvailable)
+            IconButton(
+              tooltip: 'Historical map',
+              icon: Icon(_historicalImageBytes != null ? Icons.history_toggle_off : Icons.history),
+              onPressed: _openHistoricalMapPicker,
+            ),
           if (_isSaving)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
