@@ -183,7 +183,8 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
           Text('Historical map', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'Browse with the arrows below — the map updates as you go.',
+            'Browse with the arrows below — the map updates as you go. '
+            'Zoom in to your field to see it (not available zoomed all the way out).',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),

@@ -2,6 +2,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/api_service.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 
+/// Below this zoom, the historical overlay doesn't request tiles at all
+/// (see its TileLayer's own minZoom in map_layers.dart/row_line_screen.dart)
+/// -- CDSE's Sentinel-2 Process API hard-rejects anything coarser than
+/// 1500 m/pixel (confirmed: a zoom-5 tile needs ~4357 m/pixel there, a
+/// flat 400 "exceeds the limit" every single time, independent of load).
+/// 12 is a wide safety margin above CDSE's own ~zoom-7 cutoff, and a
+/// whole-town view is already past where individual fields are
+/// distinguishable anyway.
+const double historicalMapMinZoom = 12;
+
 /// One historical-imagery provider as reported by the backend's
 /// GET /plot/api/historical-map/providers/ -- see
 /// smart-spray-backend/plot/historical_map.py's module docstring for what

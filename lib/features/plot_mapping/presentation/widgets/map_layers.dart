@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/widgets/my_location_layer.dart';
+import '../utils/historical_map_service.dart';
 
 /// Renders map tile, polygon and vertex markers and forwards pointer events
 /// to callers so the parent can handle selection/move logic.
@@ -87,6 +88,14 @@ class MapLayers extends StatelessWidget {
           TileLayer(
             urlTemplate: historicalTileUrlTemplate,
             tileProvider: RetryingNetworkTileProvider(headers: historicalTileHeaders),
+            // CDSE's Sentinel-2 Process API hard-rejects anything coarser
+            // than 1500 m/pixel (confirmed: a zoom-5 tile needs ~4357
+            // m/pixel there, a flat 400 "exceeds the limit" every time,
+            // not a rate limit) -- below this zoom the overlay just
+            // doesn't request tiles at all rather than erroring on every
+            // one. historicalMapMinZoom lives in historical_map_service.dart
+            // so the picker sheet can show the same threshold as a hint.
+            minZoom: historicalMapMinZoom,
           ),
         MyLocationLayer(onPosition: onMyLocation),
         if (points.isNotEmpty) ...[

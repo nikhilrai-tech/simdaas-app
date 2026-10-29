@@ -630,6 +630,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
                 TileLayer(
                   urlTemplate: _historicalTileSource!.urlTemplate,
                   tileProvider: RetryingNetworkTileProvider(headers: _historicalTileSource!.headers),
+                  minZoom: historicalMapMinZoom,
                 ),
               const MyLocationLayer(),
               // Plot polygon
