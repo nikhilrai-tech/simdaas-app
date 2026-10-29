@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -58,8 +59,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   // Active historical-imagery overlay, if any -- see
   // historical_map_picker_sheet.dart. Null (the default) means the normal
   // current-map tiles render exactly as before; set only while a farmer has
-  // explicitly chosen to view a past date, and cleared the same way.
-  HistoricalMapTileSource? _historicalTileSource;
+  // explicitly chosen to view a past date, and cleared the same way. One
+  // composite image covering the viewport bounds at the moment it was
+  // fetched, not an XYZ tile pyramid -- see historical_map_service.dart.
+  Uint8List? _historicalImageBytes;
+  LatLngBounds? _historicalImageBounds;
   String? _historicalProviderId;
   DateTime? _historicalDate;
   // Latest fix from MapLayers' own live MyLocationLayer stream. Reused by
@@ -602,14 +606,15 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     final result = await showHistoricalMapPicker(
       context,
       ref,
-      isActive: _historicalTileSource != null,
+      isActive: _historicalImageBytes != null,
       initialProviderId: _historicalProviderId,
       initialDate: _historicalDate,
       onPreview: _applyHistoricalSelection,
     );
     if (result is HistoricalMapClear && mounted) {
       setState(() {
-        _historicalTileSource = null;
+        _historicalImageBytes = null;
+        _historicalImageBounds = null;
         _historicalProviderId = null;
         _historicalDate = null;
       });
@@ -619,15 +624,27 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   /// Fetches and applies one provider/date live -- called by the picker
   /// sheet on every arrow tap/provider change while it's still open, not
   /// just once when it closes, so the map updates as the farmer browses.
+  /// Fetches ONE image covering the current viewport (see
+  /// historical_map_service.dart), not a tile pyramid.
   Future<void> _applyHistoricalSelection(String providerId, DateTime date) async {
+    final bounds = _mapController.camera.visibleBounds;
+    if (_mapController.camera.zoom < historicalMapMinZoom) {
+      if (mounted) {
+        showGenericErrorSnackBar(
+          context, 'Zoom in to your field to see historical imagery.');
+      }
+      return;
+    }
     try {
-      final source = await ref.read(historicalMapServiceProvider).getTileSource(
+      final bytes = await ref.read(historicalMapServiceProvider).getRegionImage(
             providerId: providerId,
             date: date,
+            bounds: bounds,
           );
       if (!mounted) return;
       setState(() {
-        _historicalTileSource = source;
+        _historicalImageBytes = bytes;
+        _historicalImageBounds = bounds;
         _historicalProviderId = providerId;
         _historicalDate = date;
       });
@@ -736,7 +753,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             ),
           IconButton(
             tooltip: 'Historical map',
-            icon: Icon(_historicalTileSource != null ? Icons.history_toggle_off : Icons.history),
+            icon: Icon(_historicalImageBytes != null ? Icons.history_toggle_off : Icons.history),
             onPressed: _openHistoricalMapPicker,
           ),
           IconButton(
@@ -795,8 +812,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             onTap: _onTapTap,
             onMyLocation: (pos) => _liveStreamPosition = pos,
             isSatellite: _isSatelliteView,
-            historicalTileUrlTemplate: _historicalTileSource?.urlTemplate,
-            historicalTileHeaders: _historicalTileSource?.headers,
+            historicalImageBytes: _historicalImageBytes,
+            historicalImageBounds: _historicalImageBounds,
             onMarkerPointerDown: (i, event) {
               final mapNotifier = ref.read(mapStateProvider.notifier);
               mapNotifier.selectVertex(i);

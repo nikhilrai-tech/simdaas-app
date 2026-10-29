@@ -1,15 +1,19 @@
+import 'dart:typed_data';
+
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/api_service.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 
-/// Below this zoom, the historical overlay doesn't request tiles at all
-/// (see its TileLayer's own minZoom in map_layers.dart/row_line_screen.dart)
-/// -- CDSE's Sentinel-2 Process API hard-rejects anything coarser than
-/// 1500 m/pixel (confirmed: a zoom-5 tile needs ~4357 m/pixel there, a
-/// flat 400 "exceeds the limit" every single time, independent of load).
-/// 12 is a wide safety margin above CDSE's own ~zoom-7 cutoff, and a
-/// whole-town view is already past where individual fields are
-/// distinguishable anyway.
+/// Below this zoom, the historical overlay doesn't fetch an image at all
+/// -- the viewport bbox a lower zoom covers gets coarser than either
+/// provider can actually serve (confirmed on CDSE: a zoom-5 viewport
+/// needs ~4357 m/pixel, a flat 400 "exceeds the limit" of 1500 m/pixel
+/// every single time, independent of load -- and an oversized bbox on
+/// Earth Engine just means a slow fetch for an image too coarse to be
+/// useful anyway). 12 is a wide safety margin above CDSE's own ~zoom-7
+/// cutoff, and a whole-town view is already past where individual fields
+/// are distinguishable anyway.
 const double historicalMapMinZoom = 12;
 
 /// One historical-imagery provider as reported by the backend's
@@ -38,19 +42,6 @@ class HistoricalMapProviderInfo {
       );
 }
 
-/// Picked provider + date, and everything a flutter_map TileLayer needs to
-/// show it: a {z}/{x}/{y} URL template, plus request headers when the tiles
-/// have to come through this app's own backend (the CDSE provider -- its
-/// proxy endpoint is behind the same auth every other API call uses). The
-/// Google Earth Engine provider's template points directly at Google's own
-/// tile server and needs no headers from here.
-class HistoricalMapTileSource {
-  final String urlTemplate;
-  final Map<String, String>? headers;
-
-  const HistoricalMapTileSource({required this.urlTemplate, this.headers});
-}
-
 class HistoricalMapService {
   final ApiService api;
   const HistoricalMapService(this.api);
@@ -64,29 +55,35 @@ class HistoricalMapService {
         .toList();
   }
 
-  /// Builds the tile source for [providerId] + [date]. For 'cdse_free' this
-  /// is purely client-side (the proxy tile URL is itself already a
-  /// {z}/{x}/{y} template -- no extra round trip needed to construct it).
-  /// For 'google_earth_paid' this makes one call to the backend, which asks
-  /// Earth Engine for a template built around the requested date.
-  Future<HistoricalMapTileSource> getTileSource({
+  /// ONE composite image covering [bounds] (the farmer's current map
+  /// viewport, not an XYZ tile pyramid -- see
+  /// smart-spray-backend/plot/historical_map.py's module docstring for
+  /// why: both providers' per-tile paths turned out to have hard
+  /// rate/size ceilings a real viewport's burst of simultaneous tile
+  /// requests kept hitting). Same backend endpoint, same auth, for
+  /// either provider.
+  Future<Uint8List> getRegionImage({
     required String providerId,
     required DateTime date,
+    required LatLngBounds bounds,
   }) async {
     final isoDate =
         '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    if (providerId == 'cdse_free') {
-      final template =
-          '${api.baseUrl}/plot/api/historical-map/cdse/tile/{z}/{x}/{y}/?date=$isoDate';
-      final token = api.authToken;
-      return HistoricalMapTileSource(
-        urlTemplate: template,
-        headers: token != null ? {'Authorization': 'Bearer $token'} : null,
-      );
-    }
-    final data = await api.getJson(
-        '/plot/api/historical-map/gee/tile-template/?date=$isoDate') as Map<String, dynamic>;
-    return HistoricalMapTileSource(urlTemplate: data['tile_url_template'] as String);
+    final query = {
+      'provider': providerId,
+      'date': isoDate,
+      'west': bounds.west.toString(),
+      'south': bounds.south.toString(),
+      'east': bounds.east.toString(),
+      'north': bounds.north.toString(),
+    };
+    final queryString = query.entries
+        .map((e) =>
+            '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    final path = '/plot/api/historical-map/region-image/?$queryString';
+    final response = await api.get(path);
+    return response.bodyBytes;
   }
 }
 
