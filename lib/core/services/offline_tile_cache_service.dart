@@ -129,11 +129,27 @@ class OfflineTileCache {
 /// available here), falls back to a plain NetworkImage, same as before
 /// this feature existed.
 class CachedTileProvider extends TileProvider {
+  // flutter_map's own NetworkTileProvider supports this (see its own
+  // source) specifically so a tile pruned by fast panning/zooming, or a
+  // whole TileLayer removed from the tree, stops being fetched instead of
+  // running to completion in the background for no one. Without it, our
+  // own providers kept working (and, for RetryingNetworkTileProvider
+  // below, kept retrying through multi-second backoff waits) after the
+  // farmer had already moved on -- directly competing with whatever the
+  // base map was trying to load next, which is why switching back to the
+  // base map after browsing historical dates felt slow.
   @override
-  ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
+  bool get supportsCancelLoading => true;
+
+  @override
+  ImageProvider getImageWithCancelLoadingSupport(
+    TileCoordinates coordinates,
+    TileLayer options,
+    Future<void> cancelLoading,
+  ) {
     final url = getTileUrl(coordinates, options);
     if (kIsWeb) return NetworkImage(url, headers: headers);
-    return _DiskCachedTileImage(url);
+    return _DiskCachedTileImage(url, cancelLoading);
   }
 }
 
@@ -151,7 +167,14 @@ class RetryingNetworkTileProvider extends TileProvider {
   RetryingNetworkTileProvider({super.headers});
 
   @override
-  ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
+  bool get supportsCancelLoading => true;
+
+  @override
+  ImageProvider getImageWithCancelLoadingSupport(
+    TileCoordinates coordinates,
+    TileLayer options,
+    Future<void> cancelLoading,
+  ) {
     final url = getTileUrl(coordinates, options);
     // Same web carve-out as CachedTileProvider above: manually decoding
     // bytes via dart:ui's ImmutableBuffer (what _RetryingNetworkTileImage
@@ -162,14 +185,15 @@ class RetryingNetworkTileProvider extends TileProvider {
     // lost on web as a result, but web is a secondary target here (the
     // real app is Android/iOS); getting it to render at all matters more.
     if (kIsWeb) return NetworkImage(url, headers: headers);
-    return _RetryingNetworkTileImage(url, headers);
+    return _RetryingNetworkTileImage(url, headers, cancelLoading);
   }
 }
 
 class _RetryingNetworkTileImage extends ImageProvider<_RetryingNetworkTileImage> {
   final String url;
   final Map<String, String> headers;
-  const _RetryingNetworkTileImage(this.url, this.headers);
+  final Future<void> cancelLoading;
+  const _RetryingNetworkTileImage(this.url, this.headers, this.cancelLoading);
 
   static const int _maxAttempts = 4;
   static const Duration _baseDelay = Duration(milliseconds: 500);
@@ -188,17 +212,31 @@ class _RetryingNetworkTileImage extends ImageProvider<_RetryingNetworkTileImage>
   }
 
   Future<ui.Codec> _load(ImageDecoderCallback decode) async {
-    Object lastError = Exception('Tile fetch failed for $url');
+    var cancelled = false;
+    // ignore: discarded_futures -- fire-and-forget flag flip, not awaited
+    cancelLoading.then((_) => cancelled = true);
+
+    Object lastError = Exception('Tile no longer needed: $url');
     for (var attempt = 0; attempt < _maxAttempts; attempt++) {
+      if (cancelled) throw lastError;
       if (attempt > 0) {
         // Exponential backoff + a little jitter, so a whole burst of
         // tiles that all got 429'd together don't all retry in lockstep
-        // and immediately trip the same rate limit again.
+        // and immediately trip the same rate limit again. Raced against
+        // cancelLoading so a tile that's been pruned mid-backoff (e.g.
+        // the farmer already switched dates or left the screen) doesn't
+        // sit out the full wait just to retry a fetch nothing needs
+        // anymore.
         final jitter = Duration(milliseconds: math.Random().nextInt(250));
-        await Future.delayed(_baseDelay * (1 << (attempt - 1)) + jitter);
+        await Future.any([
+          Future.delayed(_baseDelay * (1 << (attempt - 1)) + jitter),
+          cancelLoading,
+        ]);
+        if (cancelled) throw lastError;
       }
       try {
         final response = await http.get(Uri.parse(url), headers: headers);
+        if (cancelled) throw lastError;
         if (response.statusCode == 200) {
           final buffer = await ui.ImmutableBuffer.fromUint8List(response.bodyBytes);
           return await decode(buffer);
@@ -223,7 +261,8 @@ class _RetryingNetworkTileImage extends ImageProvider<_RetryingNetworkTileImage>
 
 class _DiskCachedTileImage extends ImageProvider<_DiskCachedTileImage> {
   final String url;
-  const _DiskCachedTileImage(this.url);
+  final Future<void> cancelLoading;
+  const _DiskCachedTileImage(this.url, this.cancelLoading);
 
   @override
   Future<_DiskCachedTileImage> obtainKey(ImageConfiguration configuration) =>
@@ -239,7 +278,10 @@ class _DiskCachedTileImage extends ImageProvider<_DiskCachedTileImage> {
   }
 
   Future<ui.Codec> _load(ImageDecoderCallback decode) async {
-    final bytes = await OfflineTileCache.instance.fetchTileBytes(url);
+    final bytes = await Future.any<Uint8List>([
+      OfflineTileCache.instance.fetchTileBytes(url),
+      cancelLoading.then((_) => throw Exception('Tile no longer needed: $url')),
+    ]);
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
     return decode(buffer);
   }
