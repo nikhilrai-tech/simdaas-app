@@ -11,6 +11,7 @@ abstract class ReportRepository {
     bool sortAscending = false,
     DateTime? createdAfter,
     DateTime? createdBefore,
+    List<String>? verificationStatuses,
   });
   Future<Report> getReport(String id);
   Future<void> deleteReport(String id);

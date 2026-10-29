@@ -144,11 +144,21 @@ class _FixReportPlotScreenState extends ConsumerState<FixReportPlotScreen> {
     });
   }
 
+  // Only live/verified reports are offered for a plot fix. 'prefilled' and
+  // 'verifying' reports may still have their totals corrected by the
+  // SD-card log-verification pipeline (see JobReport.VERIFICATION_STATUS_
+  // CHOICES / jobs/log_verification.py), so fixing the plot on one of those
+  // now could be immediately superseded by that automatic correction.
+  // 'live' reports never go through that pipeline at all (nothing to
+  // verify -- no backfilled data) and are safe to fix right away.
+  static const _fixablePlotVerificationStatuses = ['live', 'verified'];
+
   ReportsPageParams _params(int page) => ReportsPageParams(
         page: page,
         pageSize: _pageSize,
         createdAfter: _dateFrom,
         createdBefore: _dateTo,
+        verificationStatuses: _fixablePlotVerificationStatuses,
       );
 
   Future<void> _submit() async {
@@ -359,7 +369,8 @@ class _FixReportPlotScreenState extends ConsumerState<FixReportPlotScreen> {
             size: 20,
           ),
         ),
-        title: Text(report.plot?.name ?? 'Unknown plot', style: const TextStyle(fontWeight: FontWeight.w600)),
+        title: Text('${report.plot?.name ?? 'Unknown plot'} (#${report.id})',
+            style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(
           '${DateFormat('dd MMM yyyy, h:mm a').format(report.createdAt.toLocal())} · $areaLabel',
           style: const TextStyle(fontSize: 12),

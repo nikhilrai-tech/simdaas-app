@@ -18,6 +18,7 @@ class ReportRepositoryImpl implements ReportRepository {
     bool sortAscending = false,
     DateTime? createdAfter,
     DateTime? createdBefore,
+    List<String>? verificationStatuses,
   }) async {
     final result = await remoteDataSource.getReportsPage(
       page: page,
@@ -27,6 +28,7 @@ class ReportRepositoryImpl implements ReportRepository {
       sortAscending: sortAscending,
       createdAfter: createdAfter,
       createdBefore: createdBefore,
+      verificationStatuses: verificationStatuses,
     );
     return (reports: result.reports, totalCount: result.totalCount);
   }

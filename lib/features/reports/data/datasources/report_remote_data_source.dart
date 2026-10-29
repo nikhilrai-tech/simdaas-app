@@ -17,6 +17,7 @@ abstract class ReportRemoteDataSource {
     bool sortAscending = false,
     DateTime? createdAfter,
     DateTime? createdBefore,
+    List<String>? verificationStatuses,
   });
   Future<ReportModel> getReport(String id);
   Future<void> deleteReport(String id);
@@ -51,6 +52,7 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
     bool sortAscending = false,
     DateTime? createdAfter,
     DateTime? createdBefore,
+    List<String>? verificationStatuses,
   }) async {
     try {
       final params = <String, String>{
@@ -63,6 +65,8 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
           'created_after': createdAfter.toUtc().toIso8601String(),
         if (createdBefore != null)
           'created_before': createdBefore.toUtc().toIso8601String(),
+        if (verificationStatuses != null && verificationStatuses.isNotEmpty)
+          'verification_status': verificationStatuses.join(','),
       };
       final query = params.entries
           .map((e) =>
