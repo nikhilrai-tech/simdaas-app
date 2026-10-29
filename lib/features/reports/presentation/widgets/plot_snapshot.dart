@@ -111,9 +111,9 @@ class _PlotSnapshotState extends State<PlotSnapshot> {
               children: [
                 TileLayer(
                   urlTemplate: _isSatelliteView
-                      ? 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
-                      : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-                  subdomains: const ['a', 'b', 'c'],
+                      ? 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+                      : 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                  subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
                 ),
                 PolygonLayer(
                   polygons: [

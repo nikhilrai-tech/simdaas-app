@@ -27,9 +27,9 @@ import '../widgets/plot_snapshot.dart';
 import '../widgets/saved_donut_chart.dart';
 
 const String _kSatelliteTileUrl =
-    'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+    'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
 const String _kNormalTileUrl =
-    'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+    'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
 
 /// Small floating icon button toggling satellite/normal map view, styled to
 /// match the existing fullscreen/close buttons on these map cards. Shared by
@@ -1246,7 +1246,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                 TileLayer(
                   urlTemplate:
                       _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
-                  subdomains: const ['a', 'b', 'c'],
+                  subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
                 ),
                 if (report.plot != null)
                   PolygonLayer(
@@ -2042,7 +2042,7 @@ class _FullScreenMapPageState extends ConsumerState<_FullScreenMapPage> {
               TileLayer(
                 urlTemplate:
                     _isSatelliteView ? _kSatelliteTileUrl : _kNormalTileUrl,
-                subdomains: const ['a', 'b', 'c'],
+                subdomains: const ['mt0', 'mt1', 'mt2', 'mt3'],
               ),
               if (report.plot != null)
                 PolygonLayer(
