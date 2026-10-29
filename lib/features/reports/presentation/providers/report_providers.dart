@@ -15,6 +15,7 @@ class ReportsPageParams {
   final bool sortAscending;
   final DateTime? createdAfter;
   final DateTime? createdBefore;
+  final List<String>? verificationStatuses;
 
   const ReportsPageParams({
     required this.page,
@@ -24,7 +25,18 @@ class ReportsPageParams {
     this.sortAscending = false,
     this.createdAfter,
     this.createdBefore,
+    this.verificationStatuses,
   });
+
+  static bool _statusesEqual(List<String>? a, List<String>? b) {
+    if (identical(a, b)) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -35,11 +47,21 @@ class ReportsPageParams {
       other.controlUnitId == controlUnitId &&
       other.sortAscending == sortAscending &&
       other.createdAfter == createdAfter &&
-      other.createdBefore == createdBefore;
+      other.createdBefore == createdBefore &&
+      _statusesEqual(other.verificationStatuses, verificationStatuses);
 
   @override
-  int get hashCode => Object.hash(page, pageSize, plotId, controlUnitId,
-      sortAscending, createdAfter, createdBefore);
+  int get hashCode => Object.hash(
+      page,
+      pageSize,
+      plotId,
+      controlUnitId,
+      sortAscending,
+      createdAfter,
+      createdBefore,
+      verificationStatuses == null
+          ? null
+          : Object.hashAll(verificationStatuses!));
 }
 
 /// One page fetched directly from the backend, filtered/sorted server-side
@@ -59,6 +81,7 @@ final reportsListProvider = FutureProvider.family<
       sortAscending: params.sortAscending,
       createdAfter: params.createdAfter,
       createdBefore: params.createdBefore,
+      verificationStatuses: params.verificationStatuses,
     );
   },
 );
