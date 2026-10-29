@@ -251,7 +251,7 @@ class _PlotListScreenState extends ConsumerState<PlotListScreen>
                   itemBuilder: (context, idx) {
                     final f = plots[idx];
                     final summary = <String>[];
-                    if (f.area != null) summary.add('${f.area} ha');
+                    if (f.area != null) summary.add('${f.area} acre');
                     if (f.rowSpacing != null) summary.add('${f.rowSpacing} m');
                     if (f.treeCount != null)
                       summary.add('${f.treeCount} trees');

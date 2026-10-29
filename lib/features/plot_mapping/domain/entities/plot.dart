@@ -5,7 +5,7 @@ class PlotEntity {
   final String name;
   // owner/user who created/owns the plot
   final String? userId;
-  // total area in hectares
+  // total area in acres
   final double? area;
   // number of trees in the plot
   final int? treeCount;

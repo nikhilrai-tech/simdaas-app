@@ -14,7 +14,7 @@ Future<PlotModel?> showPlotSaveSheet(
     BuildContext context,
     WidgetRef ref,
     List<LatLng> normalizedPoints,
-    double Function(List<LatLng>) computeAreaHa,
+    double Function(List<LatLng>) computeAreaAcres,
     {PlotModel? existingPlot}) async {
   final nameCtrl = TextEditingController(text: existingPlot?.name);
   final zipCtrl = TextEditingController();
@@ -25,7 +25,7 @@ Future<PlotModel?> showPlotSaveSheet(
   final treeCountCtrl = TextEditingController(text: existingPlot?.treeCount?.toString());
 
   try {
-    final suggested = computeAreaHa(normalizedPoints);
+    final suggested = computeAreaAcres(normalizedPoints);
     if (suggested > 0) areaCtrl.text = suggested.toStringAsFixed(2);
   } catch (_) {}
 
@@ -122,10 +122,15 @@ class _PlotSaveSheetContent extends StatefulWidget {
 }
 
 class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
+  // Matches HECTARE_TO_ACRE in the backend (plot/migrations/0003_*).
+  static const double _acreToHaFactor = 4046.8564224 / 10000.0;
+
   final _formKey = GlobalKey<FormState>();
   String _bedUnit = 'm';
   String _rowUnit = 'm';
-  String _areaUnit = 'ha';
+  // Stored/sent value is genuinely acres (see PlotModel.area / user_area_acre),
+  // so acre is the unit the field starts in.
+  String _areaUnit = 'acre';
   String? _nameError;
 
   void _convertRow(String newUnit) {
@@ -161,12 +166,12 @@ class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
   void _convertArea(String newUnit) {
     final currentVal = double.tryParse(widget.areaCtrl.text) ?? 0;
     if (currentVal == 0) { setState(() => _areaUnit = newUnit); return; }
-    double inHa;
-    if (_areaUnit == 'acre') inHa = currentVal * 0.404686;
-    else inHa = currentVal;
+    double inAcre;
+    if (_areaUnit == 'ha') inAcre = currentVal / _acreToHaFactor;
+    else inAcre = currentVal;
     double newVal;
-    if (newUnit == 'acre') newVal = inHa / 0.404686;
-    else newVal = inHa;
+    if (newUnit == 'ha') newVal = inAcre * _acreToHaFactor;
+    else newVal = inAcre;
     widget.areaCtrl.text = newVal.toStringAsFixed(2);
     setState(() => _areaUnit = newUnit);
   }
@@ -372,11 +377,13 @@ class _PlotSaveSheetContentState extends State<_PlotSaveSheetContent> {
                       }
                     }
 
+                    // Always send genuine acres (user_area_acre), regardless
+                    // of which unit is currently shown in the field.
                     String areaOut = widget.areaCtrl.text;
                     if (areaOut.isNotEmpty) {
                       final v = double.tryParse(areaOut);
                       if (v != null) {
-                        if (_areaUnit == 'acre') areaOut = (v * 0.404686).toString();
+                        if (_areaUnit == 'ha') areaOut = (v / _acreToHaFactor).toString();
                         else areaOut = v.toString();
                       }
                     }
