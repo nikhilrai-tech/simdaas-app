@@ -137,6 +137,81 @@ class CachedTileProvider extends TileProvider {
   }
 }
 
+/// Plain network TileProvider (no disk cache -- the historical-imagery
+/// overlay is one-off per date/provider, not worth caching the way the
+/// base map is) that retries a tile a few times, with backoff, on HTTP 429
+/// or 503. The historical overlay asks for a whole viewport's worth of
+/// tiles from CDSE/Earth Engine at once; both providers have been observed
+/// rate-limiting/rejecting some of that burst (429 from Earth Engine's own
+/// tile server, 503 from our CDSE proxy when the Process API itself
+/// rejects a request under load) even though the SAME tile fetched alone,
+/// moments later, succeeds -- a bare NetworkTileProvider just leaves that
+/// tile blank forever once its single request fails.
+class RetryingNetworkTileProvider extends TileProvider {
+  RetryingNetworkTileProvider({super.headers});
+
+  @override
+  ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
+    final url = getTileUrl(coordinates, options);
+    return _RetryingNetworkTileImage(url, headers);
+  }
+}
+
+class _RetryingNetworkTileImage extends ImageProvider<_RetryingNetworkTileImage> {
+  final String url;
+  final Map<String, String> headers;
+  const _RetryingNetworkTileImage(this.url, this.headers);
+
+  static const int _maxAttempts = 4;
+  static const Duration _baseDelay = Duration(milliseconds: 500);
+
+  @override
+  Future<_RetryingNetworkTileImage> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture<_RetryingNetworkTileImage>(this);
+
+  @override
+  ImageStreamCompleter loadImage(_RetryingNetworkTileImage key, ImageDecoderCallback decode) {
+    return MultiFrameImageStreamCompleter(
+      codec: _load(decode),
+      scale: 1.0,
+      debugLabel: url,
+    );
+  }
+
+  Future<ui.Codec> _load(ImageDecoderCallback decode) async {
+    Object lastError = Exception('Tile fetch failed for $url');
+    for (var attempt = 0; attempt < _maxAttempts; attempt++) {
+      if (attempt > 0) {
+        // Exponential backoff + a little jitter, so a whole burst of
+        // tiles that all got 429'd together don't all retry in lockstep
+        // and immediately trip the same rate limit again.
+        final jitter = Duration(milliseconds: math.Random().nextInt(250));
+        await Future.delayed(_baseDelay * (1 << (attempt - 1)) + jitter);
+      }
+      try {
+        final response = await http.get(Uri.parse(url), headers: headers);
+        if (response.statusCode == 200) {
+          final buffer = await ui.ImmutableBuffer.fromUint8List(response.bodyBytes);
+          return await decode(buffer);
+        }
+        lastError = Exception('Tile fetch failed: HTTP ${response.statusCode} for $url');
+        // Only 429/503 are worth retrying -- a 400/404/auth error won't
+        // fix itself.
+        if (response.statusCode != 429 && response.statusCode != 503) break;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError;
+  }
+
+  @override
+  bool operator ==(Object other) => other is _RetryingNetworkTileImage && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}
+
 class _DiskCachedTileImage extends ImageProvider<_DiskCachedTileImage> {
   final String url;
   const _DiskCachedTileImage(this.url);

@@ -629,7 +629,7 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               if (_historicalTileSource != null)
                 TileLayer(
                   urlTemplate: _historicalTileSource!.urlTemplate,
-                  tileProvider: NetworkTileProvider(headers: _historicalTileSource!.headers),
+                  tileProvider: RetryingNetworkTileProvider(headers: _historicalTileSource!.headers),
                 ),
               const MyLocationLayer(),
               // Plot polygon
