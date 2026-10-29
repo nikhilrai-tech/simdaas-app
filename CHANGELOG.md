@@ -10,6 +10,35 @@ already written — see "Release process" at the bottom.
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-10-29
+
+### Fixed
+- Settings → Fix report plot now only lists reports whose data has
+  actually settled (live reports, or ones already confirmed against the
+  sprayer's own on-device log) — a report still mid-verification no
+  longer shows up as a candidate to reassign, since its numbers (and
+  therefore what "fixing" its plot would recompute) aren't final yet.
+  Each report in the list now also shows its own report ID. *(backend)*
+- Plot area is now shown and saved consistently in acres everywhere —
+  Plot Save sheet, Plot Details, Plot List, Map Plot's live area readout
+  while drawing, and a report's own "Plot Area" figure. Some of these
+  previously showed hectares, mislabeled a value that was already in
+  acres, or (Plot Save sheet) had its unit-conversion on save applying
+  the hectare→acre scaling backwards.
+- Every map screen in the app (Map Plot, Row Lines, Monitoring, Report
+  Details, Job creation) could be slow to fully load — every tile
+  request was funneled through a single fixed host with no real
+  concurrency, and a plot already viewed before wasn't cached to disk
+  the way the Map Plot/Monitoring screens already were. Tile requests
+  now spread across Google's real subdomains, and every map screen now
+  shares the same disk cache — a plot seen once loads instantly
+  everywhere after that.
+- Map Plot (new plot creation) could sit at a placeholder location for
+  several seconds before jumping to your real position, waiting on a
+  fresh GPS fix. Now moves to a cached last-known fix immediately (the
+  same fast-then-accurate approach the "locate me" button already
+  used), then refines it once the accurate fix is ready.
+
 ## [1.1.5] - 2026-10-23
 
 ### Added
