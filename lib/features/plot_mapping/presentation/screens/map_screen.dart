@@ -71,7 +71,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   final FocusNode _searchFocus = FocusNode();
 
   // (multi-pointer centroid removed; we use simple single-touch drag for vertices)
-  double _computeAreaHa(List<LatLng> poly) {
+  double _computeAreaAcres(List<LatLng> poly) {
     if (poly.length < 3) return 0.0;
     const R = 6371000.0; // Earth radius in meters
     // use centroid latitude for projection scale
@@ -98,7 +98,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       area += xs[i] * ys[j] - xs[j] * ys[i];
     }
     area = area.abs() * 0.5; // in square meters
-    return area / 10000.0; // hectares
+    // Matches ACRE_SQM in the backend (session_service.py).
+    return area / 4046.8564224; // acres
   }
 
   void _onTapTap(TapPosition tapPos, LatLng latlng) {
@@ -423,7 +424,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     ref.read(mapStateProvider.notifier).setPoints(normalizedPoints);
 
     final pendingModel = await showPlotSaveSheet(
-        context, ref, normalizedPoints, _computeAreaHa,
+        context, ref, normalizedPoints, _computeAreaAcres,
         existingPlot: widget.existingPlot);
     if (pendingModel == null) return;
 
@@ -538,7 +539,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             );
 
       final pendingModel = await showPlotSaveSheet(
-          context, ref, normalizedPoints, _computeAreaHa,
+          context, ref, normalizedPoints, _computeAreaAcres,
           existingPlot: importedRowsCarrier);
       if (pendingModel == null) return;
 

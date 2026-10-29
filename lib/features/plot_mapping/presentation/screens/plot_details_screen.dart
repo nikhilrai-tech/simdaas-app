@@ -654,7 +654,7 @@ class _PlotSummaryHeader extends SliverPersistentHeaderDelegate {
       Text(plot.name,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
       const SizedBox(height: 6),
-      if (plot.area != null) Text('Area: ${plot.area} ha'),
+      if (plot.area != null) Text('Area: ${plot.area} acre'),
       if (plot.treeCount != null) Text('Trees: ${plot.treeCount}'),
       if (plot.rowSpacing != null) Text('Row spacing: ${plot.rowSpacing} m'),
       Text(
@@ -781,7 +781,7 @@ class _EditPlotSheetState extends State<_EditPlotSheet> {
                   TextFormField(
                       controller: widget.areaCtrl,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Approx Area (ha) *'),
+                      decoration: const InputDecoration(labelText: 'Approx Area (acre) *'),
                       validator: (v) {
                         if (v == null || v.trim().isEmpty) return 'Enter approx area';
                         if (double.tryParse(v.trim()) == null) return 'Invalid number';
