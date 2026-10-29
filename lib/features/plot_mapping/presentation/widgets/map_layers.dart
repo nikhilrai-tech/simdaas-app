@@ -1,9 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:simdaas/core/services/offline_tile_cache_service.dart';
 import 'package:simdaas/core/widgets/my_location_layer.dart';
-import '../utils/historical_map_service.dart';
 
 /// Renders map tile, polygon and vertex markers and forwards pointer events
 /// to callers so the parent can handle selection/move logic.
@@ -23,11 +24,13 @@ class MapLayers extends StatelessWidget {
   // Historical-imagery overlay (see historical_map_service.dart) -- null
   // (the default, every existing caller) means no overlay at all, and the
   // normal tile layer below renders exactly as it always has. When set,
-  // drawn as a second, fully opaque TileLayer on top of the normal one, so
-  // turning the overlay back off (setting these back to null) is a plain
-  // rebuild, nothing to restore.
-  final String? historicalTileUrlTemplate;
-  final Map<String, String>? historicalTileHeaders;
+  // drawn as a single bounded image on top of the normal tile layer --
+  // ONE composite image covering historicalImageBounds, not an XYZ tile
+  // pyramid (see historical_map.py's module docstring for why: both
+  // providers' per-tile paths had hard rate/size ceilings a real
+  // viewport's burst of tile requests kept hitting).
+  final Uint8List? historicalImageBytes;
+  final LatLngBounds? historicalImageBounds;
 
   // Pointer event forwards for markers
   final void Function(int index, PointerEvent event) onMarkerPointerDown;
@@ -46,8 +49,8 @@ class MapLayers extends StatelessWidget {
     this.onTap,
     this.onMyLocation,
     this.isSatellite = true,
-    this.historicalTileUrlTemplate,
-    this.historicalTileHeaders,
+    this.historicalImageBytes,
+    this.historicalImageBounds,
     required this.onMarkerPointerDown,
     required this.onMarkerPointerMove,
     required this.onMarkerPointerUp,
@@ -84,19 +87,13 @@ class MapLayers extends StatelessWidget {
             // service.dart for why this is a from-scratch implementation
             // rather than the usual flutter_map_tile_caching package (GPL).
             tileProvider: CachedTileProvider()),
-        if (historicalTileUrlTemplate != null)
-          TileLayer(
-            urlTemplate: historicalTileUrlTemplate,
-            tileProvider: RetryingNetworkTileProvider(headers: historicalTileHeaders),
-            // CDSE's Sentinel-2 Process API hard-rejects anything coarser
-            // than 1500 m/pixel (confirmed: a zoom-5 tile needs ~4357
-            // m/pixel there, a flat 400 "exceeds the limit" every time,
-            // not a rate limit) -- below this zoom the overlay just
-            // doesn't request tiles at all rather than erroring on every
-            // one. historicalMapMinZoom lives in historical_map_service.dart
-            // so the picker sheet can show the same threshold as a hint.
-            minZoom: historicalMapMinZoom,
-          ),
+        if (historicalImageBytes != null && historicalImageBounds != null)
+          OverlayImageLayer(overlayImages: [
+            OverlayImage(
+              bounds: historicalImageBounds!,
+              imageProvider: MemoryImage(historicalImageBytes!),
+            ),
+          ]),
         MyLocationLayer(onPosition: onMyLocation),
         if (points.isNotEmpty) ...[
           PolygonLayer(polygons: [
