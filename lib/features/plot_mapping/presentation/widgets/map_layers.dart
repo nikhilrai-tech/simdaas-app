@@ -86,7 +86,7 @@ class MapLayers extends StatelessWidget {
         if (historicalTileUrlTemplate != null)
           TileLayer(
             urlTemplate: historicalTileUrlTemplate,
-            tileProvider: NetworkTileProvider(headers: historicalTileHeaders),
+            tileProvider: RetryingNetworkTileProvider(headers: historicalTileHeaders),
           ),
         MyLocationLayer(onPosition: onMyLocation),
         if (points.isNotEmpty) ...[
