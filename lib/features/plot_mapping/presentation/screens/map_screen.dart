@@ -230,18 +230,36 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       }
     });
 
-    // If no initial data, try to move to device's current location
+    // If no initial data, try to move to device's current location. Same
+    // fast-then-accurate pattern as _centerOnCurrentLocation() below: a
+    // cached last-known fix resolves near-instantly (no live GPS wait), so
+    // the map moves off flutter_map's placeholder default on essentially
+    // the next frame instead of sitting there for however long a fresh GPS
+    // fix takes (can be several seconds, longer indoors/cold start) --
+    // then the accurate fix refines it once it's ready.
     if (widget.initialCenter == null &&
         (widget.initialPoints == null || widget.initialPoints!.isEmpty)) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
+        bool movedOnce = false;
+        try {
+          final lastKnown = await LocationService().getLastKnownLocation();
+          if (lastKnown != null && mounted) {
+            _mapController.move(lastKnown, 18.0);
+            movedOnce = true;
+          }
+        } catch (e, st) {
+          debugPrint('map_screen.initState.getLastKnownLocation error: $e\n$st');
+        }
         try {
           final loc = await LocationService().getCurrentLocation();
           // ignore invalid fallback (0,0)
-          if (loc.latitude != 0 || loc.longitude != 0) {
+          if (mounted && (loc.latitude != 0 || loc.longitude != 0)) {
             _mapController.move(loc, 18.0);
           }
         } catch (e, st) {
-          debugPrint('map_screen.initState.getCurrentLocation error: $e\n$st');
+          if (!movedOnce) {
+            debugPrint('map_screen.initState.getCurrentLocation error: $e\n$st');
+          }
         }
       });
     }
