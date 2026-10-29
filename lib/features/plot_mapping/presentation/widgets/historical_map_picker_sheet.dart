@@ -90,7 +90,6 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
     try {
       final providers = await widget.ref.read(historicalMapServiceProvider).getProviders();
       if (!mounted) return;
-      final hadProvider = _selectedProviderId != null;
       setState(() {
         _providers = providers;
         _selectedProviderId ??= providers.firstWhere(
@@ -98,13 +97,13 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
           orElse: () => providers.first,
         ).id;
       });
-      // Auto-preview as soon as a provider is first resolved (fresh open,
-      // nothing picked yet) -- the whole point of the live-browsing flow is
-      // that the farmer never has to tap a separate "show" button, the
-      // default date just appears. A re-open with an existing selection
-      // (hadProvider) already has that state showing on the map -- no need
-      // to refetch the exact same tile again.
-      if (!hadProvider) await _preview();
+      // No auto-preview here anymore: each date change is a real backend
+      // tile fetch (CDSE's Process API alone is ~1-3s per uncached tile),
+      // and firing a whole fetch wave the instant the sheet opens -- before
+      // the farmer has touched anything -- was making the sheet itself feel
+      // slow to open and made the map behind it visibly stutter/blur while
+      // tiles streamed in. Now the first real fetch only happens once they
+      // pick a provider or step a date, same as every fetch after it.
     } catch (e) {
       if (mounted) setState(() => _error = 'Could not load historical map providers — $e');
     }
