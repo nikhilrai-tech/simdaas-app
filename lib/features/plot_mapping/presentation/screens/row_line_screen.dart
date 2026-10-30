@@ -50,6 +50,11 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   // Row line state
   List<List<LatLng>> _rowLines = [];
 
+  // Deleted rows stay in _rowLines as empty ([]) placeholders rather than
+  // being removed (see _buildRowDeleteMarkers for why) -- this is the
+  // actual row count, for display.
+  int get _realRowCount => _rowLines.where((r) => r.length >= 2).length;
+
   // Manual drag state
   Offset? _lastPointerPos;
   int? _draggingRow;
@@ -591,7 +596,10 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
               overflow: TextOverflow.ellipsis,
             ),
             Text(
-              '${_rowLines.length} row${_rowLines.length == 1 ? '' : 's'}',
+              // Deleted rows stay in _rowLines as empty placeholders (see
+              // _buildRowDeleteMarkers), so the real count is however many
+              // slots still have actual points, not the list length.
+              '$_realRowCount row${_realRowCount == 1 ? '' : 's'}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).appBarTheme.foregroundColor?.withValues(alpha: 0.75) ??
                         Theme.of(context).colorScheme.onSurfaceVariant,
