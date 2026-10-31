@@ -1,11 +1,23 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
+import '../../data/datasources/investor_report_remote_data_source.dart';
 import '../../data/datasources/report_remote_data_source.dart';
 import '../../data/repositories/report_repository_impl.dart';
 import '../../domain/report.dart';
 
 final reportRepoProvider = Provider((ref) =>
     ReportRepositoryImpl(ReportRemoteDataSourceImpl(ref.read(apiServiceProvider))));
+
+/// Same ReportRepositoryImpl, pointed at the investor-facing fleet-wide
+/// endpoints instead. Backs investorReportsListProvider/
+/// investorReportDetailProvider below -- a ProviderScope override of
+/// reportRepoProvider was considered instead of a parallel provider family,
+/// but doesn't actually work here: ReportsListScreen pushes
+/// ReportDetailsScreen via the app's single root Navigator, which mounts
+/// the new route as a sibling of wherever the ProviderScope override was
+/// applied, not a descendant of it, so the override would never reach it.
+final investorReportRepoProvider = Provider((ref) => ReportRepositoryImpl(
+    InvestorReportRemoteDataSourceImpl(ref.read(apiServiceProvider))));
 
 class ReportsPageParams {
   final int page;
@@ -88,6 +100,33 @@ final reportsListProvider = FutureProvider.family<
 
 final reportDetailProvider = FutureProvider.family((ref, String id) async {
   final repo = ref.read(reportRepoProvider);
+  return repo.getReport(id);
+});
+
+/// Investor-viewer equivalents of reportsListProvider/reportDetailProvider
+/// above -- same params/shape, just backed by investorReportRepoProvider
+/// (fleet-wide, every user's reports) instead of the farmer-scoped one.
+/// InvestorReportsScreen/ReportDetailsScreen(readOnly: true) watch these
+/// instead of the normal pair.
+final investorReportsListProvider = FutureProvider.family<
+    ({List<Report> reports, int totalCount}), ReportsPageParams>(
+  (ref, params) async {
+    final repo = ref.read(investorReportRepoProvider);
+    return repo.getReportsPage(
+      page: params.page,
+      pageSize: params.pageSize,
+      plotId: params.plotId,
+      controlUnitId: params.controlUnitId,
+      sortAscending: params.sortAscending,
+      createdAfter: params.createdAfter,
+      createdBefore: params.createdBefore,
+      verificationStatuses: params.verificationStatuses,
+    );
+  },
+);
+
+final investorReportDetailProvider = FutureProvider.family((ref, String id) async {
+  final repo = ref.read(investorReportRepoProvider);
   return repo.getReport(id);
 });
 
