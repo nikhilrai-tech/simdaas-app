@@ -140,8 +140,16 @@ class _LoginFormState extends ConsumerState<LoginForm> {
                           await _storage.write(
                               key: _kSavedEmail, value: email);
                           TextInput.finishAutofillContext();
-                          Navigator.of(context)
-                              .pushReplacementNamed('/dashboard');
+                          // Not a hardcoded '/dashboard' -- that always
+                          // landed on the farmer TempDashboard regardless
+                          // of account type, bypassing AuthGate's
+                          // is_investor_viewer branch entirely (it only
+                          // ran on next app start/refresh, when AuthGate
+                          // re-evaluates from scratch). Popping to root
+                          // lets AuthGate itself decide where a freshly
+                          // signed-in account belongs.
+                          Navigator.of(context).pushNamedAndRemoveUntil(
+                              '/', (route) => false);
                         }
                       } else if (state is AsyncError) {
                         final msg = extractErrorMessage(state.error);

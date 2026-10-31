@@ -33,6 +33,7 @@ class InvestorReportRemoteDataSourceImpl implements ReportRemoteDataSource {
     DateTime? createdAfter,
     DateTime? createdBefore,
     List<String>? verificationStatuses,
+    String? reportId,
   }) async {
     try {
       final params = <String, String>{
@@ -47,6 +48,7 @@ class InvestorReportRemoteDataSourceImpl implements ReportRemoteDataSource {
           'created_before': createdBefore.toUtc().toIso8601String(),
         if (verificationStatuses != null && verificationStatuses.isNotEmpty)
           'verification_status': verificationStatuses.join(','),
+        if (reportId != null && reportId.isNotEmpty) 'report_id': reportId,
       };
       final query = params.entries
           .map((e) =>

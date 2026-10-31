@@ -18,6 +18,7 @@ abstract class ReportRemoteDataSource {
     DateTime? createdAfter,
     DateTime? createdBefore,
     List<String>? verificationStatuses,
+    String? reportId,
   });
   Future<ReportModel> getReport(String id);
   Future<void> deleteReport(String id);
@@ -53,6 +54,7 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
     DateTime? createdAfter,
     DateTime? createdBefore,
     List<String>? verificationStatuses,
+    String? reportId,
   }) async {
     try {
       final params = <String, String>{
@@ -67,6 +69,7 @@ class ReportRemoteDataSourceImpl implements ReportRemoteDataSource {
           'created_before': createdBefore.toUtc().toIso8601String(),
         if (verificationStatuses != null && verificationStatuses.isNotEmpty)
           'verification_status': verificationStatuses.join(','),
+        if (reportId != null && reportId.isNotEmpty) 'report_id': reportId,
       };
       final query = params.entries
           .map((e) =>

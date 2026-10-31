@@ -32,6 +32,28 @@ void main() {
       expect(result.reports, hasLength(2));
       expect(result.totalCount, 7);
     });
+
+    test('passes reportId through as the report_id query param', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.queryParameters['report_id'], '10220');
+        return http.Response(jsonEncode({'results': [], 'count': 0}), 200);
+      });
+      final api = ApiService(baseUrl: 'https://api.example.com', client: mockClient);
+      final ds = InvestorReportRemoteDataSourceImpl(api);
+
+      await ds.getReportsPage(page: 1, pageSize: 10, reportId: '10220');
+    });
+
+    test('omits report_id entirely when not searching', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.queryParameters.containsKey('report_id'), isFalse);
+        return http.Response(jsonEncode({'results': [], 'count': 0}), 200);
+      });
+      final api = ApiService(baseUrl: 'https://api.example.com', client: mockClient);
+      final ds = InvestorReportRemoteDataSourceImpl(api);
+
+      await ds.getReportsPage(page: 1, pageSize: 10);
+    });
   });
 
   group('InvestorReportRemoteDataSourceImpl.getReport', () {
