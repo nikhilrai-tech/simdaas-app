@@ -28,6 +28,7 @@ class ReportsPageParams {
   final DateTime? createdAfter;
   final DateTime? createdBefore;
   final List<String>? verificationStatuses;
+  final String? reportId;
 
   const ReportsPageParams({
     required this.page,
@@ -38,6 +39,7 @@ class ReportsPageParams {
     this.createdAfter,
     this.createdBefore,
     this.verificationStatuses,
+    this.reportId,
   });
 
   static bool _statusesEqual(List<String>? a, List<String>? b) {
@@ -60,6 +62,7 @@ class ReportsPageParams {
       other.sortAscending == sortAscending &&
       other.createdAfter == createdAfter &&
       other.createdBefore == createdBefore &&
+      other.reportId == reportId &&
       _statusesEqual(other.verificationStatuses, verificationStatuses);
 
   @override
@@ -71,6 +74,7 @@ class ReportsPageParams {
       sortAscending,
       createdAfter,
       createdBefore,
+      reportId,
       verificationStatuses == null
           ? null
           : Object.hashAll(verificationStatuses!));
@@ -94,6 +98,7 @@ final reportsListProvider = FutureProvider.family<
       createdAfter: params.createdAfter,
       createdBefore: params.createdBefore,
       verificationStatuses: params.verificationStatuses,
+      reportId: params.reportId,
     );
   },
 );
@@ -121,6 +126,7 @@ final investorReportsListProvider = FutureProvider.family<
       createdAfter: params.createdAfter,
       createdBefore: params.createdBefore,
       verificationStatuses: params.verificationStatuses,
+      reportId: params.reportId,
     );
   },
 );

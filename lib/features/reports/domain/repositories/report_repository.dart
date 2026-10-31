@@ -12,6 +12,7 @@ abstract class ReportRepository {
     DateTime? createdAfter,
     DateTime? createdBefore,
     List<String>? verificationStatuses,
+    String? reportId,
   });
   Future<Report> getReport(String id);
   Future<void> deleteReport(String id);

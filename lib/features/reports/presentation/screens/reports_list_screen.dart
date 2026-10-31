@@ -52,6 +52,8 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   String? _selectedPlotId;
   String? _selectedControlUnitId;
   bool _sortAscending = false; // Default Newest first
+  final _searchCtrl = TextEditingController();
+  String? _reportIdQuery;
 
   _DatePreset _datePreset = _DatePreset.today;
   DateTimeRange? _customRange;
@@ -191,7 +193,21 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   @override
   void dispose() {
     _autoRefreshSub.cancel();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _applySearch(String value) {
+    final trimmed = value.trim();
+    setState(() {
+      _reportIdQuery = trimmed.isEmpty ? null : trimmed;
+      _currentPage = 0;
+    });
+  }
+
+  void _clearSearch() {
+    _searchCtrl.clear();
+    _applySearch('');
   }
 
   @override
@@ -206,6 +222,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
       sortAscending: _sortAscending,
       createdAfter: _dateFrom,
       createdBefore: _dateTo,
+      reportId: _reportIdQuery,
     );
     final reportsAsync = widget.isInvestorView
         ? ref.watch(investorReportsListProvider(pageParams))
@@ -242,7 +259,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
       backgroundColor: Colors.grey[50], // Light background for contrast
       body: Column(
         children: [
-          if (!widget.isInvestorView) _buildFilterBar(context, ref),
+          _buildFilterBar(context, ref),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refreshData,
@@ -508,71 +525,42 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   }
 
   Widget _buildFilterBar(BuildContext context, WidgetRef ref) {
-    final userId = ref.read(authServiceProvider).currentUserId ?? '';
-    final plotsAsync = ref.watch(plot_provs.plotsListProvider(userId));
-    final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       color: Colors.white,
       child: Column(
         children: [
-          Row(
-        children: [
-          Expanded(
-            child: plotsAsync.when(
-              data: (plots) => DropdownButtonFormField<String?>(
-                value: _selectedPlotId,
-                style: const TextStyle(fontSize: 13, color: Colors.black),
-                decoration: const InputDecoration(
-                  labelText: 'Field',
-                  labelStyle: TextStyle(fontSize: 12),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  border: OutlineInputBorder(),
-                ),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('All Fields', style: TextStyle(fontSize: 13))),
-                  ...plots.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name, style: const TextStyle(fontSize: 13)))),
-                ],
-                onChanged: (val) => setState(() {
-                  _selectedPlotId = val;
-                  _currentPage = 0;
-                }),
+          if (widget.isInvestorView)
+            TextField(
+              controller: _searchCtrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'Search by Report ID',
+                labelStyle: const TextStyle(fontSize: 12),
+                isDense: true,
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _reportIdQuery == null
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: _clearSearch,
+                      ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                border: const OutlineInputBorder(),
               ),
-              loading: () => const LinearProgressIndicator(),
-              error: (_, __) => const Text('Error loading plots'),
+              onSubmitted: _applySearch,
             ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: controlUnitsAsync.when(
-              data: (cus) => DropdownButtonFormField<String?>(
-                value: _selectedControlUnitId,
-                style: const TextStyle(fontSize: 13, color: Colors.black),
-                decoration: const InputDecoration(
-                  labelText: 'Unit',
-                  labelStyle: TextStyle(fontSize: 12),
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                  border: OutlineInputBorder(),
-                ),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('All Units', style: TextStyle(fontSize: 13))),
-                  ...cus.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name, style: const TextStyle(fontSize: 13)))),
-                ],
-                onChanged: (val) => setState(() {
-                  _selectedControlUnitId = val;
-                  _currentPage = 0;
-                }),
-              ),
-              loading: () => const LinearProgressIndicator(),
-              error: (_, __) => const Text('Error loading units'),
-            ),
-          ),
-        ],
-          ),
-          const SizedBox(height: 8),
+          if (widget.isInvestorView) const SizedBox(height: 8),
+          // Field/Unit filters only make sense for a farmer's own
+          // plots/devices -- an investor account has none of its own (it
+          // sees every owner's reports), so this row (and the provider
+          // reads that back it) is skipped entirely in investor view.
+          if (!widget.isInvestorView) ...[
+            _buildFieldUnitRow(context, ref),
+            const SizedBox(height: 8),
+          ],
           Align(
             alignment: Alignment.centerLeft,
             child: InkWell(
@@ -605,6 +593,68 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildFieldUnitRow(BuildContext context, WidgetRef ref) {
+    final userId = ref.read(authServiceProvider).currentUserId ?? '';
+    final plotsAsync = ref.watch(plot_provs.plotsListProvider(userId));
+    final controlUnitsAsync = ref.watch(eq_provs.controlUnitsProvider(userId));
+
+    return Row(
+              children: [
+                Expanded(
+                  child: plotsAsync.when(
+                    data: (plots) => DropdownButtonFormField<String?>(
+                      value: _selectedPlotId,
+                      style: const TextStyle(fontSize: 13, color: Colors.black),
+                      decoration: const InputDecoration(
+                        labelText: 'Field',
+                        labelStyle: TextStyle(fontSize: 12),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('All Fields', style: TextStyle(fontSize: 13))),
+                        ...plots.map((p) => DropdownMenuItem(value: p.id, child: Text(p.name, style: const TextStyle(fontSize: 13)))),
+                      ],
+                      onChanged: (val) => setState(() {
+                        _selectedPlotId = val;
+                        _currentPage = 0;
+                      }),
+                    ),
+                    loading: () => const LinearProgressIndicator(),
+                    error: (_, __) => const Text('Error loading plots'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: controlUnitsAsync.when(
+                    data: (cus) => DropdownButtonFormField<String?>(
+                      value: _selectedControlUnitId,
+                      style: const TextStyle(fontSize: 13, color: Colors.black),
+                      decoration: const InputDecoration(
+                        labelText: 'Unit',
+                        labelStyle: TextStyle(fontSize: 12),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('All Units', style: TextStyle(fontSize: 13))),
+                        ...cus.map((c) => DropdownMenuItem(value: c.id, child: Text(c.name, style: const TextStyle(fontSize: 13)))),
+                      ],
+                      onChanged: (val) => setState(() {
+                        _selectedControlUnitId = val;
+                        _currentPage = 0;
+                      }),
+                    ),
+                    loading: () => const LinearProgressIndicator(),
+                    error: (_, __) => const Text('Error loading units'),
+                  ),
+                ),
+              ],
+            );
   }
 
   Widget _buildMiniStat(IconData icon, String value, String label) {
