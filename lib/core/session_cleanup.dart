@@ -25,6 +25,8 @@ import '../features/reports/presentation/providers/session_providers.dart';
 void clearUserScopedCaches(WidgetRef ref) {
   ref.invalidate(reportsListProvider);
   ref.invalidate(reportDetailProvider);
+  ref.invalidate(investorReportsListProvider);
+  ref.invalidate(investorReportDetailProvider);
   ref.invalidate(activeSessionsListProvider);
   ref.invalidate(jobsListProvider);
   ref.invalidate(plotsListProvider);

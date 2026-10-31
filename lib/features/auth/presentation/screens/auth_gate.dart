@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:simdaas/core/services/auth_service.dart';
 import 'package:simdaas/core/widgets/agrios_splash_screen.dart';
 import 'package:simdaas/features/auth/presentation/screens/login_screen.dart';
+import 'package:simdaas/features/reports/presentation/screens/reports_list_screen.dart';
 import 'package:simdaas/temp_features/control_centres_dashboard.dart';
 
 class AuthGate extends ConsumerStatefulWidget {
@@ -42,6 +43,16 @@ class _AuthGateState extends ConsumerState<AuthGate> {
 
     // If token exists, go to dashboard; otherwise show login
     if (auth.token != null) {
+      // Same precedent as control_centres_dashboard.dart's own
+      // is_superadmin check -- an investor_viewer account never has any
+      // plots/devices of its own, so the normal farmer dashboard (and
+      // every other tab) would just be empty/meaningless clutter for it.
+      // Routes straight to the fleet-wide, read-only Reports screen
+      // instead -- the only thing this account type is meant to see.
+      final isInvestorViewer = auth.currentUserMap?['is_investor_viewer'] == true;
+      if (isInvestorViewer) {
+        return const ReportsListScreen(isInvestorView: true, title: 'All Reports');
+      }
       return const TempDashboard();
     }
 

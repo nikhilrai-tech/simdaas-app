@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 import 'package:simdaas/core/services/auth_service.dart';
+import 'package:simdaas/core/session_cleanup.dart';
 import '../providers/report_providers.dart';
 import 'package:simdaas/features/plot_mapping/presentation/providers/plot_providers.dart' as plot_provs;
 import 'package:simdaas/features/equipments/presentation/providers/equipment_providers.dart' as eq_provs;
@@ -10,7 +11,22 @@ import 'package:simdaas/core/utils/mac_utils.dart';
 import 'report_details_screen.dart';
 
 class ReportsListScreen extends ConsumerStatefulWidget {
-  const ReportsListScreen({super.key});
+  // Investor-viewer mode: fleet-wide reports (investorReportsListProvider,
+  // every user's, not just the signed-in account's own) instead of the
+  // normal reportsListProvider, no Field/Unit filters (there's no "my own
+  // plots/devices" for an investor account to filter by), reports open
+  // read-only, and the AppBar gets a sign-out action since an investor
+  // account has no Settings screen to reach one from otherwise. Defaults
+  // to false everywhere else -- zero behavior change for the normal,
+  // farmer-facing screen.
+  final bool isInvestorView;
+  final String title;
+
+  const ReportsListScreen({
+    super.key,
+    this.isInvestorView = false,
+    this.title = 'Spray Reports',
+  });
 
   @override
   ConsumerState<ReportsListScreen> createState() => _ReportsListScreenState();
@@ -163,7 +179,13 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
   }
 
   Future<void> _refreshData() async {
-    ref.invalidate(reportsListProvider);
+    ref.invalidate(widget.isInvestorView ? investorReportsListProvider : reportsListProvider);
+  }
+
+  Future<void> _signOut() async {
+    await ref.read(authServiceProvider).signOut();
+    clearUserScopedCaches(ref);
+    if (mounted) Navigator.of(context).pushReplacementNamed('/login');
   }
 
   @override
@@ -174,21 +196,32 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final reportsAsync = ref.watch(reportsListProvider(ReportsPageParams(
+    final pageParams = ReportsPageParams(
       page: _currentPage + 1,
       pageSize: _pageSize,
+      // Field/Unit filters are hidden entirely in investor view (see
+      // _buildFilterBar), so these stay null there regardless.
       plotId: _selectedPlotId,
       controlUnitId: _selectedControlUnitId,
       sortAscending: _sortAscending,
       createdAfter: _dateFrom,
       createdBefore: _dateTo,
-    )));
+    );
+    final reportsAsync = widget.isInvestorView
+        ? ref.watch(investorReportsListProvider(pageParams))
+        : ref.watch(reportsListProvider(pageParams));
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Spray Reports'),
+        title: Text(widget.title),
         elevation: 0,
         actions: [
+          if (widget.isInvestorView)
+            IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: _signOut,
+              tooltip: 'Sign out',
+            ),
           IconButton(
             icon: Icon(_sortAscending ? Icons.sort_by_alpha : Icons.history),
             onPressed: () {
@@ -209,7 +242,7 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
       backgroundColor: Colors.grey[50], // Light background for contrast
       body: Column(
         children: [
-          _buildFilterBar(context, ref),
+          if (!widget.isInvestorView) _buildFilterBar(context, ref),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refreshData,
@@ -268,7 +301,8 @@ class _ReportsListScreenState extends ConsumerState<ReportsListScreen> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => ReportDetailsScreen(report: r))),
+                        builder: (_) => ReportDetailsScreen(
+                            report: r, readOnly: widget.isInvestorView))),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Column(

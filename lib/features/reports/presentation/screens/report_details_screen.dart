@@ -57,7 +57,17 @@ Widget _mapViewToggleButton(
 class ReportDetailsScreen extends ConsumerStatefulWidget {
   final Report report;
 
-  const ReportDetailsScreen({required this.report, super.key});
+  // Investor-viewer mode: fetches via investorReportDetailProvider (fleet-
+  // wide, not scoped to the signed-in account) instead of the normal
+  // reportDetailProvider, and hides every write surface -- Share/Email/
+  // Delete AppBar actions, the editable Driver Name/Fertilizers/
+  // Agrochemical rows (shown as plain text instead), and the automatic
+  // heatmap-snapshot upload. An investor_viewer account must never be able
+  // to mutate another user's report. Defaults to false everywhere else --
+  // zero behavior change for the normal, farmer-facing screen.
+  final bool readOnly;
+
+  const ReportDetailsScreen({required this.report, this.readOnly = false, super.key});
 
   @override
   ConsumerState<ReportDetailsScreen> createState() => _ReportDetailsScreenState();
@@ -90,6 +100,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   final Set<String> _uploadedSnapshotKeys = {};
 
   void _maybeUploadHeatmapSnapshot(Report report) {
+    if (widget.readOnly) return;
     if (report.trajectory.isEmpty) return;
     final key = '${report.id}:${_heatmapType.name}';
     if (_uploadedSnapshotKeys.contains(key)) return;
@@ -146,7 +157,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   }
 
   Future<void> _refreshReport() async {
-    ref.invalidate(reportDetailProvider(widget.report.id));
+    ref.invalidate(widget.readOnly
+        ? investorReportDetailProvider(widget.report.id)
+        : reportDetailProvider(widget.report.id));
   }
 
   @override
@@ -157,7 +170,9 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final detailAsync = ref.watch(reportDetailProvider(widget.report.id));
+    final detailAsync = widget.readOnly
+        ? ref.watch(investorReportDetailProvider(widget.report.id))
+        : ref.watch(reportDetailProvider(widget.report.id));
     final report = detailAsync.asData?.value ?? widget.report;
     _maybeUploadHeatmapSnapshot(report);
     // Not read directly -- watching is what makes the heatmaps below
@@ -204,30 +219,32 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
-          IconButton(
-              icon: _isSharing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.share_outlined, color: Colors.black),
-              onPressed: _isSharing ? null : () => _shareReport(context, report)),
-          IconButton(
-              tooltip: 'Email me this report',
-              icon: _isEmailing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.email_outlined, color: Colors.black),
-              onPressed: _isEmailing ? null : () => _emailReport(context, report)),
-          IconButton(
-            icon: const Icon(Icons.delete_outline, color: Colors.red),
-            tooltip: 'Delete report',
-            onPressed: () => _confirmDelete(context, report),
-          ),
+          if (!widget.readOnly) ...[
+            IconButton(
+                icon: _isSharing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.share_outlined, color: Colors.black),
+                onPressed: _isSharing ? null : () => _shareReport(context, report)),
+            IconButton(
+                tooltip: 'Email me this report',
+                icon: _isEmailing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.email_outlined, color: Colors.black),
+                onPressed: _isEmailing ? null : () => _emailReport(context, report)),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              tooltip: 'Delete report',
+              onPressed: () => _confirmDelete(context, report),
+            ),
+          ],
         ],
       ),
       body: RefreshIndicator(
@@ -929,26 +946,30 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     'Driver Name',
                     report.driverName,
                     const Color(0xFF00695C),
-                    onTap: () => _editReportField(
-                      context: context,
-                      title: 'Driver Name',
-                      currentValue: report.driverName,
-                      onSave: (value) => _saveReportField(driverName: value),
-                    ),
+                    onTap: widget.readOnly
+                        ? null
+                        : () => _editReportField(
+                              context: context,
+                              title: 'Driver Name',
+                              currentValue: report.driverName,
+                              onSave: (value) => _saveReportField(driverName: value),
+                            ),
                   ),
                   _editableRow(
                     Icons.eco_outlined,
                     'Fertilizers Used',
                     report.fertilizersUsed,
                     const Color(0xFF558B2F),
-                    onTap: () => _editReportField(
-                      context: context,
-                      title: 'Fertilizers Used',
-                      currentValue: report.fertilizersUsed,
-                      multiline: true,
-                      onSave: (value) =>
-                          _saveReportField(fertilizersUsed: value),
-                    ),
+                    onTap: widget.readOnly
+                        ? null
+                        : () => _editReportField(
+                              context: context,
+                              title: 'Fertilizers Used',
+                              currentValue: report.fertilizersUsed,
+                              multiline: true,
+                              onSave: (value) =>
+                                  _saveReportField(fertilizersUsed: value),
+                            ),
                   ),
                   _editableRow(
                     Icons.science_outlined,
@@ -956,14 +977,16 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                     report.agrochemicalUsed,
                     const Color(0xFF6D4C41),
                     isLast: true,
-                    onTap: () => _editReportField(
-                      context: context,
-                      title: 'Agrochemical',
-                      currentValue: report.agrochemicalUsed,
-                      multiline: true,
-                      onSave: (value) =>
-                          _saveReportField(agrochemicalUsed: value),
-                    ),
+                    onTap: widget.readOnly
+                        ? null
+                        : () => _editReportField(
+                              context: context,
+                              title: 'Agrochemical',
+                              currentValue: report.agrochemicalUsed,
+                              multiline: true,
+                              onSave: (value) =>
+                                  _saveReportField(agrochemicalUsed: value),
+                            ),
                   ),
                 ],
               ),
@@ -1540,7 +1563,7 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
   // Shows "N/A" until the user fills a value in.
   Widget _editableRow(
       IconData icon, String label, String? value, Color accentColor,
-      {required VoidCallback onTap, bool isLast = false}) {
+      {required VoidCallback? onTap, bool isLast = false}) {
     final displayValue =
         (value == null || value.trim().isEmpty) ? 'N/A' : value;
     return InkWell(
@@ -1578,8 +1601,10 @@ class _ReportDetailsScreenState extends ConsumerState<ReportDetailsScreen> {
                       fontWeight: FontWeight.w600,
                       color: Colors.black87)),
             ),
-            const SizedBox(width: 6),
-            Icon(Icons.edit, size: 15, color: Colors.grey[400]),
+            if (onTap != null) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.edit, size: 15, color: Colors.grey[400]),
+            ],
           ],
         ),
       ),
