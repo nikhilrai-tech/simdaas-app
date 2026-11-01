@@ -42,6 +42,22 @@ class HistoricalMapProviderInfo {
       );
 }
 
+/// Result of [HistoricalMapService.getRegionImage]: the image bytes plus
+/// the REAL satellite-pass date they're actually from (from the backend's
+/// X-Image-Actual-Date header -- see plot/views.py's
+/// HistoricalMapRegionImageView). Not necessarily the date that was asked
+/// for: Sentinel-2's revisit gaps mean the backend often serves the
+/// nearest available pass instead (see
+/// smart-spray-backend/plot/historical_map.py's module docstring).
+/// [actualDate] is null only for a response with no such header at all
+/// (a pre-existing cache entry from before this field existed).
+class HistoricalMapRegionImage {
+  final Uint8List bytes;
+  final DateTime? actualDate;
+
+  const HistoricalMapRegionImage({required this.bytes, this.actualDate});
+}
+
 class HistoricalMapService {
   final ApiService api;
   const HistoricalMapService(this.api);
@@ -62,7 +78,7 @@ class HistoricalMapService {
   /// rate/size ceilings a real viewport's burst of simultaneous tile
   /// requests kept hitting). Same backend endpoint, same auth, for
   /// either provider.
-  Future<Uint8List> getRegionImage({
+  Future<HistoricalMapRegionImage> getRegionImage({
     required String providerId,
     required DateTime date,
     required LatLngBounds bounds,
@@ -83,7 +99,21 @@ class HistoricalMapService {
         .join('&');
     final path = '/plot/api/historical-map/region-image/?$queryString';
     final response = await api.get(path);
-    return response.bodyBytes;
+    // Case-insensitive lookup -- a real HTTP response normalises header
+    // names to lowercase, but that's a wire-parsing detail this package's
+    // own Response object doesn't enforce itself (confirmed against its
+    // own MockClient, which preserves whatever case a test handler sets).
+    String? actualDateRaw;
+    for (final entry in response.headers.entries) {
+      if (entry.key.toLowerCase() == 'x-image-actual-date') {
+        actualDateRaw = entry.value;
+        break;
+      }
+    }
+    return HistoricalMapRegionImage(
+      bytes: response.bodyBytes,
+      actualDate: actualDateRaw != null ? DateTime.tryParse(actualDateRaw) : null,
+    );
   }
 }
 

@@ -172,36 +172,42 @@ class _RowLineScreenState extends ConsumerState<RowLineScreen> {
   }
 
   /// Fetches and applies one provider/date live -- called by the picker
-  /// sheet on every arrow tap/provider change while it's still open, not
-  /// just once when it closes, so the map updates as the farmer browses.
-  /// Fetches ONE image covering the current viewport (see
-  /// historical_map_service.dart), not a tile pyramid.
-  Future<void> _applyHistoricalSelection(String providerId, DateTime date) async {
+  /// sheet on every arrow tap/calendar pick/provider change while it's
+  /// still open, not just once when it closes, so the map updates as the
+  /// farmer browses. Fetches ONE image covering the current viewport (see
+  /// historical_map_service.dart), not a tile pyramid. Returns the actual
+  /// satellite-pass date the fetched image is from (often not `date`
+  /// itself -- see HistoricalMapRegionImage's doc comment) so the picker
+  /// sheet can show it; null on any failure or if the backend didn't
+  /// report one.
+  Future<DateTime?> _applyHistoricalSelection(String providerId, DateTime date) async {
     final bounds = _mapController.camera.visibleBounds;
     if (_mapController.camera.zoom < historicalMapMinZoom) {
       if (mounted) {
         showGenericErrorSnackBar(
           context, 'Zoom in to your field to see historical imagery.');
       }
-      return;
+      return null;
     }
     try {
-      final bytes = await ref.read(historicalMapServiceProvider).getRegionImage(
+      final image = await ref.read(historicalMapServiceProvider).getRegionImage(
             providerId: providerId,
             date: date,
             bounds: bounds,
           );
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
-        _historicalImageBytes = bytes;
+        _historicalImageBytes = image.bytes;
         _historicalImageBounds = bounds;
         _historicalProviderId = providerId;
         _historicalDate = date;
       });
+      return image.actualDate;
     } catch (e) {
       if (mounted) {
         showGenericErrorSnackBar(context, 'Could not load historical map — $e');
       }
+      return null;
     }
   }
 

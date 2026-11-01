@@ -29,7 +29,7 @@ class HistoricalMapClear extends HistoricalMapPickerResult {
 Future<HistoricalMapPickerResult?> showHistoricalMapPicker(
   BuildContext context,
   WidgetRef ref, {
-  required Future<void> Function(String providerId, DateTime date) onPreview,
+  required Future<DateTime?> Function(String providerId, DateTime date) onPreview,
   bool isActive = false,
   String? initialProviderId,
   DateTime? initialDate,
@@ -56,7 +56,7 @@ class _HistoricalMapPickerContent extends StatefulWidget {
   final bool isActive;
   final String? initialProviderId;
   final DateTime? initialDate;
-  final Future<void> Function(String providerId, DateTime date) onPreview;
+  final Future<DateTime?> Function(String providerId, DateTime date) onPreview;
 
   const _HistoricalMapPickerContent({
     required this.ref,
@@ -75,6 +75,10 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
   String? _error;
   String? _selectedProviderId;
   late DateTime _selectedDate;
+  // The REAL satellite-pass date the last fetched image is actually from
+  // -- see HistoricalMapRegionImage's doc comment for why this is often
+  // not _selectedDate itself. Null while loading/on error/unknown.
+  DateTime? _actualDate;
   bool _previewing = false;
   Timer? _stepDebounce;
 
@@ -113,10 +117,9 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
   // nothing older than that exists to show.
   static final DateTime _earliestDate = DateTime(2015, 6, 23);
 
-  // Matches the backend's own +/-10 day search window (historical_map.py's
-  // _date_window) -- each step lands in a genuinely different window
-  // instead of just re-finding the same nearest image again.
-  static const int _stepDays = 10;
+  // A fine nudge, one day at a time -- for jumping further, tap the date
+  // itself to open a full calendar (see _pickDate below).
+  static const int _stepDays = 1;
 
   bool get _canStepBack => _selectedDate.isAfter(_earliestDate);
   bool get _canStepForward => _selectedDate.isBefore(DateTime.now());
@@ -124,12 +127,29 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
   Future<void> _preview() async {
     final providerId = _selectedProviderId;
     if (providerId == null) return;
-    setState(() => _previewing = true);
+    setState(() {
+      _previewing = true;
+      _actualDate = null;
+    });
     try {
-      await widget.onPreview(providerId, _selectedDate);
+      final actualDate = await widget.onPreview(providerId, _selectedDate);
+      if (mounted) setState(() => _actualDate = actualDate);
     } finally {
       if (mounted) setState(() => _previewing = false);
     }
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: _earliestDate,
+      lastDate: DateTime.now(),
+    );
+    if (picked == null) return;
+    _stepDebounce?.cancel();
+    setState(() => _selectedDate = picked);
+    _preview();
   }
 
   void _selectProvider(String providerId) {
@@ -167,6 +187,12 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
     super.dispose();
   }
 
+  String _formatDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  bool _isSameDate(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -183,8 +209,9 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
           Text('Historical map', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-            'Browse with the arrows below — the map updates as you go. '
-            'Zoom in to your field to see it (not available zoomed all the way out).',
+            'Tap the date to jump to any day, or use the arrows to nudge by one — '
+            'the map updates as you go. Zoom in to your field to see it '
+            '(not available zoomed all the way out).',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -215,24 +242,39 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
                   tooltip: 'Earlier',
                   onPressed: (_canStepBack && !_previewing) ? () => _stepDate(-1) : null,
                 ),
-                Column(
-                  children: [
-                    Text('Date', style: Theme.of(context).textTheme.bodySmall),
-                    SizedBox(
-                      height: 24,
-                      child: _previewing
-                          ? const Center(
-                              child: SizedBox(
-                                width: 16, height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            )
-                          : Text(
-                              '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
+                InkWell(
+                  onTap: _previewing ? null : _pickDate,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Date', style: Theme.of(context).textTheme.bodySmall),
+                            const SizedBox(width: 4),
+                            Icon(Icons.calendar_month, size: 14,
+                                color: Theme.of(context).textTheme.bodySmall?.color),
+                          ],
+                        ),
+                        SizedBox(
+                          height: 24,
+                          child: _previewing
+                              ? const Center(
+                                  child: SizedBox(
+                                    width: 16, height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                )
+                              : Text(
+                                  _formatDate(_selectedDate),
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
@@ -241,6 +283,16 @@ class _HistoricalMapPickerContentState extends State<_HistoricalMapPickerContent
                 ),
               ],
             ),
+            if (!_previewing && _actualDate != null && !_isSameDate(_actualDate!, _selectedDate))
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Center(
+                  child: Text(
+                    'Nearest available image: ${_formatDate(_actualDate!)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ),
             const SizedBox(height: 16),
             Row(
               children: [

@@ -48,13 +48,13 @@ void main() {
       final api = ApiService(baseUrl: 'https://api.example.com', client: mockClient);
       final service = HistoricalMapService(api);
 
-      final bytes = await service.getRegionImage(
+      final image = await service.getRegionImage(
         providerId: 'cdse_free',
         date: DateTime(2026, 6, 15),
         bounds: bounds,
       );
 
-      expect(bytes, [0xff, 0xd8, 1, 2, 3]);
+      expect(image.bytes, [0xff, 0xd8, 1, 2, 3]);
     });
 
     test('same endpoint and query shape for google_earth_paid -- only the '
@@ -68,13 +68,48 @@ void main() {
       final api = ApiService(baseUrl: 'https://api.example.com', client: mockClient);
       final service = HistoricalMapService(api);
 
-      final bytes = await service.getRegionImage(
+      final image = await service.getRegionImage(
         providerId: 'google_earth_paid',
         date: DateTime(2026, 3, 10),
         bounds: bounds,
       );
 
-      expect(bytes, [0x89, 0x50, 0x4e, 0x47]);
+      expect(image.bytes, [0x89, 0x50, 0x4e, 0x47]);
+    });
+
+    test('parses the X-Image-Actual-Date header into actualDate', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response.bytes(
+          [0xff, 0xd8], 200,
+          headers: {'X-Image-Actual-Date': '2026-06-18'},
+        );
+      });
+      final api = ApiService(baseUrl: 'https://api.example.com', client: mockClient);
+      final service = HistoricalMapService(api);
+
+      final image = await service.getRegionImage(
+        providerId: 'cdse_free',
+        date: DateTime(2026, 6, 15),
+        bounds: bounds,
+      );
+
+      expect(image.actualDate, DateTime(2026, 6, 18));
+    });
+
+    test('actualDate is null when the header is absent', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response.bytes([0xff, 0xd8], 200);
+      });
+      final api = ApiService(baseUrl: 'https://api.example.com', client: mockClient);
+      final service = HistoricalMapService(api);
+
+      final image = await service.getRegionImage(
+        providerId: 'cdse_free',
+        date: DateTime(2026, 6, 15),
+        bounds: bounds,
+      );
+
+      expect(image.actualDate, isNull);
     });
   });
 
